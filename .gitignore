@@ -1,0 +1,12 @@
+.vs/
+**/bin/
+**/obj/
+TestResults/
+artifacts/
+release/
+
+*.user
+*.suo
+*.log
+*.trx
+*.pdb
