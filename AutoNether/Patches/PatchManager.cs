@@ -8,6 +8,7 @@ public static class PatchManager
     public static void Initialize()
     {
         Harmony.CreateAndPatchAll(typeof(NetherAutoClimbPatch));
+        Harmony.CreateAndPatchAll(typeof(NetherAutoClimbBattleSettingsDestroyPrefixPatch));
         Harmony.CreateAndPatchAll(typeof(NetherBattleStartTaskCapturePatch));
         Harmony.CreateAndPatchAll(typeof(NetherBattleTerminalPatch));
         Harmony.CreateAndPatchAll(typeof(NetherAutoClimbStartStatusLifecyclePatch));

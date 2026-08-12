@@ -14,6 +14,56 @@ namespace AutoNether.Tests;
 public sealed class NetherLifecycleInteropBindingsTests
 {
     [Fact]
+    public void Packaged_battle_hud_uses_the_mandatory_token_free_settings_initialization_seam()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        NetherInteropPatchBinding binding = Assert.Single(
+            NetherLifecycleInteropBindings.All,
+            candidate => candidate.TypeName == "Project.Ingame.BottomRightView"
+                && candidate.Method.Name == "InitializeTimeScaleButtons"
+        );
+
+        Assert.True(
+            NetherLifecycleInteropBindings.TryResolve(
+                new[] { packaged.Assembly },
+                binding,
+                out string error,
+                out MethodInfo? method
+            ),
+            error
+        );
+        Assert.Equal(
+            new[] { "Project.Ingame.IIngameUserSettings" },
+            method!.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()
+        );
+        Assert.DoesNotContain(
+            NetherLifecycleInteropBindings.All,
+            candidate => candidate.TypeName == "Project.Ingame.BottomRightView"
+                && candidate.Method.ParameterTypeNames.Contains("Il2CppSystem.Threading.CancellationToken")
+        );
+    }
+
+    [Fact]
+    public void Packaged_ingame_settings_wrapper_is_accepted_by_the_exact_native_accessor()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        Type settingsType = packaged.RequireType("Project.Ingame.IIngameUserSettings");
+        object settings = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(settingsType);
+        // This is a metadata-only characterizer.  The generated wrapper inherits the native
+        // Il2CppObjectBase finalizer, but this deliberately uninitialized instance owns no
+        // native pointer.  Do not let a later GC call into IL2CPP after the isolated packaged
+        // assembly load context has been unloaded.
+        GC.SuppressFinalize(settings);
+
+        Assert.False(settingsType.IsInterface);
+        Assert.True(
+            NetherBattleSettingsNativeAccessor.TryCreate(settings, out var accessor, out string error),
+            error
+        );
+        Assert.NotNull(accessor);
+    }
+
+    [Fact]
     public void Packaged_battle_result_model_is_a_post_request_nether_terminal_seam()
     {
         using var packaged = PackagedProjectAssembly.Load();
@@ -215,10 +265,10 @@ public sealed class NetherLifecycleInteropBindingsTests
             resolvedNames.Add(method!.Name);
         }
 
-        Assert.Equal(24, bindings.Length);
+        Assert.Equal(26, bindings.Length);
         Assert.Empty(failures);
         Assert.Contains("Project_ISubService_Terminate", resolvedNames);
-        Assert.Equal(14, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
+        Assert.Equal(15, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
         Assert.Equal(
             new[] { "OnEntered", "OnInitializeAsync", "OnRefreshAsync" },
             bindings
@@ -258,6 +308,38 @@ public sealed class NetherLifecycleInteropBindingsTests
             },
             method.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()
         );
+    }
+
+    [Fact]
+    public void Packaged_code_received_popup_exposes_the_exact_confirm_close_contract()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        NetherInteropPatchBinding binding = Assert.Single(
+            NetherLifecycleInteropBindings.All,
+            candidate => candidate.TypeName
+                == "Project.Nether.AbyssCodeReceivedPopup.AbyssCodeReceivedPopupController"
+        );
+
+        Assert.True(
+            NetherLifecycleInteropBindings.TryResolve(
+                new[] { packaged.Assembly },
+                binding,
+                out string error,
+                out MethodInfo? method
+            ),
+            error
+        );
+        Assert.NotNull(method);
+        Assert.Equal("SetupPopupEvent", method!.Name);
+        Assert.Equal(
+            new[]
+            {
+                "Project.Nether.AbyssCodeReceivedPopup.AbyssCodeReceivedPopup",
+                "Il2CppSystem.Action",
+            },
+            method.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()
+        );
+
     }
 
     [Fact]

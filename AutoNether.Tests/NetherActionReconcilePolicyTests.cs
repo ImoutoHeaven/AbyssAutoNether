@@ -207,6 +207,48 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
+    public void Composed_recovery_heal_accepts_the_authoritative_full_hp_cap()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            Characters = new[] { new NetherCharacterState(1, 1000) },
+            CharacterHpHash = "1:1000:1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            Characters = new[] { new NetherCharacterState(1, 1000) },
+            CharacterHpHash = "1:1000:1",
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Recovery,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 2,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.Heal, 300) },
+        };
+
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
+    }
+
+    [Fact]
+    public void Standalone_full_hp_heal_without_a_parent_postcondition_is_not_treated_as_applied()
+    {
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            Characters = new[] { new NetherCharacterState(1, 1000) },
+            CharacterHpHash = "1:1000:1",
+        };
+        NetherPlannedAction action = new(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 2,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.Heal, 300) },
+        };
+
+        Assert.Equal(NetherActionOutcome.NotApplied, NetherActionReconcilePolicy.Evaluate(action, snapshot, snapshot));
+    }
+
+    [Fact]
     public void Composed_event_damage_requires_the_exact_delta_for_each_active_party_member()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with

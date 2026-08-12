@@ -40,10 +40,15 @@ internal static class NetherAutoClimbController
         NetherBattleSettingsLease.Instance
     );
     private static readonly NetherNativeWaitGate BattleAccessorWait = new(maximumMissingPolls: 3600);
+    // F12 can arrive a few frames before FloorSelection/Result registers its exact native
+    // owner.  Preserve that user intent only for a bounded registration window; no route,
+    // popup, or server mutation is allowed until one of those authoritative owners exists.
+    private const int DeferredEnableMaximumUpdates = 3600;
 
     private static bool _initialized;
     private static NetherCombatLane? _lockedCombatLane;
     private static NetherBattleProjectionPayload? _pendingBattleProjection;
+    private static int _deferredEnableRemainingUpdates;
     private static string _lastTransition = string.Empty;
 
     public static bool IsEnabled => State.IsEnabled;
@@ -94,6 +99,7 @@ internal static class NetherAutoClimbController
             _initialized,
             _lockedCombatLane,
             _pendingBattleProjection,
+            _deferredEnableRemainingUpdates,
             _lastTransition
         );
         _bridge = bridge;
@@ -111,6 +117,7 @@ internal static class NetherAutoClimbController
         _initialized = false;
         _lockedCombatLane = null;
         _pendingBattleProjection = null;
+        _deferredEnableRemainingUpdates = 0;
         BattleAccessorWait.Clear();
         _lastTransition = string.Empty;
         return scope;
@@ -174,6 +181,7 @@ internal static class NetherAutoClimbController
         Initialize();
         if (State.IsEnabled)
         {
+            _deferredEnableRemainingUpdates = 0;
             State.Toggle(isInNether: true);
             ObserveBattleSettingsLeaseBoundary(
                 BattleSettingsLifecycle.OnF12Off(),
@@ -190,41 +198,48 @@ internal static class NetherAutoClimbController
             return;
         }
 
-        if (!_bridge.HasRegisteredFloorSelection)
+        // The result view is the foreground authority even if the preceding FloorSelection
+        // owner has not emitted its teardown callback yet.  Preferring that stale map owner
+        // would route behind the visible result/code popup and leave the popup untouched.
+        if (_bridge.HasObservedNetherBattleResult && State.EnableFromBattleResult())
         {
-            // A proven Nether battle-result view is itself an in-Nether owner.  FloorSelection
-            // is intentionally absent on this page, so F12 must resume through the exact native
-            // Next callback instead of rejecting the user as outside Nether.
-            if (_bridge.HasObservedNetherBattleResult && State.EnableFromBattleResult())
-            {
-                BattleResultCodeFlow.Reset();
-                _lockedCombatLane = null;
-                _pendingBattleProjection = null;
-                NetherAutoClimbSettings resultSettings = BuildSettings();
-                LogTransition("ON source=battle-result-resume maxDepth=" + resultSettings.MaxDepth);
-                LogDiagnostic(
-                    "toggle-result",
-                    new("outcome", "enabled"),
-                    new("source", "battle-result-resume"),
-                    new("phase", State.Phase.ToString()),
-                    new("maxDepth", resultSettings.MaxDepth.ToString()),
-                    new("softErosion", resultSettings.SoftErosionLimit.ToString()),
-                    new("detailedLogging", resultSettings.DetailedLogging.ToString())
-                );
-                return;
-            }
-
-            State.Toggle(isInNether: false);
-            LogTransition("OFF no-registered-nether-runtime");
+            _deferredEnableRemainingUpdates = 0;
+            BattleResultCodeFlow.Reset();
+            _lockedCombatLane = null;
+            _pendingBattleProjection = null;
+            NetherAutoClimbSettings resultSettings = BuildSettings();
+            LogTransition("ON source=battle-result-resume maxDepth=" + resultSettings.MaxDepth);
             LogDiagnostic(
                 "toggle-result",
-                new("outcome", "rejected"),
-                new("reason", "no-registered-floor-selection"),
+                new("outcome", "enabled"),
+                new("source", "battle-result-resume"),
+                new("phase", State.Phase.ToString()),
+                new("maxDepth", resultSettings.MaxDepth.ToString()),
+                new("softErosion", resultSettings.SoftErosionLimit.ToString()),
+                new("detailedLogging", resultSettings.DetailedLogging.ToString())
+            );
+            return;
+        }
+
+        if (!_bridge.HasRegisteredFloorSelection)
+        {
+            // FloorSelection registration happens after the Nether scene begins loading and
+            // can race the hotkey Update.  Arming is observation-only: repeated F12 refreshes
+            // the bounded window, while all native mutations remain blocked until an exact
+            // FloorSelection or battle-result owner is present.
+            _deferredEnableRemainingUpdates = DeferredEnableMaximumUpdates;
+            LogTransition("ARMED awaiting-nether-runtime");
+            LogDiagnostic(
+                "toggle-result",
+                new("outcome", "armed"),
+                new("reason", "awaiting-nether-runtime"),
+                new("timeoutUpdates", DeferredEnableMaximumUpdates.ToString()),
                 new("phase", State.Phase.ToString())
             );
             return;
         }
 
+        _deferredEnableRemainingUpdates = 0;
         NetherRuntimeSnapshotResult captured = _bridge.TryCaptureSnapshot();
         if (!captured.IsSuccess)
         {
@@ -285,6 +300,9 @@ internal static class NetherAutoClimbController
             return;
 
         PumpBattleSettingsLeaseRetry();
+
+        if (_deferredEnableRemainingUpdates > 0 && !State.IsEnabled)
+            ObserveDeferredEnableIntent();
 
         // A startup/resume code popup can predate F12 and keeps the game's exact
         // HandleStartEventByStatusAsync parent pending.  Once automation has invoked its child,
@@ -433,14 +451,48 @@ internal static class NetherAutoClimbController
         _initialized = false;
         _lockedCombatLane = null;
         _pendingBattleProjection = null;
+        _deferredEnableRemainingUpdates = 0;
         BattleAccessorWait.Clear();
         ProjectionCalibration.Clear();
         _lastTransition = string.Empty;
     }
 
+    private static void ObserveDeferredEnableIntent()
+    {
+        bool hasFloorOwner = _bridge.HasRegisteredFloorSelection;
+        bool hasBattleResultOwner = _bridge.HasObservedNetherBattleResult;
+        if (!hasFloorOwner && !hasBattleResultOwner)
+        {
+            _deferredEnableRemainingUpdates--;
+            if (_deferredEnableRemainingUpdates == 0)
+            {
+                LogTransition("OFF deferred-enable-expired");
+                LogDiagnostic(
+                    "deferred-toggle",
+                    new("outcome", "expired"),
+                    new("reason", "nether-runtime-timeout"),
+                    new("phase", State.Phase.ToString())
+                );
+            }
+            return;
+        }
+
+        string source = hasBattleResultOwner ? "battle-result" : "floor-selection";
+        _deferredEnableRemainingUpdates = 0;
+        Toggle();
+        LogDiagnostic(
+            "deferred-toggle",
+            new("outcome", State.IsEnabled ? "activated" : "rejected"),
+            new("source", source),
+            new("phase", State.Phase.ToString()),
+            new("pauseReason", State.PauseReason.ToString()),
+            new("pauseDetail", State.PauseDetail)
+        );
+    }
+
     /// <summary>
-    /// Called only after the exact BottomRightView.ApplyUserSettings patch has constructed an
-    /// accessor.  This is the first safe point for persisted lease recovery.
+    /// Called only after an exact token-free BottomRightView settings initialization/application patch has
+    /// constructed an accessor.  This is the first safe point for persisted lease recovery.
     /// </summary>
     internal static void OnBattleSettingsAccessorRegistered()
     {
@@ -903,7 +955,7 @@ internal static class NetherAutoClimbController
         // wait one frame before polling battle terminal tasks.
         if (State.IsEnabled
             && State.Phase == NetherAutoClimbPhase.AwaitingBattle
-            && BattleSettingsLifecycle.LeasePhase != NetherBattleSettingsLeasePhase.Forced)
+            && !BattleSettingsLifecycle.IsCurrentBattleLeaseSatisfied)
         {
             if (!BattleSettingsLifecycle.IsExactAccessorRegistered
                 && !BattleSettingsLifecycle.BlocksRoute)
@@ -1013,6 +1065,31 @@ internal static class NetherAutoClimbController
                 FailClosedTerminal(NetherPauseReason.BattleLifecycleFault, "battle-lifecycle-fault:" + step.Detail);
                 return;
         }
+    }
+
+    /// <summary>
+    /// Exact BottomRightView.OnDestroy prefix boundary. The settings service is still valid,
+    /// so restore and verify the user's original values before the native owner is destroyed.
+    /// </summary>
+    internal static void OnBattleSettingsAccessorDestroying()
+    {
+        if (!_initialized)
+            return;
+        NetherNativeActionResult restore = BattleSettingsLifecycle.OnBattleViewDestroying();
+        LogDiagnostic(
+            "runtime-lifecycle",
+            new("action", "battle-settings-accessor-destroying"),
+            new("enabled", State.IsEnabled.ToString()),
+            new("phase", State.Phase.ToString()),
+            new("leasePhase", BattleSettingsLifecycle.LeasePhase.ToString()),
+            new("result", restore.Kind.ToString()),
+            new("detail", restore.Detail)
+        );
+        ObserveBattleSettingsLeaseBoundary(
+            restore,
+            "native-accessor-destroying",
+            pauseEnabledState: State.IsEnabled
+        );
     }
 
     private static void ObserveRecoveredCodeOffer(NetherAutoClimbSettings? capturedSettings = null)
@@ -2538,6 +2615,7 @@ internal static class NetherAutoClimbController
         private readonly bool _initialized;
         private readonly NetherCombatLane? _lockedCombatLane;
         private readonly NetherBattleProjectionPayload? _pendingBattleProjection;
+        private readonly int _deferredEnableRemainingUpdates;
         private readonly string _lastTransition;
         private bool _disposed;
 
@@ -2557,6 +2635,7 @@ internal static class NetherAutoClimbController
             bool initialized,
             NetherCombatLane? lockedCombatLane,
             NetherBattleProjectionPayload? pendingBattleProjection,
+            int deferredEnableRemainingUpdates,
             string lastTransition
         )
         {
@@ -2575,6 +2654,7 @@ internal static class NetherAutoClimbController
             _initialized = initialized;
             _lockedCombatLane = lockedCombatLane;
             _pendingBattleProjection = pendingBattleProjection;
+            _deferredEnableRemainingUpdates = deferredEnableRemainingUpdates;
             _lastTransition = lastTransition;
         }
 
@@ -2598,6 +2678,7 @@ internal static class NetherAutoClimbController
             NetherAutoClimbController._initialized = _initialized;
             NetherAutoClimbController._lockedCombatLane = _lockedCombatLane;
             NetherAutoClimbController._pendingBattleProjection = _pendingBattleProjection;
+            NetherAutoClimbController._deferredEnableRemainingUpdates = _deferredEnableRemainingUpdates;
             NetherAutoClimbController._lastTransition = _lastTransition;
         }
     }

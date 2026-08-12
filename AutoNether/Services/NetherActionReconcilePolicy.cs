@@ -148,7 +148,7 @@ internal static class NetherActionReconcilePolicy
         {
             NetherRuntimePopupKind.Event or NetherRuntimePopupKind.Recovery or NetherRuntimePopupKind.Treasure
                 when action.OwnedPopupActionKind == NetherActionKind.SelectEventOption =>
-                    EvaluateEventEffects(action, before, after),
+                    EvaluateEventEffects(action, before, after, allowSaturatedHealNoOp: true),
             NetherRuntimePopupKind.Shop when action.OwnedPopupActionKind == NetherActionKind.LeaveShop =>
                 NetherActionOutcome.Applied,
             NetherRuntimePopupKind.Shop when action.OwnedPopupActionKind == NetherActionKind.BuyShopItem =>
@@ -183,7 +183,7 @@ internal static class NetherActionReconcilePolicy
         {
             NetherRuntimePopupKind.Event or NetherRuntimePopupKind.Recovery or NetherRuntimePopupKind.Treasure
                 when stage.ActionKind == NetherActionKind.SelectEventOption =>
-                    EvaluateEventEffects(child, before, after),
+                    EvaluateEventEffects(child, before, after, allowSaturatedHealNoOp: true),
             NetherRuntimePopupKind.Shop when stage.ActionKind == NetherActionKind.LeaveShop =>
                 NetherActionOutcome.Applied,
             NetherRuntimePopupKind.Shop when stage.ActionKind == NetherActionKind.BuyShopItem =>
@@ -214,7 +214,8 @@ internal static class NetherActionReconcilePolicy
     private static NetherActionOutcome EvaluateEventEffects(
         NetherPlannedAction action,
         NetherSnapshot before,
-        NetherSnapshot after
+        NetherSnapshot after,
+        bool allowSaturatedHealNoOp = false
     )
     {
         if (action.OptionNumber <= 0
@@ -261,7 +262,7 @@ internal static class NetherActionReconcilePolicy
             if (!resourcesMatch)
                 return UnchangedOrAmbiguous(before, after);
 
-            if (hpDelta != 0 && !HasExactHpDelta(before, after, hpDelta))
+            if (hpDelta != 0 && !HasExactHpDelta(before, after, hpDelta, allowSaturatedHealNoOp))
                 return UnchangedOrAmbiguous(before, after);
 
             foreach (NetherEffect effect in action.ExpectedEffects)
@@ -564,7 +565,12 @@ internal static class NetherActionReconcilePolicy
     private static bool AcquiredItemsChanged(NetherSnapshot before, NetherSnapshot after) =>
         !string.Equals(CreateItemIdentity(before), CreateItemIdentity(after), StringComparison.Ordinal);
 
-    private static bool HasExactHpDelta(NetherSnapshot before, NetherSnapshot after, int expectedDelta)
+    private static bool HasExactHpDelta(
+        NetherSnapshot before,
+        NetherSnapshot after,
+        int expectedDelta,
+        bool allowSaturatedHealNoOp
+    )
     {
         if (before.Characters == null || after.Characters == null
             || before.Characters.Count == 0
@@ -575,6 +581,8 @@ internal static class NetherActionReconcilePolicy
         try
         {
             var afterByCharacterId = new Dictionary<long, NetherCharacterState>();
+            bool hasActiveCharacter = false;
+            bool allActiveHpUnchanged = true;
             foreach (NetherCharacterState character in after.Characters)
             {
                 if (!afterByCharacterId.TryAdd(character.CharacterId, character))
@@ -589,14 +597,25 @@ internal static class NetherActionReconcilePolicy
                     return false;
                 }
 
+                if (character.IsActive)
+                {
+                    hasActiveCharacter = true;
+                    allActiveHpUnchanged &= observed.HpPermille == character.HpPermille;
+                }
                 int expectedHp = character.IsActive
                     ? checked(character.HpPermille + expectedDelta)
                     : character.HpPermille;
+                if (character.IsActive && expectedDelta > 0)
+                    expectedHp = Math.Min(1000, expectedHp);
                 if (observed.HpPermille != expectedHp)
                     return false;
             }
 
-            return !string.Equals(before.CharacterHpHash, after.CharacterHpHash, StringComparison.Ordinal);
+            return !string.Equals(before.CharacterHpHash, after.CharacterHpHash, StringComparison.Ordinal)
+                || (allowSaturatedHealNoOp
+                    && expectedDelta > 0
+                    && hasActiveCharacter
+                    && allActiveHpUnchanged);
         }
         catch (OverflowException)
         {

@@ -113,7 +113,7 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
-    public void F12_hotkey_explains_missing_floor_runtime_without_starting_automation()
+    public void F12_hotkey_arms_without_mutation_while_floor_runtime_is_registering()
     {
         var bridge = new ScriptedRuntimeBridge
         {
@@ -133,15 +133,202 @@ public class NetherAutoClimbControllerEndToEndTests
             NetherAutoClimbController.ToggleFromHotkey();
 
             Assert.False(NetherAutoClimbController.IsEnabled);
+            Assert.Empty(bridge.Invocations);
             Assert.Contains(Logger.Messages, message =>
                 message.Contains("event=toggle-result")
-                && message.Contains("outcome=rejected")
-                && message.Contains("reason=no-registered-floor-selection"));
+                && message.Contains("outcome=armed")
+                && message.Contains("reason=awaiting-nether-runtime"));
         }
         finally
         {
             NetherAutoClimbController.OnPluginUnload();
             Logger.Reset();
+        }
+    }
+
+    [Fact]
+    public void Repeated_F12_during_registration_gap_enables_once_when_floor_runtime_arrives()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            HasRegisteredFloorSelection = false,
+            HasObservedNetherBattleResult = false,
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+        Config.NetherAutoClimbDetailedLogging.Value = false;
+        Logger.Reset();
+
+        try
+        {
+            NetherAutoClimbController.ToggleFromHotkey();
+            NetherAutoClimbController.ToggleFromHotkey();
+            NetherAutoClimbController.Update();
+
+            Assert.False(NetherAutoClimbController.IsEnabled);
+            Assert.Empty(bridge.Invocations);
+
+            bridge.HasRegisteredFloorSelection = true;
+            NetherAutoClimbController.Update();
+
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Assert.NotEqual(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Contains(Logger.Messages, message =>
+                message.Contains("event=deferred-toggle")
+                && message.Contains("outcome=activated")
+                && message.Contains("source=floor-selection"));
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+            Logger.Reset();
+        }
+    }
+
+    [Fact]
+    public void Deferred_F12_expires_without_mutation_when_no_nether_runtime_appears()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            HasRegisteredFloorSelection = false,
+            HasObservedNetherBattleResult = false,
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+        Config.NetherAutoClimbDetailedLogging.Value = false;
+        Logger.Reset();
+
+        try
+        {
+            NetherAutoClimbController.ToggleFromHotkey();
+            for (int poll = 0; poll < 4000; poll++)
+                NetherAutoClimbController.Update();
+
+            Assert.False(NetherAutoClimbController.IsEnabled);
+            Assert.Empty(bridge.Invocations);
+            Assert.Contains(Logger.Messages, message =>
+                message.Contains("event=deferred-toggle")
+                && message.Contains("outcome=expired")
+                && message.Contains("reason=nether-runtime-timeout"));
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+            Logger.Reset();
+        }
+    }
+
+    [Fact]
+    public void Deferred_F12_activates_on_battle_result_and_selects_code_before_next()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            HasRegisteredFloorSelection = false,
+            HasObservedNetherBattleResult = false,
+            AutoCompleteBattleResultContinuation = false,
+            BattleResultRebound = false,
+            CodeCandidates = SafeCodeCandidates(30024),
+            BattleResultCodePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                OwnerAction = NetherActionKind.BattleSettlement,
+                OwnerGeneration = 9,
+                Sequence = 20,
+            },
+        };
+        bridge.BattleResultCodeNativeSteps.Enqueue(
+            NetherBattleResultCodeNativeStep.Pending("scripted-code-confirm-pending")
+        );
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+        Config.NetherAutoClimbDetailedLogging.Value = false;
+        Logger.Reset();
+
+        try
+        {
+            NetherAutoClimbController.ToggleFromHotkey();
+            Assert.False(NetherAutoClimbController.IsEnabled);
+
+            bridge.HasObservedNetherBattleResult = true;
+            NetherAutoClimbController.Update();
+
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Assert.Equal(
+                new[] { NetherActionKind.SelectCode },
+                bridge.BattleResultCodeActions.Select(action => action.Kind)
+            );
+            Assert.Equal(0, bridge.BattleResultNextInvokeCount);
+            Assert.Contains(Logger.Messages, message =>
+                message.Contains("event=deferred-toggle")
+                && message.Contains("outcome=activated")
+                && message.Contains("source=battle-result"));
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+            Logger.Reset();
+        }
+    }
+
+    [Fact]
+    public void F12_prefers_proven_battle_result_owner_over_stale_floor_registration()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            // The real result view can be observed before the preceding floor owner emits
+            // its termination callback.  That stale registration must never route behind
+            // the foreground result/code popup.
+            HasRegisteredFloorSelection = true,
+            HasObservedNetherBattleResult = true,
+            AutoCompleteBattleResultContinuation = false,
+            BattleResultRebound = false,
+            CodeCandidates = SafeCodeCandidates(30024),
+            BattleResultCodePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                OwnerAction = NetherActionKind.BattleSettlement,
+                OwnerGeneration = 9,
+                Sequence = 20,
+            },
+        };
+        bridge.BattleResultCodeNativeSteps.Enqueue(
+            NetherBattleResultCodeNativeStep.Pending("scripted-code-confirm-pending")
+        );
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.ToggleFromHotkey();
+            Assert.Equal(
+                NetherAutoClimbPhase.AwaitingBattleResultContinuation,
+                NetherAutoClimbController.Phase
+            );
+
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(
+                new[] { NetherActionKind.SelectCode },
+                bridge.BattleResultCodeActions.Select(action => action.Kind)
+            );
+            Assert.Equal(0, bridge.BattleResultNextInvokeCount);
+            Assert.Empty(bridge.Invocations);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
         }
     }
 
@@ -784,6 +971,68 @@ public class NetherAutoClimbControllerEndToEndTests
             Assert.True(bridge.HasRegisteredFloorSelection);
             Assert.Single(bridge.BattleResultCodeActions);
             Assert.Equal(1, bridge.BattleResultNextInvokeCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Battle_view_destroy_restores_forced_settings_before_unbind_and_keeps_code_settlement_running()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            AutoCompleteBattleResultContinuation = false,
+            BattleResultRebound = false,
+            CodeCandidates = SafeCodeCandidates(30024),
+            BattleResultCodePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                OwnerAction = NetherActionKind.BattleSettlement,
+                OwnerGeneration = 9,
+                Sequence = 20,
+            },
+        };
+        bridge.BattleResultCodeNativeSteps.Enqueue(
+            NetherBattleResultCodeNativeStep.Pending("scripted-code-confirm-pending")
+        );
+        var lease = new RecordingLeaseDriver();
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(lease, retryIntervalUpdates: 1);
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+            Pump(3);
+            NetherAutoClimbController.OnBattleSettingsAccessorRegistered();
+            NetherAutoClimbController.Update(); // force Auto/highest speed
+
+            Assert.Equal(NetherBattleSettingsLeasePhase.Forced, lease.Phase);
+
+            // This is the live order: BottomRightView.OnDestroy prefix can still use the
+            // accessor, then the postfix unbinds it before the result/code UI appears.
+            NetherAutoClimbController.OnBattleSettingsAccessorDestroying();
+            NetherAutoClimbController.OnBattleSettingsAccessorUnregistered();
+
+            Assert.Equal(NetherBattleSettingsLeasePhase.Restored, lease.Phase);
+            Assert.NotEqual(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+
+            NetherAutoClimbController.Update(); // observe clear
+            NetherAutoClimbController.Update(); // GET begin
+            NetherAutoClimbController.Update(); // GET terminal and invoke code selection
+
+            Assert.Equal(
+                NetherAutoClimbPhase.AwaitingBattleResultContinuation,
+                NetherAutoClimbController.Phase
+            );
+            Assert.Equal(
+                new[] { NetherActionKind.SelectCode },
+                bridge.BattleResultCodeActions.Select(action => action.Kind)
+            );
+            Assert.Equal(1, lease.RestoreCalls);
         }
         finally
         {
@@ -1827,6 +2076,32 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_continues_routing_after_recovery_heal_is_capped_at_full_hp()
+    {
+        NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
+            NetherSessionStatus.Play,
+            NetherFloorNodeType.Recovery,
+            floorId: 2,
+            gold: 10,
+            hp: 1000
+        ) with { CharacterHpHash = "character:1:1000" };
+
+        RunOwnedFloorTransaction(
+            NetherFloorNodeType.Recovery,
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Recovery,
+                Options = new[] { new NetherEventOption(2, new[] { new NetherEffect(NetherEffectKind.Heal, 300) }) },
+            },
+            new NetherFloorEventPartMasterRow(1002, 1, 300, 0, 0, 0, 0, 0, 0, 0),
+            after,
+            NetherActionKind.SelectEventOption,
+            startHp: 1000,
+            assertNextRoute: true
+        );
+    }
+
+    [Fact]
     public void Production_controller_reconciles_owned_treasure_with_exact_key_contract()
     {
         NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
@@ -2429,20 +2704,24 @@ public class NetherAutoClimbControllerEndToEndTests
         NetherRuntimePopupContext popup,
         NetherFloorEventPartMasterRow? eventPart,
         NetherSnapshot after,
-        NetherActionKind expectedChild
+        NetherActionKind expectedChild,
+        int startHp = 500,
+        bool assertNextRoute = false
     )
     {
         NetherSnapshot routeStart = ScriptedRuntimeBridge.OwnedRouteSnapshot(
             NetherSessionStatus.Play,
             kind,
             floorId: 1,
-            gold: 10
+            gold: 10,
+            hp: startHp
         );
         NetherSnapshot popupWait = ScriptedRuntimeBridge.OwnedRouteSnapshot(
             NetherSessionStatus.Wait,
             kind,
             floorId: 2,
-            gold: 10
+            gold: 10,
+            hp: startHp
         );
         var bridge = new ScriptedRuntimeBridge
         {
@@ -2475,6 +2754,11 @@ public class NetherAutoClimbControllerEndToEndTests
             Assert.Equal(expectedChild, child.Kind);
             Assert.Equal(1, bridge.GetOnlyBeginCount);
             Assert.Equal(1, bridge.GetOnlyPollCount);
+            if (assertNextRoute)
+            {
+                NetherAutoClimbController.Update();
+                Assert.Equal(2, bridge.Invocations.Count(action => action == NetherActionKind.SelectFloor));
+            }
             return bridge;
         }
         finally
@@ -2629,7 +2913,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public bool HoldBattleOpen { get; set; }
         public int BattleStartCancelCount { get; private set; }
         public int BattleResultNextInvokeCount { get; private set; }
-        public bool HasObservedNetherBattleResult { get; set; } = true;
+        public bool HasObservedNetherBattleResult { get; set; }
         public bool AutoCompleteBattleResultContinuation { get; set; } = true;
         public bool BattleResultRebound { get; set; } = true;
         public NetherSnapshot? BattleResultReboundSnapshot { get; set; }
@@ -3078,6 +3362,7 @@ public class NetherAutoClimbControllerEndToEndTests
             // code popup are presented.  Keep the production E2E seam faithful to that lifecycle
             // so the result-owned flow cannot accidentally depend on a stale map controller.
             HasRegisteredFloorSelection = false;
+            HasObservedNetherBattleResult = true;
             _battleResultNextInvoked = false;
             _battleResultContinuationCompleted = false;
             _battleClearAvailable = true;
@@ -3201,6 +3486,7 @@ public class NetherAutoClimbControllerEndToEndTests
             if (!_battleResultContinuationCompleted)
             {
                 _battleResultContinuationCompleted = true;
+                HasObservedNetherBattleResult = false;
                 HasRegisteredFloorSelection = true;
                 CurrentRuntimeGeneration++;
                 if (BattleResultReboundSnapshot != null)
@@ -3228,6 +3514,7 @@ public class NetherAutoClimbControllerEndToEndTests
             _floorParentPending = false;
             _battleResultNextInvoked = false;
             _battleResultContinuationCompleted = false;
+            HasObservedNetherBattleResult = false;
             BattleResultCodePopup = null;
             BattleResultCodeActions.Clear();
             BattleResultCodeNativeSteps.Clear();

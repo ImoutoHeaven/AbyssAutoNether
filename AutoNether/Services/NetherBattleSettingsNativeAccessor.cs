@@ -8,8 +8,9 @@ namespace AutoNether.Services;
 
 /// <summary>
 /// Exact packaged-game binding for exploration/Nether battle settings.  The game exposes this
-/// surface through Project.Ingame.IIngameUserSettings and applies it to BottomRightView via
-/// ApplyUserSettings; no property-name fallback or guessed component lookup is used.
+/// surface through Project.Ingame.IIngameUserSettings and supplies it to BottomRightView via
+/// InitializeTimeScaleButtons/ApplyUserSettings; no property-name fallback or guessed component
+/// lookup is used.
 /// </summary>
 internal sealed class NetherBattleSettingsNativeAccessor : INetherBattleSettingsNative
 {
@@ -50,10 +51,20 @@ internal sealed class NetherBattleSettingsNativeAccessor : INetherBattleSettings
         }
 
         Type concrete = settings.GetType();
-        bool implementsExpectedInterface = concrete.GetInterfaces().Any(type =>
+        // IL2CPP interop projects a native interface as a CLR wrapper class, so an argument
+        // declared IIngameUserSettings normally arrives with that exact concrete FullName and
+        // an empty CLR GetInterfaces() result.  Accept that exact wrapper as well as any future
+        // generated concrete type which genuinely exposes the same CLR contract; the four
+        // accessor methods below still have to match exactly before mutation is possible.
+        bool isExpectedWrapper = string.Equals(
+            concrete.FullName,
+            SettingsInterfaceTypeName,
+            StringComparison.Ordinal
+        );
+        bool implementsExpectedContract = concrete.GetInterfaces().Any(type =>
             string.Equals(type.FullName, SettingsInterfaceTypeName, StringComparison.Ordinal)
         );
-        if (!implementsExpectedInterface)
+        if (!isExpectedWrapper && !implementsExpectedContract)
         {
             error = "unexpected-native-settings-interface:" + concrete.FullName;
             return false;
@@ -228,5 +239,21 @@ internal static class NetherBattleSettingsNativeRegistry
         }
         if (unregistered)
             NetherAutoClimbController.OnBattleSettingsAccessorUnregistered();
+    }
+
+    /// <summary>
+    /// Prefix half of BottomRightView.OnDestroy. Owner identity prevents a stale view from
+    /// restoring a lease owned by a newer battle view.
+    /// </summary>
+    public static void PrepareForUnregister(object owner)
+    {
+        if (owner == null)
+            return;
+        lock (Gate)
+        {
+            if (!ReferenceEquals(_owner, owner) || _accessor == null)
+                return;
+        }
+        NetherAutoClimbController.OnBattleSettingsAccessorDestroying();
     }
 }

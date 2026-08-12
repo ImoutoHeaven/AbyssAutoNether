@@ -65,6 +65,7 @@
     <Compile Include="..\AutoNether\Services\NetherBattleSettingsLease.cs" Link="NetherBattleSettingsLease.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLease.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleSettingsLeaseRuntimeCoordinator.cs" Link="NetherBattleSettingsLeaseRuntimeCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLeaseRuntimeCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleSettingsLeaseControllerLifecycle.cs" Link="NetherBattleSettingsLeaseControllerLifecycle.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLeaseControllerLifecycle.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherBattleSettingsNativeAccessor.cs" Link="NetherBattleSettingsNativeAccessor.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsNativeAccessor.cs')" />
     <Compile Include="..\AutoNether\Services\NetherActionReconcilePolicy.cs" Link="NetherActionReconcilePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherActionReconcilePolicy.cs')" />
     <Compile Include="..\AutoNether\Services\NetherFloorActionTransactionComposer.cs" Link="NetherFloorActionTransactionComposer.cs" Condition="Exists('..\AutoNether\Services\NetherFloorActionTransactionComposer.cs')" />
     <Compile Include="..\AutoNether\Services\NetherShopPurchaseCloseCoordinator.cs" Link="NetherShopPurchaseCloseCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherShopPurchaseCloseCoordinator.cs')" />
@@ -80,6 +81,7 @@
     <Compile Include="..\AutoNether\Services\NetherFloorEventSequenceTaskFlow.cs" Link="NetherFloorEventSequenceTaskFlow.cs" Condition="Exists('..\AutoNether\Services\NetherFloorEventSequenceTaskFlow.cs')" />
     <Compile Include="..\AutoNether\Services\NetherRecoveredFloorEventTaskLease.cs" Link="NetherRecoveredFloorEventTaskLease.cs" Condition="Exists('..\AutoNether\Services\NetherRecoveredFloorEventTaskLease.cs')" />
     <Compile Include="..\AutoNether\Services\NetherContentAcquiredConfirmLease.cs" Link="NetherContentAcquiredConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherContentAcquiredConfirmLease.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherCodeReceivedConfirmLease.cs" Link="NetherCodeReceivedConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherCodeReceivedConfirmLease.cs')" />
     <Compile Include="..\AutoNether\Services\NetherFloorEventSequenceNativeBinding.cs" Link="NetherFloorEventSequenceNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherFloorEventSequenceNativeBinding.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodePopupNativeBinding.cs" Link="NetherCodePopupNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherCodePopupNativeBinding.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeTransformNativeBinding.cs" Link="NetherCodeTransformNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherCodeTransformNativeBinding.cs')" />

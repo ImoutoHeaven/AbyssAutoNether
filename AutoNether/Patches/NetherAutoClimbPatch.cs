@@ -112,6 +112,46 @@ internal static class NetherAutoClimbResultPatch
 }
 
 /// <summary>
+/// Restores the battle-scoped Auto/speed lease while BottomRightView still owns its exact
+/// IIngameUserSettings instance. The ordinary lifecycle postfix unbinds it after OnDestroy.
+/// </summary>
+[HarmonyPatch]
+internal static class NetherAutoClimbBattleSettingsDestroyPrefixPatch
+{
+    private static MethodBase? TargetMethod()
+    {
+        bool resolved = NetherLifecycleInteropBindings.TryResolve(
+            AppDomain.CurrentDomain.GetAssemblies(),
+            NetherLifecycleInteropBindings.BattleSettingsOwnerDestroy,
+            out string error,
+            out MethodInfo? method
+        );
+        NetherAutoClimbController.LogDiagnostic(
+            "binding",
+            new("family", "battle-settings-destroy-prefix"),
+            new("outcome", resolved ? "resolved" : "missing-method"),
+            new("type", NetherLifecycleInteropBindings.BattleSettingsOwnerDestroy.TypeName),
+            new("method", NetherLifecycleInteropBindings.BattleSettingsOwnerDestroy.Method.Name),
+            new("detail", resolved ? "exact-signature" : error)
+        );
+        return method;
+    }
+
+    [HarmonyPrefix]
+    private static void Prefix(MethodBase __originalMethod, object __instance)
+    {
+        try
+        {
+            NetherRuntimeBridge.ObservePatchedCallEntering(__originalMethod, __instance);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("[F12][AutoNether] battle settings destroy prefix failed: " + ex);
+        }
+    }
+}
+
+/// <summary>
 /// Captures the actual generated FloorSelection startup/resume state machine. Native OnEntered
 /// invokes MoveNext directly and therefore bypasses the public async wrapper. The prefix owns
 /// popups created during MoveNext; the postfix exposes the builder's pollable parent UniTask.

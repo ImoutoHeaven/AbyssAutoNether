@@ -34,6 +34,13 @@ internal static class NetherLifecycleInteropBindings
         UniTaskTypeName
     );
 
+    public static NetherInteropPatchBinding BattleSettingsOwnerDestroy { get; } = Instance(
+        "Project.Ingame.BottomRightView",
+        "OnDestroy",
+        Array.Empty<string>(),
+        "System.Void"
+    );
+
     // The native OnEntered UniTaskVoid constructs this state machine directly and calls
     // MoveNext, bypassing the public HandleStartEventByStatusAsync interop wrapper.
     public static NetherInteropPatchBinding StartStatusStateMachineMoveNext { get; } = Instance(
@@ -81,6 +88,12 @@ internal static class NetherLifecycleInteropBindings
         ),
         Instance(
             "Project.Ingame.BottomRightView",
+            "InitializeTimeScaleButtons",
+            new[] { "Project.Ingame.IIngameUserSettings" },
+            "System.Void"
+        ),
+        Instance(
+            "Project.Ingame.BottomRightView",
             "ApplyUserSettings",
             new[] { "Project.Ingame.IIngameUserSettings" },
             "System.Void"
@@ -112,6 +125,10 @@ internal static class NetherLifecycleInteropBindings
         Popup(
             "Project.Nether.AbyssCodeSelectPopup.AbyssCodeSelectPopupController",
             "Project.Nether.AbyssCodeSelectPopup.AbyssCodeSelectPopup"
+        ),
+        Popup(
+            "Project.Nether.AbyssCodeReceivedPopup.AbyssCodeReceivedPopupController",
+            "Project.Nether.AbyssCodeReceivedPopup.AbyssCodeReceivedPopup"
         ),
         Popup(
             "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupController",

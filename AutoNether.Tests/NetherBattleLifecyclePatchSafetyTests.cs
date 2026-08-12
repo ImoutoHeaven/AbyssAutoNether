@@ -92,6 +92,12 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
         Assert.DoesNotContain("BattlePatchBindings", bridge);
         Assert.DoesNotContain("GetBattleTaskPatchTarget", bridge);
         Assert.Contains("standalone-autonether", plugin);
+
+        Assert.Contains("NetherAutoClimbBattleSettingsDestroyPrefixPatch", autoClimbPatch);
+        Assert.Contains(
+            "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbBattleSettingsDestroyPrefixPatch));",
+            manager
+        );
     }
 
     private static string FindRepositoryRoot()

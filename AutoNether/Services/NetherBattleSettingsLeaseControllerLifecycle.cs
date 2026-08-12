@@ -16,6 +16,7 @@ internal sealed class NetherBattleSettingsLeaseControllerLifecycle
     private bool _startupRecoveryRequested;
     private bool _startupRecoveryComplete;
     private bool _exactAccessorRegistered;
+    private bool _currentBattleLeaseSatisfied;
     private long _updateTick;
 
     public NetherBattleSettingsLeaseControllerLifecycle(
@@ -36,6 +37,12 @@ internal sealed class NetherBattleSettingsLeaseControllerLifecycle
     public NetherBattleSettingsLeaseRuntimeState RuntimeState => _runtime.State;
 
     public bool IsExactAccessorRegistered => _exactAccessorRegistered;
+
+    /// <summary>
+    /// True after this battle acquired its settings lease. It remains true when the view
+    /// restores during OnDestroy so settlement cannot mistake teardown for a missing acquire.
+    /// </summary>
+    public bool IsCurrentBattleLeaseSatisfied => _currentBattleLeaseSatisfied;
 
     /// <summary>
     /// Route selection is safe without an Ingame-only settings owner when there is no active
@@ -107,10 +114,40 @@ internal sealed class NetherBattleSettingsLeaseControllerLifecycle
                 + _runtime.State
             );
         }
-        return _runtime.OnBattleEnter();
+        NetherNativeActionResult result = _runtime.OnBattleEnter();
+        if (result.Kind == NetherNativeActionResultKind.Completed
+            && _runtime.LeasePhase == NetherBattleSettingsLeasePhase.Forced)
+        {
+            _currentBattleLeaseSatisfied = true;
+        }
+        return result;
     }
 
-    public NetherNativeActionResult OnBattleClearOrClose() => _runtime.OnBattleExit();
+    /// <summary>
+    /// Called from BottomRightView.OnDestroy prefix while its exact accessor is still alive.
+    /// Keep the battle marker until clear/close is observed because result code UI appears
+    /// after this view teardown.
+    /// </summary>
+    public NetherNativeActionResult OnBattleViewDestroying() => _runtime.OnBattleExit();
+
+    public NetherNativeActionResult OnBattleClearOrClose()
+    {
+        if (_runtime.LeasePhase is NetherBattleSettingsLeasePhase.Empty
+            or NetherBattleSettingsLeasePhase.Restored)
+        {
+            _currentBattleLeaseSatisfied = false;
+            return NetherNativeActionResult.Completed("battle-settings-already-restored-before-clear");
+        }
+
+        NetherNativeActionResult result = _runtime.OnBattleExit();
+        if (result.Kind == NetherNativeActionResultKind.Completed
+            && _runtime.LeasePhase is NetherBattleSettingsLeasePhase.Empty
+                or NetherBattleSettingsLeasePhase.Restored)
+        {
+            _currentBattleLeaseSatisfied = false;
+        }
+        return result;
+    }
 
     public NetherNativeActionResult OnF12Off() => _runtime.OnF12Off();
 
