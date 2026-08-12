@@ -1,0 +1,116 @@
+using System.Collections.Generic;
+using AutoNether.Patches;
+using AutoNether.Services;
+using BepInEx.Configuration;
+using UnityEngine;
+
+namespace AutoNether;
+
+/// <summary>
+/// 快捷键处理。挂载为 MonoBehaviour，每帧检查按键输入。
+/// 使用节流机制避免连续帧重复触发同一快捷键。
+/// </summary>
+public class Hotkey : MonoBehaviour
+{
+    private const float DebounceInterval = 0.15f;
+
+    // 周期扫描翻译走 SetText 的界面（底部导航等无法被 set_text hook 捕获的文本）
+    private const float RefreshInterval = 0.5f;
+    private float _lastRefreshTime;
+
+    private readonly Dictionary<KeyCode, float> _lastPressTime = new();
+
+    private void Update()
+    {
+        // Capture F12 before any subsystem update. If an earlier updater throws, this line is
+        // still enough to distinguish "Unity never saw the key" from "dispatch was aborted".
+        bool f12KeyDown = Input.GetKeyDown(KeyCode.F12);
+        bool f12Accepted = f12KeyDown && CanTrigger(KeyCode.F12);
+        if (f12KeyDown)
+            NetherAutoClimbController.ObserveHotkeyInput(f12Accepted);
+
+        ConfigAutoReload.Update(Time.unscaledTime);
+        BattleSessionAutoSL.Update();
+        NetherAutoClimbController.Update();
+
+        if (Input.GetKeyDown(KeyCode.F8) && CanTrigger(KeyCode.F8))
+        {
+            Config.Translation.Value = !Config.Translation.Value;
+            ConfigAutoReload.AcknowledgeCurrent();
+            TranslationPatch.RefreshCurrentMessage();
+        }
+        CheckToggle(KeyCode.F9, () => Config.VoiceInterruption);
+
+        if (Input.GetKeyDown(KeyCode.F10) && CanTrigger(KeyCode.F10))
+        {
+            Plugin.ConfigFile.Reload();
+            ConfigAutoReload.AcknowledgeCurrent();
+            Logger.Info("Config reloaded");
+        }
+
+        if (Input.GetKeyDown(KeyCode.F11) && CanTrigger(KeyCode.F11))
+        {
+            Config.BattleSessionAutoSL.Value = !Config.BattleSessionAutoSL.Value;
+            ConfigAutoReload.AcknowledgeCurrent();
+            Logger.Info(
+                $"[F11] Battle session auto-SL {(Config.BattleSessionAutoSL.Value ? "ON" : "OFF")}"
+            );
+            if (Config.BattleSessionAutoSL.Value)
+            {
+                Logger.Info(
+                    "[F11] targets: normal="
+                        + BattleSessionAutoSLPolicy.DescribeNormalStopCondition(
+                            Config.BattleSessionAutoSLNormalStopMode.Value,
+                            Config.BattleSessionAutoSLNormalMinimumRarity.Value,
+                            Config.BattleSessionAutoSLNormalContentTypes.Value
+                        )
+                        + ", netherBattle=" + Config.BattleSessionAutoSLNetherBattleStrategy.Value
+                        + ", netherMiniBoss=" + Config.BattleSessionAutoSLNetherMiniBossStrategy.Value
+                        + ", netherBoss=" + Config.BattleSessionAutoSLNetherBossStrategy.Value
+                        + $", netherEquipmentOnly={Config.BattleSessionAutoSLNetherEquipmentOnly.Value}"
+                        + $", netherPreserveMode={Config.BattleSessionAutoSLNetherPreserveMode.Value}"
+                        + ", netherPreserveItemIds="
+                        + (string.IsNullOrWhiteSpace(
+                            Config.BattleSessionAutoSLNetherPreserveItemIds.Value
+                        )
+                            ? "none"
+                            : Config.BattleSessionAutoSLNetherPreserveItemIds.Value)
+                );
+            }
+        }
+
+        if (f12Accepted)
+            NetherAutoClimbController.ToggleFromHotkey();
+
+        if (Config.Translation.Value && Time.unscaledTime - _lastRefreshTime >= RefreshInterval)
+        {
+            _lastRefreshTime = Time.unscaledTime;
+            Patches.GeneralTextPatch.RefreshVisibleText();
+            Patches.TranslationPatch.RefreshCurrentMessage();
+        }
+    }
+
+    private void CheckToggle(KeyCode key, System.Func<ConfigEntry<bool>> getter)
+    {
+        if (Input.GetKeyDown(key) && CanTrigger(key))
+        {
+            var entry = getter();
+            entry.Value = !entry.Value;
+            ConfigAutoReload.AcknowledgeCurrent();
+        }
+    }
+
+    private bool CanTrigger(KeyCode key)
+    {
+        float now = Time.time;
+        if (_lastPressTime.TryGetValue(key, out float last) && now - last < DebounceInterval)
+            return false;
+        _lastPressTime[key] = now;
+        return true;
+    }
+
+    private static bool IsAltPressed()
+    {
+        return Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+    }
+}

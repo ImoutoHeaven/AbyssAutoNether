@@ -1,0 +1,145 @@
+#nullable enable
+
+using System;
+
+namespace AutoNether.Services;
+
+/// <summary>
+/// Production-facing lifecycle seam between the F12 controller, the exact native accessor
+/// registration patch, and the persisted battle-settings lease.  It intentionally does not
+/// cache a session-wide restore flag: the real lease phase determines whether every battle may
+/// acquire settings and whether every boundary must restore them.
+/// </summary>
+internal sealed class NetherBattleSettingsLeaseControllerLifecycle
+{
+    private readonly NetherBattleSettingsLeaseRuntimeCoordinator _runtime;
+    private bool _startupRecoveryRequested;
+    private bool _startupRecoveryComplete;
+    private bool _exactAccessorRegistered;
+    private long _updateTick;
+
+    public NetherBattleSettingsLeaseControllerLifecycle(
+        INetherBattleSettingsLeaseDriver lease,
+        int maximumRestoreRetries = 3,
+        int retryIntervalUpdates = 60
+    )
+    {
+        _runtime = new NetherBattleSettingsLeaseRuntimeCoordinator(
+            lease,
+            maximumRestoreRetries,
+            retryIntervalUpdates
+        );
+    }
+
+    public NetherBattleSettingsLeasePhase LeasePhase => _runtime.LeasePhase;
+
+    public NetherBattleSettingsLeaseRuntimeState RuntimeState => _runtime.State;
+
+    public bool IsExactAccessorRegistered => _exactAccessorRegistered;
+
+    /// <summary>
+    /// Route selection is safe without an Ingame-only settings owner when there is no active
+    /// persisted lease.  A live/failed lease is different: it remains an authority boundary and
+    /// blocks every new mutation until an exact accessor restores it.
+    /// </summary>
+    public bool BlocksRoute => _runtime.BlocksBattleEntry;
+
+    /// <summary>
+    /// Entering an actual battle additionally requires the exact BottomRight accessor and a
+    /// completed startup/rebind recovery.  The controller calls this only after the native
+    /// battle view has registered, never to gate a clean NetherTop map route.
+    /// </summary>
+    public bool BlocksBattleEntry => !_exactAccessorRegistered
+        || !_startupRecoveryComplete
+        || _runtime.BlocksBattleEntry;
+
+    // Compatibility surface for the existing lifecycle characterization tests.  New map-route
+    // code must use BlocksRoute; this property intentionally keeps the stricter battle-entry
+    // meaning so it cannot accidentally reopen a battle before an exact accessor exists.
+    public bool BlocksRouteOrBattle => BlocksBattleEntry;
+
+    public NetherNativeActionResult OnControllerInitialized()
+    {
+        // Discovery reads only the durable file.  It must happen before Stable can choose a
+        // route, but native write/readback/delete remains deferred until exact accessor
+        // registration below.
+        return _runtime.ProbeStartupLease();
+    }
+
+    public NetherNativeActionResult OnExactAccessorRegistered()
+    {
+        _exactAccessorRegistered = true;
+        bool needsExactRecovery = !_startupRecoveryRequested
+            || _runtime.State is NetherBattleSettingsLeaseRuntimeState.RecoveryPending
+                or NetherBattleSettingsLeaseRuntimeState.RetryWait
+            || _runtime.LeasePhase is NetherBattleSettingsLeasePhase.Forced
+                or NetherBattleSettingsLeasePhase.RestorePending;
+        if (needsExactRecovery)
+        {
+            _startupRecoveryRequested = true;
+            NetherNativeActionResult recovery = _runtime.RecoverOnStartup();
+            ObserveStartupRecovery(recovery);
+            return recovery;
+        }
+
+        _startupRecoveryComplete = !_runtime.BlocksBattleEntry;
+        return _startupRecoveryComplete
+            ? NetherNativeActionResult.Completed("battle-settings-accessor-rebound")
+            : NetherNativeActionResult.Started("battle-settings-accessor-rebound-awaiting-retry");
+    }
+
+    public void OnExactAccessorUnregistered()
+    {
+        _exactAccessorRegistered = false;
+        _startupRecoveryComplete = false;
+    }
+
+    public NetherNativeActionResult OnBattleEnter()
+    {
+        if (BlocksBattleEntry)
+        {
+            return NetherNativeActionResult.Rejected(
+                "battle-settings-lifecycle-entry-blocked:"
+                + _exactAccessorRegistered
+                + ":"
+                + _startupRecoveryComplete
+                + ":"
+                + _runtime.State
+            );
+        }
+        return _runtime.OnBattleEnter();
+    }
+
+    public NetherNativeActionResult OnBattleClearOrClose() => _runtime.OnBattleExit();
+
+    public NetherNativeActionResult OnF12Off() => _runtime.OnF12Off();
+
+    public NetherNativeActionResult OnLeaveNether() => _runtime.OnLeaveNether();
+
+    public NetherNativeActionResult OnPluginUnload() => _runtime.OnPluginUnload();
+
+    public NetherNativeActionResult OnAutomationPause() => _runtime.OnAutomationPause();
+
+    /// <summary>
+    /// May be called every controller update.  The runtime coordinator makes a real retry only
+    /// when the configured interval is due, so this method remains silent between attempts.
+    /// </summary>
+    public NetherBattleSettingsLeaseRetryPumpResult PumpUpdate()
+    {
+        if (_updateTick < long.MaxValue)
+            _updateTick++;
+        if (!_exactAccessorRegistered && !_runtime.AllowsPreAccessorDiscoveryRetry)
+            return NetherBattleSettingsLeaseRetryPumpResult.NotAttempted;
+
+        NetherBattleSettingsLeaseRetryPumpResult result = _runtime.PumpScheduledRetry(_updateTick);
+        if (result.Attempted && result.Result is { } nativeResult)
+            ObserveStartupRecovery(nativeResult);
+        return result;
+    }
+
+    private void ObserveStartupRecovery(NetherNativeActionResult result)
+    {
+        _startupRecoveryComplete = result.Kind == NetherNativeActionResultKind.Completed
+            && !_runtime.BlocksBattleEntry;
+    }
+}
