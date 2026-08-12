@@ -79,7 +79,6 @@ internal sealed class NetherRuntimeBridge
         public bool HasObservedNetherBattleResult => false;
         public bool IsBattleActive => false;
         public bool IsResultObserved => false;
-        public bool IsF11Busy => false;
         public bool FloorOwnerTerminated => false;
         public long CurrentRuntimeGeneration => 0;
         public bool IsExpectedNetherTopScene => false;

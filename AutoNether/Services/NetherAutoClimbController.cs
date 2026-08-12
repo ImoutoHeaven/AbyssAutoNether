@@ -34,7 +34,7 @@ internal static class NetherAutoClimbController
     private static NetherRecoveredCodeOfferCoordinator RecoveredCodeFlow = new();
     private static NetherContinueSceneRuntimeCoordinator ContinueSceneFlow = new(State, _bridge);
     private static readonly NetherDetailedAuditLogger DetailedAudit = new(message =>
-        Logger.Info("[F12][NetherClimb] " + message)
+        Logger.Info("[F12][AutoNether] " + message)
     );
     private static NetherBattleSettingsLeaseControllerLifecycle BattleSettingsLifecycle = new(
         NetherBattleSettingsLease.Instance
@@ -356,7 +356,6 @@ internal static class NetherAutoClimbController
         if (State.PendingAction?.Kind == NetherActionKind.BattleSettlement
             && State.Phase is (
                 NetherAutoClimbPhase.AwaitingBattle
-                or NetherAutoClimbPhase.AwaitingF11
                 or NetherAutoClimbPhase.AwaitingBattleSettlement
             ))
         {
@@ -369,7 +368,6 @@ internal static class NetherAutoClimbController
                 NetherAutoClimbPhase.ExecutingNativeAction or
                 NetherAutoClimbPhase.Reconciling or
                 NetherAutoClimbPhase.AwaitingBattleSceneHandoff or
-                NetherAutoClimbPhase.AwaitingF11 or
                 NetherAutoClimbPhase.AwaitingBattle or
                 NetherAutoClimbPhase.AwaitingBattleSettlement or
                 NetherAutoClimbPhase.AwaitingBattleResultContinuation or
@@ -404,7 +402,6 @@ internal static class NetherAutoClimbController
                 Reconcile();
                 return;
             case NetherAutoClimbPhase.AwaitingBattle:
-            case NetherAutoClimbPhase.AwaitingF11:
             case NetherAutoClimbPhase.AwaitingBattleSettlement:
                 ObserveBattle();
                 return;
@@ -905,8 +902,7 @@ internal static class NetherAutoClimbController
         // intentionally deferred until this scene owner exists; after a successful acquire we
         // wait one frame before polling battle terminal tasks.
         if (State.IsEnabled
-            && State.Phase is (NetherAutoClimbPhase.AwaitingBattle or NetherAutoClimbPhase.AwaitingF11)
-            && !_bridge.IsF11Busy
+            && State.Phase == NetherAutoClimbPhase.AwaitingBattle
             && BattleSettingsLifecycle.LeasePhase != NetherBattleSettingsLeasePhase.Forced)
         {
             if (!BattleSettingsLifecycle.IsExactAccessorRegistered
@@ -944,20 +940,9 @@ internal static class NetherAutoClimbController
         );
         switch (step.Kind)
         {
-            case NetherBattleSettlementStepKind.AwaitingF11:
-                Audit(
-                    NetherDetailedAuditKind.F11,
-                    "battle-f11-blocked",
-                    new NetherDetailedAuditField("blocked", "true"),
-                    new NetherDetailedAuditField("phase", State.Phase.ToString())
-                );
-                State.ObserveF11Busy(isBusy: true);
-                return;
             case NetherBattleSettlementStepKind.AwaitingBattle:
-                State.ObserveF11Busy(isBusy: false);
                 return;
             case NetherBattleSettlementStepKind.AwaitingSettlement:
-                State.ObserveF11Busy(isBusy: false);
                 // The coordinator returns AwaitingSettlement both for the clear/close edge and
                 // for each subsequent GET-only poll.  Enter the state and restore the lease on
                 // that edge exactly once; treating a pending refresh as a second transition
@@ -1565,7 +1550,7 @@ internal static class NetherAutoClimbController
     private static void PlanCheckpoint(NetherSnapshot snapshot, NetherCheckpointDecision checkpoint)
     {
         if (!NetherPreserveItemIdParser.TryParse(
-                Config.BattleSessionAutoSLNetherPreserveItemIds.Value,
+                Config.CheckpointPreserveItemIds.Value,
                 out HashSet<long> preserveIds,
                 out string preserveError
             ))

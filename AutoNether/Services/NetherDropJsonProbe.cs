@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace AutoNether.Services;
 
-public readonly record struct BattleDropItem(
+public readonly record struct NetherDropItem(
     long Sid,
     int ContentType,
     long ContentId,
@@ -14,15 +14,15 @@ public readonly record struct BattleDropItem(
     bool IsRare
 );
 
-public sealed class BattleDropProbeReport
+public sealed class NetherDropJsonReport
 {
-    public IReadOnlyList<BattleDropItem> Items { get; }
+    public IReadOnlyList<NetherDropItem> Items { get; }
     public int DropCount => Items.Count;
     public int RareDropCount { get; }
     public string Error { get; }
 
-    public BattleDropProbeReport(
-        IReadOnlyList<BattleDropItem> items,
+    public NetherDropJsonReport(
+        IReadOnlyList<NetherDropItem> items,
         int rareDropCount,
         string error = ""
     )
@@ -40,7 +40,7 @@ public sealed class BattleDropProbeReport
             if (i > 0)
                 builder.Append("; ");
 
-            BattleDropItem item = Items[i];
+            NetherDropItem item = Items[i];
             builder.Append("sid=").Append(item.Sid)
                 .Append(" contentType=").Append(item.ContentType)
                 .Append(" contentId=").Append(item.ContentId)
@@ -52,9 +52,9 @@ public sealed class BattleDropProbeReport
     }
 }
 
-public static class BattleSessionDropProbe
+public static class NetherDropJsonProbe
 {
-    public static BattleDropProbeReport Parse(string stageDetail)
+    public static NetherDropJsonReport Parse(string stageDetail)
     {
         if (string.IsNullOrWhiteSpace(stageDetail))
             return Missing();
@@ -69,7 +69,7 @@ public static class BattleSessionDropProbe
                 || drops.ValueKind != JsonValueKind.Array)
                 return Missing();
 
-            var items = new List<BattleDropItem>();
+            var items = new List<NetherDropItem>();
             int rareCount = 0;
             foreach (JsonElement drop in drops.EnumerateArray())
             {
@@ -86,7 +86,7 @@ public static class BattleSessionDropProbe
                     rareCount++;
 
                 items.Add(
-                    new BattleDropItem(
+                    new NetherDropItem(
                         sid,
                         contentType,
                         contentId,
@@ -97,7 +97,7 @@ public static class BattleSessionDropProbe
                 );
             }
 
-            return new BattleDropProbeReport(items, rareCount);
+            return new NetherDropJsonReport(items, rareCount);
         }
         catch (JsonException)
         {
@@ -105,11 +105,11 @@ public static class BattleSessionDropProbe
         }
     }
 
-    private static BattleDropProbeReport Missing() =>
-        new(Array.Empty<BattleDropItem>(), 0, "missing");
+    private static NetherDropJsonReport Missing() =>
+        new(Array.Empty<NetherDropItem>(), 0, "missing");
 
-    private static BattleDropProbeReport ParseError() =>
-        new(Array.Empty<BattleDropItem>(), 0, "parse-error");
+    private static NetherDropJsonReport ParseError() =>
+        new(Array.Empty<NetherDropItem>(), 0, "parse-error");
 
     private static bool TryReadLong(JsonElement element, string name, out long number)
     {

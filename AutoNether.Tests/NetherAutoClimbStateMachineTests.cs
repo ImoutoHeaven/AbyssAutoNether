@@ -148,7 +148,7 @@ public class NetherAutoClimbStateMachineTests
     }
 
     [Fact]
-    public void F11_busy_moves_battle_wait_to_awaiting_f11_and_back()
+    public void Battle_wait_remains_awaiting_battle_until_final_task_settles()
     {
         var machine = StableMachine();
         NetherSnapshotFingerprint fingerprint = Fingerprint(NetherSessionStatus.Battle, 30);
@@ -156,10 +156,6 @@ public class NetherAutoClimbStateMachineTests
         Assert.True(machine.TryBegin(BattleSettlementAction(), fingerprint));
         Assert.Equal(NetherAutoClimbPhase.AwaitingBattle, machine.Phase);
 
-        machine.ObserveF11Busy(isBusy: true);
-        Assert.Equal(NetherAutoClimbPhase.AwaitingF11, machine.Phase);
-
-        machine.ObserveF11Busy(isBusy: false);
         Assert.Equal(NetherAutoClimbPhase.AwaitingBattle, machine.Phase);
     }
 
@@ -317,18 +313,17 @@ public class NetherAutoClimbStateMachineTests
     }
 
     [Fact]
-    public void F12_off_awaiting_f11_preserves_battle_settlement_evidence_and_blocks_reenable()
+    public void F12_off_awaiting_final_start_task_preserves_settlement_evidence_and_blocks_reenable()
     {
         var machine = StableMachine();
         NetherSnapshotFingerprint fingerprint = Fingerprint(NetherSessionStatus.Battle, 30);
 
         Assert.True(machine.TryBegin(BattleSettlementAction(), fingerprint));
-        machine.ObserveF11Busy(isBusy: true);
         machine.Toggle(isInNether: true); // off
-        machine.Toggle(isInNether: true); // attempted re-enable before F11/battle terminal
+        machine.Toggle(isInNether: true); // attempted re-enable before final task/battle terminal
 
         Assert.False(machine.IsEnabled);
-        Assert.Equal(NetherAutoClimbPhase.AwaitingF11, machine.Phase);
+        Assert.Equal(NetherAutoClimbPhase.AwaitingBattle, machine.Phase);
         Assert.Equal(NetherActionKind.BattleSettlement, machine.PendingAction!.Value.Kind);
     }
 

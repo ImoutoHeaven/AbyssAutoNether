@@ -84,6 +84,7 @@ public class NetherBattleSettingsLeaseControllerLifecycleTests
     public void ProductionControllerLifecycle_CorruptLeaseBlocksThenReadOnlyRetryCanReleaseWithoutAccessor()
     {
         using var harness = new LeaseHarness(autoEnabled: false, speed: 1);
+        Directory.CreateDirectory(Path.GetDirectoryName(harness.LeaseFilePath)!);
         File.WriteAllText(harness.LeaseFilePath, "not-json");
         NetherBattleSettingsLease lease = harness.CreateLeaseWithoutNative();
         var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(lease, retryIntervalUpdates: 1);
@@ -232,7 +233,7 @@ public class NetherBattleSettingsLeaseControllerLifecycleTests
         }
 
         public string ConfigPath { get; }
-        public string LeaseFilePath => Path.Combine(ConfigPath, "AutoNether.nether-battle-settings-lease.json");
+        public string LeaseFilePath => Path.Combine(ConfigPath, "Abyss.AutoNether", "battle-settings-lease.json");
         public NativeSettings Native { get; }
         public NetherBattleSettingsLease Lease { get; }
 

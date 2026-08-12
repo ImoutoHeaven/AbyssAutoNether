@@ -45,7 +45,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Parse_joins_only_enemy_drop_sids_and_supports_int64_sids()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
 
         Assert.Equal("", report.Error);
         Assert.Equal(3, report.DropCount);
@@ -58,7 +58,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_accepts_enemy_gold_equipment_even_when_is_rare_is_false()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210021] = new(91, 3),
@@ -92,7 +92,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(resourceOnlyGold);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(resourceOnlyGold);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210011] = new(91, 2),
@@ -120,7 +120,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(lostSignal);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(lostSignal);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [200001] = new(90, 3),
@@ -179,7 +179,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(researchMaterial);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(researchMaterial);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [200003] = new(90, 4),
@@ -215,7 +215,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(researchMaterial);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(researchMaterial);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [200003] = new(90, 4),
@@ -240,7 +240,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_and_retries_when_only_equipment_stop_condition_matches()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [200003] = new(90, 4),
@@ -276,7 +276,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(
             equipmentAndResearchMaterial
         );
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
@@ -304,7 +304,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_disables_preserve_combination_when_item_id_set_is_empty()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210021] = new(91, 3),
@@ -338,7 +338,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(
             nonEnemyResearchMaterial
         );
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
@@ -361,7 +361,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_fails_open_when_preserve_id_is_not_a_type90_master_item()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210021] = new(91, 3),
@@ -383,7 +383,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_ignores_ordinary_bag_master_rarity_mismatch_before_target_match()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210021] = new(91, 3),
@@ -412,7 +412,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(uniqueEquipment);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(uniqueEquipment);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210031] = new(91, 4),
@@ -441,7 +441,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(redEquipment);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(redEquipment);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210031] = new(91, 4),
@@ -477,7 +477,7 @@ public class NetherBattleDropProbeTests
         bool expectedMatch
     )
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(rawRarity));
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(rawRarity));
         var masterItems = new Dictionary<long, NetherItemMasterInfo> { [210021] = new(91, masterRarity) };
 
         NetherBattleDropEvaluation evaluation = NetherBattleAutoSLPolicy.Evaluate(
@@ -493,7 +493,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_does_not_promote_raw_zero_from_master_when_equipment_only_is_false()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(0));
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(0));
         var masterItems = new Dictionary<long, NetherItemMasterInfo> { [210021] = new(91, 2) };
 
         NetherBattleDropEvaluation evaluation = NetherBattleAutoSLPolicy.Evaluate(
@@ -509,7 +509,7 @@ public class NetherBattleDropProbeTests
     [InlineData(4, 3)]
     public void Policy_fails_open_for_gold_or_red_master_rarity_mismatch(int rawRarity, int masterRarity)
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(rawRarity));
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(rawRarity));
         var masterItems = new Dictionary<long, NetherItemMasterInfo> { [210021] = new(91, masterRarity) };
 
         NetherBattleDropEvaluation evaluation = NetherBattleAutoSLPolicy.Evaluate(
@@ -523,7 +523,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_rejects_off_target_as_a_runtime_bypass_error()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(5));
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(5));
 
         NetherBattleDropEvaluation evaluation = NetherBattleAutoSLPolicy.Evaluate(
             report, new Dictionary<long, NetherItemMasterInfo> { [210021] = new(91, 4) }, NetherSlTarget.Off
@@ -539,7 +539,7 @@ public class NetherBattleDropProbeTests
     [InlineData(6, false)]
     public void Policy_fails_open_for_out_of_domain_equipment_rarity(int rawRarity, bool equipmentOnly)
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(rawRarity));
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(rawRarity));
         IReadOnlyDictionary<long, NetherItemMasterInfo> masterItems = equipmentOnly
             ? new Dictionary<long, NetherItemMasterInfo> { [210021] = new(91, 4) }
             : new Dictionary<long, NetherItemMasterInfo>();
@@ -560,7 +560,7 @@ public class NetherBattleDropProbeTests
               { "sid": 11, "content_type": 31, "content_id": 200003, "amount": 1, "rarity_level": 6, "is_rare_drop": 0 }
             ] }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(preserveDrop);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(preserveDrop);
         var masterItems = new Dictionary<long, NetherItemMasterInfo> { [200003] = new(90, 0) };
 
         NetherBattleDropEvaluation evaluation = NetherBattleAutoSLPolicy.Evaluate(
@@ -575,7 +575,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_fails_open_for_invalid_preserve_mode_when_rules_are_configured()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(3));
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(OneEnemyDrop(3));
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210021] = new(91, 3),
@@ -602,7 +602,7 @@ public class NetherBattleDropProbeTests
               ]
             }
             """;
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(nonEquipmentGold);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(nonEquipmentGold);
 
         NetherBattleDropEvaluation evaluation = NetherBattleAutoSLPolicy.Evaluate(
             report,
@@ -619,7 +619,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_fails_open_on_protocol_or_master_errors()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
 
         NetherBattleDropEvaluation missingMaster = NetherBattleAutoSLPolicy.Evaluate(
             report,
@@ -646,7 +646,7 @@ public class NetherBattleDropProbeTests
     [Fact]
     public void Policy_fails_open_when_a_nether_item_is_absent_from_master_data()
     {
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(StageDetail);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(StageDetail);
         var masterItems = new Dictionary<long, NetherItemMasterInfo>
         {
             [210011] = new(91, 2),
@@ -673,7 +673,7 @@ public class NetherBattleDropProbeTests
             }
             """;
 
-        NetherBattleDropProbeReport report = NetherBattleDropProbe.Parse(invalid);
+        NetherNetherDropJsonReport report = NetherBattleDropProbe.Parse(invalid);
 
         Assert.Equal("unresolved-enemy-drop-sid:99", report.Error);
     }

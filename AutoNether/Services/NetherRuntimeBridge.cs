@@ -293,8 +293,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
     }
 
-    public bool IsF11Busy => BattleSessionAutoSL.HasActiveNetherOperation;
-
     public bool IsResultObserved
     {
         get
@@ -5841,13 +5839,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 .ToArray();
             string? audit = NetherCodeDiagnosticAudit.Format(detailedLogging, audits);
             if (audit != null)
-                Logger.Info("[F12][NetherClimb] " + audit);
+                Logger.Info("[F12][AutoNether] " + audit);
         }
         catch (Exception ex)
         {
             // Diagnostics never alter category/rarity/level selection or erosion projection.
             // The exception type is sufficient to request a focused live dump.
-            Logger.Info("[F12][NetherClimb] code-master-audit=unavailable:" + ex.GetType().Name);
+            Logger.Info("[F12][AutoNether] code-master-audit=unavailable:" + ex.GetType().Name);
         }
     }
 

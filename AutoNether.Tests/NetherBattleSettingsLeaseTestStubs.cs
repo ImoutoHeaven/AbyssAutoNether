@@ -47,6 +47,6 @@ namespace AutoNether
         internal static ControllerTestConfigEntry<AutoNether.Services.NetherTreasureMode> NetherAutoClimbTreasureMode { get; } = new(AutoNether.Services.NetherTreasureMode.KeyOnly);
         internal static ControllerTestConfigEntry<AutoNether.Services.NetherShopMode> NetherAutoClimbShopMode { get; } = new(AutoNether.Services.NetherShopMode.Off);
         internal static ControllerTestConfigEntry<bool> NetherAutoClimbDetailedLogging { get; } = new(false);
-        internal static ControllerTestConfigEntry<string> BattleSessionAutoSLNetherPreserveItemIds { get; } = new(string.Empty);
+        internal static ControllerTestConfigEntry<string> CheckpointPreserveItemIds { get; } = new(string.Empty);
     }
 }

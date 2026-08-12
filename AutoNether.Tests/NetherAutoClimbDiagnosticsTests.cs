@@ -15,7 +15,7 @@ public class NetherAutoClimbDiagnosticsTests
         );
 
         Assert.Equal(
-            "[F12][NetherClimb][Diag] event=toggle-result outcome=rejected reason=snapshot_failed_missing_model",
+            "[F12][AutoNether][Diag] event=toggle-result outcome=rejected reason=snapshot_failed_missing_model",
             line
         );
     }

@@ -89,7 +89,7 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
         if (!_state.MarkForced())
             return Fault("battle-settings-force-transition-failed", saveFailure: false);
 
-        Logger.Info("[F12][NetherClimb] battle settings lease saved and native Auto/highest-speed forced");
+        Logger.Info("[F12][AutoNether] battle settings lease saved and native Auto/highest-speed forced");
         return NetherNativeActionResult.Completed("battle-settings-forced");
     }
 
@@ -122,7 +122,7 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
             return NetherNativeActionResult.UnknownOutcome("lease-delete-failed:" + deleteError);
         }
 
-        Logger.Info("[F12][NetherClimb] battle settings restored: " + reason);
+        Logger.Info("[F12][AutoNether] battle settings restored: " + reason);
         return NetherNativeActionResult.Completed("battle-settings-restored:" + reason);
     }
 
@@ -204,7 +204,7 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
         if (result.Kind is NetherNativeActionResultKind.UnknownOutcome or NetherNativeActionResultKind.BindingUnavailable)
         {
             Logger.Error(
-                "[F12][NetherClimb] battle settings lease restore on unload failed: " + result.Detail
+                "[F12][AutoNether] battle settings lease restore on unload failed: " + result.Detail
             );
         }
     }
@@ -213,7 +213,11 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
     {
         if (_initialized)
             return;
-        _leasePath = Path.Combine(Paths.ConfigPath, "AutoNether.nether-battle-settings-lease.json");
+        _leasePath = Path.Combine(
+            Paths.ConfigPath,
+            "Abyss.AutoNether",
+            "battle-settings-lease.json"
+        );
         _initialized = true;
     }
 
@@ -223,7 +227,7 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
             _state.FailSave(reason);
         else
             _state.FailRestore(reason);
-        Logger.Error("[F12][NetherClimb] battle settings lease fault: " + reason);
+        Logger.Error("[F12][AutoNether] battle settings lease fault: " + reason);
         return NetherNativeActionResult.BindingUnavailable(reason);
     }
 
@@ -233,7 +237,7 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
         if (!string.Equals(_lastStartupProbeFault, reason, StringComparison.Ordinal))
         {
             _lastStartupProbeFault = reason;
-            Logger.Error("[F12][NetherClimb] battle settings lease startup probe fault: " + reason);
+            Logger.Error("[F12][AutoNether] battle settings lease startup probe fault: " + reason);
         }
         return NetherNativeActionResult.BindingUnavailable(reason);
     }

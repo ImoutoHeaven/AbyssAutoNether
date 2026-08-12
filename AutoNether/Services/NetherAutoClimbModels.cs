@@ -39,7 +39,6 @@ internal enum NetherAutoClimbPhase
     AwaitingBattleSceneHandoff,
     AwaitingContinueSceneHandoff,
     AwaitingBattle,
-    AwaitingF11,
     AwaitingBattleSettlement,
     AwaitingBattleResultContinuation,
     AwaitingSceneChange,

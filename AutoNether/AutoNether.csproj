@@ -24,7 +24,7 @@
       https://nuget.samboy.dev/v3/index.json
     </RestoreAdditionalProjectSources>
     <RootNamespace>AutoNether</RootNamespace>
-    <BaseOutputPath>$(GameDir)\BepInEx\plugins\$(Product)</BaseOutputPath>
+    <BaseOutputPath Condition="'$(BaseOutputPath)' == ''">$(MSBuildProjectDirectory)\..\release\</BaseOutputPath>
     <ProduceReferenceAssembly>True</ProduceReferenceAssembly>
   </PropertyGroup>
 
@@ -43,10 +43,6 @@
     <Reference Include="@(GameDlls)">
       <Private>false</Private>
     </Reference>
-    <Reference Include="Utility">
-      <HintPath>$(GameDir)\BepInEx\plugins\AutoNether\Utility.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
   </ItemGroup>
 
   <ItemGroup>
@@ -54,9 +50,4 @@
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="AutoNether.master_mapping.json">
-      <LogicalName>AutoNether.master_mapping.json</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
 </Project>

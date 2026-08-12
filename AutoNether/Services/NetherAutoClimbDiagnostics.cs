@@ -27,7 +27,7 @@ internal static class NetherAutoClimbDiagnostics
     {
         var entries = new List<string>(MaximumFields + 2)
         {
-            "[F12][NetherClimb][Diag]",
+            "[F12][AutoNether][Diag]",
             "event=" + Sanitize(eventName, MaximumEventLength),
         };
         if (fields != null)

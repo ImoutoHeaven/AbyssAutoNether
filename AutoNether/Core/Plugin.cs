@@ -1,8 +1,5 @@
 using System;
-using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Text;
 using AutoNether.Patches;
 using AutoNether.Services;
 using BepInEx;
@@ -10,114 +7,52 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
-using Utility.Fonts;
-using Utility.Toast;
 
 namespace AutoNether;
 
-[BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
-public class Plugin : BasePlugin
+[BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+[BepInDependency("AbyssMod", BepInDependency.DependencyFlags.SoftDependency)]
+public sealed class Plugin : BasePlugin
 {
-    private const int HttpTimeoutSeconds = 10;
-    private const int PooledConnectionLifetimeMinutes = 5;
-    private const int PooledConnectionIdleTimeoutMinutes = 2;
+    public const string PluginGuid = "Abyss.AutoNether";
+    public const string PluginName = "Abyss AutoNether";
+    public const string PluginVersion = "0.1.0";
 
-    public static ConfigFile ConfigFile;
-    public static new ManualLogSource Log;
-    public static MonoBehaviour Instance;
-    public static TranslationManager Trans;
+    public static ConfigFile ConfigFile { get; private set; } = null!;
+    public static new ManualLogSource Log { get; private set; } = null!;
+    public static MonoBehaviour Instance { get; private set; } = null!;
 
     public override void Load()
     {
-        try
-        {
-            Console.OutputEncoding = Encoding.UTF8;
-        }
-        catch { }
-
-#if DEBUG
-        var args = Environment.GetCommandLineArgs();
-        if (args.Contains("--offline") || args.Contains("-o"))
-            AutoNether.Config.OfflineStartup = true;
-#endif
-
         Log = base.Log;
         ConfigFile = base.Config;
-        Log.LogInfo($"Plugin {MyPluginInfo.PLUGIN_GUID} is loaded!");
+
+        AutoNether.Config.Initialize();
+        Instance = AddComponent<Hotkey>();
+        PatchManager.Initialize();
+        NetherAutoClimbController.Initialize();
+
+        Log.LogInfo($"{PluginName} {PluginVersion} loaded; F12 controls Nether auto-climb.");
+        bool abyssModDetected = AppDomain.CurrentDomain
+            .GetAssemblies()
+            .Any(assembly => string.Equals(
+                assembly.GetName().Name,
+                "AbyssMod",
+                StringComparison.Ordinal
+            ));
         NetherAutoClimbController.LogDiagnostic(
             "build",
-            new("version", MyPluginInfo.PLUGIN_VERSION),
-            new("profile", "autonether-session-depth-cap-v27")
-        );
-
-        AddComponent<ToastUI>();
-        AutoNether.Config.Initialize();
-            Logger.Info(
-                $"[F11] Battle session auto-SL initial state: "
-                + $"{(AutoNether.Config.BattleSessionAutoSL.Value ? "ON" : "OFF")}"
-            );
-        Instance = AddComponent<Hotkey>();
-
-        MasterMapping.Load();
-        Initialize();
-        PatchManager.Initialize();
-        // Persisted F12 battle-settings recovery is deliberately deferred until the exact
-        // BottomRightView accessor registers with the controller lifecycle.
-        NetherAutoClimbController.Initialize();
-        Trans.Initialize();
-
-        Toast.Success(
-            MyPluginInfo.PLUGIN_NAME,
-            $"Mod 加载成功，版本: {MyPluginInfo.PLUGIN_VERSION}"
-        );
-    }
-
-    private static void Initialize()
-    {
-        var socketsHandler = new SocketsHttpHandler
-        {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(PooledConnectionLifetimeMinutes),
-            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(PooledConnectionIdleTimeoutMinutes),
-        };
-        var httpClient = new HttpClient(new CryptoHandler(socketsHandler))
-        {
-            Timeout = TimeSpan.FromSeconds(HttpTimeoutSeconds),
-        };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-            $"{MyPluginInfo.PLUGIN_GUID}/{MyPluginInfo.PLUGIN_VERSION}"
-        );
-
-        var cache = new TranslationCache(
-            AutoNether.Config.TranslationCDN.Value,
-            Path.Combine(Paths.PluginPath, MyPluginInfo.PLUGIN_GUID, "cache", "translations"),
-            AutoNether.Config.TranslationLanguage.Value,
-            httpClient
-        );
-
-        string path = AutoNether.Config.FontBundlePath.Value;
-        string resolvedPath = Path.IsPathRooted(path) ? path : Path.Combine(Paths.PluginPath, path);
-
-        var font = new FontHelper(resolvedPath);
-        Trans = new TranslationManager(cache, font);
-
-        // 机翻数据归入 translations/other 类型目录（作者 CDN 无此类型，不会被覆盖）
-        MachineTranslator.Initialize(
-            Path.Combine(
-                Paths.PluginPath,
-                MyPluginInfo.PLUGIN_GUID,
-                "cache",
-                "translations",
-                TranslationPaths.Other
-            ),
-            AutoNether.Config.TranslationLanguage.Value
+            new("pluginGuid", PluginGuid),
+            new("version", PluginVersion),
+            new("profile", "standalone-autonether"),
+            new("abyssModDetected", abyssModDetected.ToString()),
+            new("interop", "final-task-capture")
         );
     }
 
     public override bool Unload()
     {
         NetherAutoClimbController.OnPluginUnload();
-        Toast.Clear();
-        MachineTranslator.Save();
         return base.Unload();
     }
 }

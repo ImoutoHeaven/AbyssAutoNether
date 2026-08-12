@@ -14,7 +14,7 @@ internal enum NetherDetailedAuditKind
     Route,
     Interactive,
     Battle,
-    F11,
+    Interop,
     Lease,
     Checkpoint,
     Native,

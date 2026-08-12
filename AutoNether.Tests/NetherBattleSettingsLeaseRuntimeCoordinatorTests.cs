@@ -189,7 +189,7 @@ public class NetherBattleSettingsLeaseRuntimeCoordinatorTests
         }
 
         public string ConfigPath { get; }
-        public string LeaseFilePath => Path.Combine(ConfigPath, "AutoNether.nether-battle-settings-lease.json");
+        public string LeaseFilePath => Path.Combine(ConfigPath, "Abyss.AutoNether", "battle-settings-lease.json");
         public NativeSettings Native { get; }
         public NetherBattleSettingsLease Lease { get; }
 

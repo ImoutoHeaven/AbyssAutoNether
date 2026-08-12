@@ -20,14 +20,14 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
         string autoClimbPatch = File.ReadAllText(
             Path.Combine(root, "AutoNether", "Patches", "NetherAutoClimbPatch.cs")
         );
-        string battleSessionPatch = File.ReadAllText(
-            Path.Combine(root, "AutoNether", "Patches", "BattleSessionAutoSLPatch.cs")
+        string battleStartPatch = File.ReadAllText(
+            Path.Combine(root, "AutoNether", "Patches", "NetherBattleStartTaskCapturePatch.cs")
         );
         string manager = File.ReadAllText(
             Path.Combine(root, "AutoNether", "Patches", "PatchManager.cs")
         );
-        string settlementPatch = File.ReadAllText(
-            Path.Combine(root, "AutoNether", "Patches", "BattleSettlementPayloadProbePatch.cs")
+        string terminalPatch = File.ReadAllText(
+            Path.Combine(root, "AutoNether", "Patches", "NetherBattleTerminalPatch.cs")
         );
         string bridge = File.ReadAllText(
             Path.Combine(root, "AutoNether", "Services", "NetherRuntimeBridge.cs")
@@ -46,31 +46,31 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
 
         Assert.Contains(
             "Project_Ingame_Exploration_IExplorationQuestAPIService_StartQuestAsync",
-            battleSessionPatch
+            battleStartPatch
         );
         Assert.DoesNotContain(
             "Project_Ingame_Exploration_IExplorationQuestAPIService_ClearQuestAsync",
-            battleSessionPatch
+            battleStartPatch
         );
         Assert.DoesNotContain(
             "Project_Ingame_Exploration_IExplorationQuestAPIService_CloseQuestAsync",
-            battleSessionPatch
+            battleStartPatch
         );
         Assert.Single(
             Regex.Matches(
-                battleSessionPatch,
+                battleStartPatch,
                 Regex.Escape("NetherRuntimeBridge.ObserveBattleStartTask(__result)")
             ).Cast<Match>()
         );
-        Assert.DoesNotContain("NetherRuntimeBridge.ObserveBattleClearTask", battleSessionPatch);
-        Assert.DoesNotContain("NetherRuntimeBridge.ObserveBattleCloseTask", battleSessionPatch);
-        Assert.Contains("ref UniTask<BattleSessionStatusResponseEntity> __result", battleSessionPatch);
-        Assert.DoesNotContain("ref UniTask<IFinishQuestResponseEntity> __result", battleSessionPatch);
+        Assert.DoesNotContain("NetherRuntimeBridge.ObserveBattleClearTask", battleStartPatch);
+        Assert.DoesNotContain("NetherRuntimeBridge.ObserveBattleCloseTask", battleStartPatch);
+        Assert.Contains("ref UniTask<BattleSessionStatusResponseEntity> __result", battleStartPatch);
+        Assert.DoesNotContain("ref UniTask<IFinishQuestResponseEntity> __result", battleStartPatch);
 
-        Assert.Contains("BattleResultUtility.CreateBattleResultModel", settlementPatch);
-        Assert.Contains("NetherBattleTerminalObservationPolicy.Classify", settlementPatch);
-        Assert.Contains("NetherRuntimeBridge.ObserveBattleClear()", settlementPatch);
-        Assert.Contains("NetherRuntimeBridge.ObserveBattleClose()", settlementPatch);
+        Assert.Contains("BattleResultUtility.CreateBattleResultModel", terminalPatch);
+        Assert.Contains("NetherBattleTerminalObservationPolicy.Classify", terminalPatch);
+        Assert.Contains("NetherRuntimeBridge.ObserveBattleClear()", terminalPatch);
+        Assert.Contains("NetherRuntimeBridge.ObserveBattleClose()", terminalPatch);
         Assert.Contains("NetherAutoClimbBattleResultLifecyclePatch", autoClimbPatch);
         Assert.Single(
             Regex.Matches(
@@ -91,7 +91,7 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
         );
         Assert.DoesNotContain("BattlePatchBindings", bridge);
         Assert.DoesNotContain("GetBattleTaskPatchTarget", bridge);
-        Assert.Contains("autonether-session-depth-cap-v27", plugin);
+        Assert.Contains("standalone-autonether", plugin);
     }
 
     private static string FindRepositoryRoot()

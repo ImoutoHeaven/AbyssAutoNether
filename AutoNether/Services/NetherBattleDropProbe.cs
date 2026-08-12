@@ -23,7 +23,7 @@ public enum NetherPreserveMode
 }
 
 public readonly record struct NetherTargetDrop(
-    BattleDropItem Drop,
+    NetherDropItem Drop,
     NetherItemMasterInfo Master,
     NetherTargetReason Reason = NetherTargetReason.EquipmentStopCondition,
     bool HasMaster = true,
@@ -78,18 +78,18 @@ public static class NetherPreserveItemIdParser
     }
 }
 
-public sealed class NetherBattleDropProbeReport
+public sealed class NetherNetherDropJsonReport
 {
-    public IReadOnlyList<BattleDropItem> AllItems { get; }
-    public IReadOnlyList<BattleDropItem> EnemyItems { get; }
+    public IReadOnlyList<NetherDropItem> AllItems { get; }
+    public IReadOnlyList<NetherDropItem> EnemyItems { get; }
     public string Error { get; }
 
     public int DropCount => AllItems.Count;
     public int EnemyDropCount => EnemyItems.Count;
 
-    public NetherBattleDropProbeReport(
-        IReadOnlyList<BattleDropItem> allItems,
-        IReadOnlyList<BattleDropItem> enemyItems,
+    public NetherNetherDropJsonReport(
+        IReadOnlyList<NetherDropItem> allItems,
+        IReadOnlyList<NetherDropItem> enemyItems,
         string error = ""
     )
     {
@@ -102,7 +102,7 @@ public sealed class NetherBattleDropProbeReport
 
     public string FormatEnemyItems() => FormatItems(EnemyItems);
 
-    private static string FormatItems(IReadOnlyList<BattleDropItem> items)
+    private static string FormatItems(IReadOnlyList<NetherDropItem> items)
     {
         var builder = new StringBuilder();
         for (int i = 0; i < items.Count; i++)
@@ -110,7 +110,7 @@ public sealed class NetherBattleDropProbeReport
             if (i > 0)
                 builder.Append("; ");
 
-            BattleDropItem item = items[i];
+            NetherDropItem item = items[i];
             builder.Append("sid=").Append(item.Sid)
                 .Append(" contentType=").Append(item.ContentType)
                 .Append(" contentId=").Append(item.ContentId)
@@ -123,22 +123,22 @@ public sealed class NetherBattleDropProbeReport
 }
 
 public readonly record struct NetherBypassTraceInput(
-    IReadOnlyList<BattleDropItem> RootDrops,
+    IReadOnlyList<NetherDropItem> RootDrops,
     string Error
 )
 {
     public static NetherBypassTraceInput FromStageDetail(string? stageDetail)
     {
-        BattleDropProbeReport report = BattleSessionDropProbe.Parse(stageDetail ?? string.Empty);
+        NetherDropJsonReport report = NetherDropJsonProbe.Parse(stageDetail ?? string.Empty);
         return new NetherBypassTraceInput(report.Items, report.Error);
     }
 }
 
 public static class NetherBattleDropProbe
 {
-    public static NetherBattleDropProbeReport Parse(string stageDetail)
+    public static NetherNetherDropJsonReport Parse(string stageDetail)
     {
-        BattleDropProbeReport allDrops = BattleSessionDropProbe.Parse(stageDetail);
+        NetherDropJsonReport allDrops = NetherDropJsonProbe.Parse(stageDetail);
         if (allDrops.Error.Length != 0)
             return Error(allDrops.Items, allDrops.Error);
 
@@ -150,8 +150,8 @@ public static class NetherBattleDropProbe
                 || enemies.ValueKind != JsonValueKind.Array)
                 return Error(allDrops.Items, "missing-enemies");
 
-            var dropBySid = new Dictionary<long, BattleDropItem>();
-            foreach (BattleDropItem item in allDrops.Items)
+            var dropBySid = new Dictionary<long, NetherDropItem>();
+            foreach (NetherDropItem item in allDrops.Items)
             {
                 if (!dropBySid.TryAdd(item.Sid, item))
                     return Error(allDrops.Items, $"duplicate-drop-sid:{item.Sid}");
@@ -182,15 +182,15 @@ public static class NetherBattleDropProbe
                 }
             }
 
-            var enemyItems = new List<BattleDropItem>(enemyDropSids.Count);
+            var enemyItems = new List<NetherDropItem>(enemyDropSids.Count);
             foreach (long sid in enemyDropSids)
             {
-                if (!dropBySid.TryGetValue(sid, out BattleDropItem item))
+                if (!dropBySid.TryGetValue(sid, out NetherDropItem item))
                     return Error(allDrops.Items, $"unresolved-enemy-drop-sid:{sid}");
                 enemyItems.Add(item);
             }
 
-            return new NetherBattleDropProbeReport(allDrops.Items, enemyItems);
+            return new NetherNetherDropJsonReport(allDrops.Items, enemyItems);
         }
         catch (JsonException)
         {
@@ -198,10 +198,10 @@ public static class NetherBattleDropProbe
         }
     }
 
-    private static NetherBattleDropProbeReport Error(
-        IReadOnlyList<BattleDropItem> allItems,
+    private static NetherNetherDropJsonReport Error(
+        IReadOnlyList<NetherDropItem> allItems,
         string error
-    ) => new(allItems, Array.Empty<BattleDropItem>(), error);
+    ) => new(allItems, Array.Empty<NetherDropItem>(), error);
 }
 
 public sealed class NetherBattleDropEvaluation
@@ -275,7 +275,7 @@ public static class NetherBattleAutoSLPolicy
     public const int RedRarityLevel = 4;
 
     public static NetherBattleDropEvaluation Evaluate(
-        NetherBattleDropProbeReport report,
+        NetherNetherDropJsonReport report,
         IReadOnlyDictionary<long, NetherItemMasterInfo>? masterItems,
         NetherSlTarget target,
         bool equipmentOnly = true,
@@ -310,7 +310,7 @@ public static class NetherBattleAutoSLPolicy
         var targets = new List<NetherTargetDrop>();
         bool equipmentStopMatched = false;
         bool preservedItemMatched = false;
-        foreach (BattleDropItem item in report.EnemyItems)
+        foreach (NetherDropItem item in report.EnemyItems)
         {
             NetherItemMasterInfo master = default;
             bool hasMaster = masterItems != null

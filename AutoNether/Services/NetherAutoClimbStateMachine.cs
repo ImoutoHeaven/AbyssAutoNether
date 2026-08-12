@@ -142,7 +142,7 @@ internal sealed class NetherAutoClimbStateMachine
             if (HasDrainEvidence() && IsDrainPhase(Phase))
             {
                 // Preserve the exact pending phase and action evidence.  An off→on repeat
-                // cannot replace a F11/battle/settlement/native/reconcile drain with a new
+                // cannot replace a battle/settlement/native/reconcile drain with a new
                 // request before the existing outcome reaches its terminal observation.
             }
             else
@@ -364,18 +364,10 @@ internal sealed class NetherAutoClimbStateMachine
             Phase = NetherAutoClimbPhase.Reconciling;
     }
 
-    public void ObserveF11Busy(bool isBusy)
-    {
-        if (isBusy && Phase == NetherAutoClimbPhase.AwaitingBattle)
-            Phase = NetherAutoClimbPhase.AwaitingF11;
-        else if (!isBusy && Phase == NetherAutoClimbPhase.AwaitingF11)
-            Phase = NetherAutoClimbPhase.AwaitingBattle;
-    }
-
     public bool BeginBattleSettlement()
     {
         if (_pendingAction?.Kind != NetherActionKind.BattleSettlement
-            || Phase is not (NetherAutoClimbPhase.AwaitingBattle or NetherAutoClimbPhase.AwaitingF11))
+            || Phase != NetherAutoClimbPhase.AwaitingBattle)
         {
             return false;
         }
@@ -536,7 +528,6 @@ internal sealed class NetherAutoClimbStateMachine
         NetherAutoClimbPhase.AwaitingBattleSceneHandoff or
         NetherAutoClimbPhase.AwaitingContinueSceneHandoff or
         NetherAutoClimbPhase.Reconciling or
-        NetherAutoClimbPhase.AwaitingF11 or
         NetherAutoClimbPhase.AwaitingBattle or
         NetherAutoClimbPhase.AwaitingBattleSettlement or
         NetherAutoClimbPhase.AwaitingBattleResultContinuation or

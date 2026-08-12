@@ -3,7 +3,7 @@ using Xunit;
 
 namespace AutoNether.Tests;
 
-public class BattleSessionDropProbeTests
+public class NetherDropJsonProbeTests
 {
     [Fact]
     public void Parse_reads_drop_items_and_rare_drop_count_from_stage_detail()
@@ -31,16 +31,16 @@ public class BattleSessionDropProbeTests
             }
             """;
 
-        BattleDropProbeReport report = BattleSessionDropProbe.Parse(stageDetail);
+        NetherDropJsonReport report = NetherDropJsonProbe.Parse(stageDetail);
 
         Assert.Equal(2, report.DropCount);
         Assert.Equal(1, report.RareDropCount);
         Assert.Equal(
-            new BattleDropItem(11, 2, 3001, 2, 1, false),
+            new NetherDropItem(11, 2, 3001, 2, 1, false),
             report.Items[0]
         );
         Assert.Equal(
-            new BattleDropItem(12, 2, 9001, 1, 5, true),
+            new NetherDropItem(12, 2, 9001, 1, 5, true),
             report.Items[1]
         );
     }
@@ -48,7 +48,7 @@ public class BattleSessionDropProbeTests
     [Fact]
     public void Parse_returns_missing_report_when_stage_detail_has_no_drops_array()
     {
-        BattleDropProbeReport report = BattleSessionDropProbe.Parse("{\"stage\":1}");
+        NetherDropJsonReport report = NetherDropJsonProbe.Parse("{\"stage\":1}");
 
         Assert.Equal(0, report.DropCount);
         Assert.Equal(0, report.RareDropCount);
@@ -62,7 +62,7 @@ public class BattleSessionDropProbeTests
         const string stageDetail =
             "{\"drops\":[{\"sid\":7,\"content_type\":3,\"content_id\":88,\"amount\":4,\"rarity_level\":2,\"is_rare_drop\":1}]}";
 
-        BattleDropProbeReport report = BattleSessionDropProbe.Parse(stageDetail);
+        NetherDropJsonReport report = NetherDropJsonProbe.Parse(stageDetail);
 
         Assert.Equal("sid=7 contentType=3 contentId=88 amount=4 rarity=2 isRare=1", report.FormatItemList());
     }
@@ -70,7 +70,7 @@ public class BattleSessionDropProbeTests
     [Fact]
     public void Parse_stops_on_structurally_invalid_drop_payloads()
     {
-        BattleDropProbeReport report = BattleSessionDropProbe.Parse(
+        NetherDropJsonReport report = NetherDropJsonProbe.Parse(
             "{\"drops\":[{\"sid\":7,\"is_rare_drop\":\"1\"}]}"
         );
 
@@ -81,7 +81,7 @@ public class BattleSessionDropProbeTests
     [Fact]
     public void Parse_stops_on_non_object_json_roots()
     {
-        BattleDropProbeReport report = BattleSessionDropProbe.Parse("[]");
+        NetherDropJsonReport report = NetherDropJsonProbe.Parse("[]");
 
         Assert.Equal("parse-error", report.Error);
     }
@@ -89,7 +89,7 @@ public class BattleSessionDropProbeTests
     [Fact]
     public void Parse_reads_drop_sid_as_int64()
     {
-        BattleDropProbeReport report = BattleSessionDropProbe.Parse(
+        NetherDropJsonReport report = NetherDropJsonProbe.Parse(
             "{\"drops\":[{\"sid\":3000000001,\"content_type\":31,\"content_id\":210021,\"amount\":1,\"rarity_level\":3,\"is_rare_drop\":0}]}"
         );
 

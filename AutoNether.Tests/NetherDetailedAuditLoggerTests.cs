@@ -119,7 +119,7 @@ public class NetherDetailedAuditLoggerTests
             NetherDetailedAuditKind.Route,
             NetherDetailedAuditKind.Interactive,
             NetherDetailedAuditKind.Battle,
-            NetherDetailedAuditKind.F11,
+            NetherDetailedAuditKind.Interop,
             NetherDetailedAuditKind.Lease,
             NetherDetailedAuditKind.Checkpoint,
             NetherDetailedAuditKind.Native,

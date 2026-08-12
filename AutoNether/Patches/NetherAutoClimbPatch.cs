@@ -28,7 +28,7 @@ internal static class NetherAutoClimbPatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] native lifecycle observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] native lifecycle observation failed: " + ex);
         }
     }
 }
@@ -106,7 +106,7 @@ internal static class NetherAutoClimbResultPatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] native result observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] native result observation failed: " + ex);
         }
     }
 }
@@ -131,7 +131,7 @@ internal static class NetherAutoClimbStartStatusLifecyclePatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] start-status state-machine enter observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] start-status state-machine enter observation failed: " + ex);
         }
     }
 
@@ -144,7 +144,7 @@ internal static class NetherAutoClimbStartStatusLifecyclePatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] start-status state-machine exit observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] start-status state-machine exit observation failed: " + ex);
         }
     }
 }
@@ -205,7 +205,7 @@ internal static class NetherAutoClimbBattleResultLifecyclePatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] battle result view observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] battle result view observation failed: " + ex);
         }
     }
 }
@@ -266,7 +266,7 @@ internal static class NetherAutoClimbFloorEventSequenceLifecyclePatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] floor event sequence observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] floor event sequence observation failed: " + ex);
         }
     }
 }
@@ -291,7 +291,7 @@ internal static class NetherAutoClimbCodeKeepCancelLifecyclePatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] native code keep/cancel observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] native code keep/cancel observation failed: " + ex);
         }
     }
 }
@@ -316,7 +316,7 @@ internal static class NetherAutoClimbCodeTransformLifecyclePatch
         }
         catch (Exception ex)
         {
-            Logger.Error("[F12][NetherClimb] native code transform task observation failed: " + ex);
+            Logger.Error("[F12][AutoNether] native code transform task observation failed: " + ex);
         }
     }
 }

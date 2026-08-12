@@ -11,8 +11,6 @@ namespace AutoNether.Services;
 /// </summary>
 internal interface INetherBattleSettlementDriver
 {
-    bool IsF11Busy { get; }
-
     NetherNativeActionResult PollBattleLifecycle();
 
     bool TryConsumeBattleClear();
@@ -32,7 +30,6 @@ internal interface INetherBattleProjectionSnapshotDriver
 
 internal enum NetherBattleSettlementStepKind
 {
-    AwaitingF11,
     AwaitingBattle,
     AwaitingSettlement,
     Settled,
@@ -118,9 +115,6 @@ internal sealed class NetherBattleSettlementCoordinator
 
         if (_settlementObserved)
             return PumpSettlement(action, _before);
-
-        if (_battle.IsF11Busy)
-            return NetherBattleSettlementStep.Create(NetherBattleSettlementStepKind.AwaitingF11, detail: "f11-nether-battle-busy");
 
         NetherNativeActionResult lifecycle = _battle.PollBattleLifecycle();
         if (lifecycle.Kind == NetherNativeActionResultKind.Started)

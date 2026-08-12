@@ -2653,7 +2653,6 @@ public class NetherAutoClimbControllerEndToEndTests
         public bool HasRegisteredFloorSelection { get; set; } = true;
         public bool IsBattleActive => CurrentSnapshot.Status == NetherSessionStatus.Battle;
         public bool IsResultObserved => CurrentSnapshot.Status == NetherSessionStatus.Clear;
-        public bool IsF11Busy => false;
         public bool IsExpectedNetherTopScene => true;
 
         public NetherRuntimeSnapshotResult TryCaptureSnapshot() => NetherRuntimeSnapshotResult.Success(CurrentSnapshot);
@@ -3515,7 +3514,7 @@ public class NetherAutoClimbControllerEndToEndTests
         }
 
         public string ConfigPath { get; }
-        public string LeaseFilePath => Path.Combine(ConfigPath, "AutoNether.nether-battle-settings-lease.json");
+        public string LeaseFilePath => Path.Combine(ConfigPath, "Abyss.AutoNether", "battle-settings-lease.json");
         public NetherBattleSettingsLease OriginalLease { get; }
 
         public NetherBattleSettingsLease CreateDetachedLease() => (NetherBattleSettingsLease)Activator.CreateInstance(

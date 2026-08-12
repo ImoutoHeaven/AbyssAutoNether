@@ -194,7 +194,7 @@ internal static class NetherBattleSettingsNativeRegistry
         string error = string.Empty;
         if (owner == null || !NetherBattleSettingsNativeAccessor.TryCreate(settings, out NetherBattleSettingsNativeAccessor? next, out error))
         {
-            Logger.Error("[F12][NetherClimb] native battle settings accessor unavailable: " + error);
+            Logger.Error("[F12][AutoNether] native battle settings accessor unavailable: " + error);
             return;
         }
 

@@ -17,21 +17,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\AutoNether\Services\MachineTranslationPrimitives.cs" Link="MachineTranslationPrimitives.cs" />
-    <Compile Include="..\AutoNether\Services\MachineTranslationTextProtection.cs" Link="MachineTranslationTextProtection.cs" />
-    <Compile Include="..\AutoNether\Patches\NovelMessageRefreshPolicy.cs" Link="NovelMessageRefreshPolicy.cs" />
-    <Compile Include="..\AutoNether\Patches\StaticNovelMessageState.cs" Link="StaticNovelMessageState.cs" />
-    <Compile Include="..\AutoNether\Patches\NovelTextTranslation.cs" Link="NovelTextTranslation.cs" />
-    <Compile Include="..\AutoNether\Services\TranslationPaths.cs" Link="TranslationPaths.cs" />
-    <Compile Include="..\AutoNether\Services\UiTranslatedValueCache.cs" Link="UiTranslatedValueCache.cs" />
-    <Compile Include="..\AutoNether\Services\TextCollectionStore.cs" Link="TextCollectionStore.cs" />
-    <Compile Include="..\AutoNether\Services\NovelTranslationLoadPolicy.cs" Link="NovelTranslationLoadPolicy.cs" />
-    <Compile Include="..\AutoNether\Services\StaticBundleProtocol.cs" Link="StaticBundleProtocol.cs" />
-    <Compile Include="..\AutoNether\Services\BattleSessionDropProbe.cs" Link="BattleSessionDropProbe.cs" />
+    <Compile Include="..\AutoNether\Services\NetherDropJsonProbe.cs" Link="NetherDropJsonProbe.cs" />
     <Compile Include="..\AutoNether\Services\NetherBattleDropProbe.cs" Link="NetherBattleDropProbe.cs" />
     <Compile Include="..\AutoNether\Services\NetherFloorStrategy.cs" Link="NetherFloorStrategy.cs" />
-    <Compile Include="..\AutoNether\Services\BattleSessionAutoSLPolicy.cs" Link="BattleSessionAutoSLPolicy.cs" />
-    <Compile Include="..\AutoNether\Services\BattleSessionAutoSLStateMachine.cs" Link="BattleSessionAutoSLStateMachine.cs" />
     <Compile Include="..\AutoNether\Services\ConfigAutoReloadState.cs" Link="ConfigAutoReloadState.cs" />
     <Compile Include="..\AutoNether\Services\NetherAutoClimbModels.cs" Link="NetherAutoClimbModels.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbModels.cs')" />
     <Compile Include="..\AutoNether\Services\NetherAutoClimbStateMachine.cs" Link="NetherAutoClimbStateMachine.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbStateMachine.cs')" />
@@ -114,7 +102,5 @@
     <Compile Include="..\AutoNether\Services\NetherContinueSceneCoordinator.cs" Link="NetherContinueSceneCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherRuntimeGenerationVisibility.cs" Link="NetherRuntimeGenerationVisibility.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeGenerationVisibility.cs')" />
     <Compile Include="..\AutoNether\Services\NetherContinueSceneRuntimeCoordinator.cs" Link="NetherContinueSceneRuntimeCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneRuntimeCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Core\UpstreamTranslationPolicy.cs" Link="UpstreamTranslationPolicy.cs" />
-    <Compile Include="..\AutoNether\Models\Manifest.cs" Link="Manifest.cs" />
   </ItemGroup>
 </Project>

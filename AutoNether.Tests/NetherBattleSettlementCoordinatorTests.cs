@@ -102,23 +102,19 @@ public class NetherBattleSettlementCoordinatorTests
     }
 
     [Fact]
-    public void F11_busy_holds_battle_without_issuing_get_until_it_releases()
+    public void Final_start_task_pending_holds_battle_without_issuing_get()
     {
         var driver = new FakeDriver(
             lifecycle: new[] { NetherNativeActionResult.Started("battle-running") },
             clearObserved: false,
             closeObserved: false,
             appliedSnapshot: BattleSnapshot()
-        ) { IsF11Busy = true };
+        );
         var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
 
         Assert.True(coordinator.Begin(Action(), BattleSnapshot()));
-        Assert.Equal(NetherBattleSettlementStepKind.AwaitingF11, coordinator.Pump().Kind);
-        Assert.Equal(0, driver.GetOnlyBeginCalls);
-
-        driver.IsF11Busy = false;
-
         Assert.Equal(NetherBattleSettlementStepKind.AwaitingBattle, coordinator.Pump().Kind);
+        Assert.Equal(0, driver.GetOnlyBeginCalls);
     }
 
     [Fact]
@@ -258,7 +254,6 @@ public class NetherBattleSettlementCoordinatorTests
             _appliedSnapshot = appliedSnapshot;
         }
 
-        public bool IsF11Busy { get; set; }
         public int GetOnlyBeginCalls { get; private set; }
         public int GetOnlyPollCalls { get; private set; }
         public int StartOrMutationCalls { get; private set; }
