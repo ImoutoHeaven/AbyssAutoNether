@@ -1479,9 +1479,6 @@ internal static class NetherAutoClimbController
         if (State.Phase != NetherAutoClimbPhase.Stable)
             return;
 
-        if (!EnsureBattleSettingsLifecycleReady("stable-route-boundary"))
-            return;
-
         if (!SettingsGate.TryCapture(
                 BuildSettings(),
                 State.Phase,
@@ -1499,6 +1496,13 @@ internal static class NetherAutoClimbController
             ObserveRecoveredCodeOffer(settings);
             return;
         }
+
+        // A resume/start-status Code Offer and its exact native parent already exist before
+        // F12 owns any route mutation.  Finish that foreground transaction first even when a
+        // crashed prior process left a battle-settings lease pending.  The lease gate remains
+        // immediately below, so no new floor route or battle may start before exact recovery.
+        if (!EnsureBattleSettingsLifecycleReady("stable-route-boundary"))
+            return;
 
         NetherCheckpointDecision checkpoint = CheckpointPolicy.Decide(snapshot, settings);
         Audit(

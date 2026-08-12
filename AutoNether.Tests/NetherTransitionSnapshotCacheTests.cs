@@ -132,6 +132,35 @@ public sealed class NetherTransitionSnapshotCacheTests
     }
 
     [Fact]
+    public void Postbattle_play_status_zero_master_floor_id_uses_unique_authoritative_coordinate()
+    {
+        var cache = new NetherTransitionSnapshotCache();
+        cache.ObserveFullSnapshot(Snapshot(NetherSessionStatus.Play, floorId: 30, floorLevel: 7, apiFloorIndex: 1));
+        cache.BeginBattle();
+        Assert.True(cache.ObserveBattleResultCharacters(new[]
+        {
+            new NetherCharacterState(1001, 720, true),
+            new NetherCharacterState(1002, 0, false),
+        }));
+
+        NetherRuntimeSnapshotResult result = cache.TryCompose(
+            TransitionState(
+                NetherSessionStatus.Play,
+                floorId: 0,
+                floorLevel: 8,
+                apiFloorIndex: 1
+            ),
+            requireFreshBattleCharacters: true
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.Equal(NetherSessionStatus.Play, result.Snapshot!.Status);
+        Assert.Equal(27, result.Snapshot.CurrentFloorId);
+        Assert.Equal(38654705666, result.Snapshot.CurrentNodeId);
+        Assert.Equal(720, result.Snapshot.Characters[0].HpPermille);
+    }
+
+    [Fact]
     public void Clear_result_characters_replace_prebattle_hp_in_postbattle_snapshot()
     {
         var cache = new NetherTransitionSnapshotCache();

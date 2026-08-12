@@ -48,6 +48,7 @@
     <Compile Include="..\AutoNether\Services\NetherCheckpointReturnPreflight.cs" Link="NetherCheckpointReturnPreflight.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointReturnPreflight.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCheckpointPopupWaitCoordinator.cs" Link="NetherCheckpointPopupWaitCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointPopupWaitCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeOfferSelection.cs" Link="NetherCodeOfferSelection.cs" Condition="Exists('..\AutoNether\Services\NetherCodeOfferSelection.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherCodePopupReadiness.cs" Link="NetherCodePopupReadiness.cs" Condition="Exists('..\AutoNether\Services\NetherCodePopupReadiness.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeSelectionNativeFlow.cs" Link="NetherCodeSelectionNativeFlow.cs" Condition="Exists('..\AutoNether\Services\NetherCodeSelectionNativeFlow.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeDiagnosticAudit.cs" Link="NetherCodeDiagnosticAudit.cs" Condition="Exists('..\AutoNether\Services\NetherCodeDiagnosticAudit.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeCategorySemantics.cs" Link="NetherCodeCategorySemantics.cs" Condition="Exists('..\AutoNether\Services\NetherCodeCategorySemantics.cs')" />

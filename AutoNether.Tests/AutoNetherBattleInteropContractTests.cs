@@ -33,6 +33,22 @@ public sealed class AutoNetherBattleInteropContractTests
         Assert.DoesNotContain("ObserveF11Busy", controller);
     }
 
+    [Fact]
+    public void Code_offer_registration_waits_for_initialized_native_model_before_detail_callback()
+    {
+        string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+
+        Assert.Contains(
+            "CodeSelectPopupControllerTypeName => TryMapCodeSelectPopup(registration)",
+            runtime
+        );
+        Assert.Contains(
+            "TryReadMember(registration.Controller, \"_model\", out object? rawModel)",
+            runtime
+        );
+        Assert.Contains("NetherCodePopupReadiness.Evaluate(", runtime);
+    }
+
     private static string Read(params string[] path) =>
         File.ReadAllText(Path.Combine(new[] { FindRepositoryRoot() }.Concat(path).ToArray()));
 

@@ -364,6 +364,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     public static void ObserveStartStatusStateMachineExit(object stateMachine) =>
         Instance.ObserveStartStatusStateMachineExitCore(stateMachine);
 
+    public static void ObserveStartStatusTask(object controller, object resultTask) =>
+        Instance.ObserveStartStatusTaskCore(controller, resultTask);
+
     /// <summary>
     /// Observes only the exact static generated UniTask spawned by the native code-offer
     /// cancel closure.  The controller argument is used to correlate that task to the live
@@ -469,6 +472,39 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherAutoClimbController.LogDiagnostic(
             "binding",
             new("family", "start-status-state-machine"),
+            new("outcome", method != null ? "resolved" : "missing-method"),
+            new("type", binding.TypeName),
+            new("method", binding.Method.Name),
+            new("detail", method != null ? "exact-signature" : error)
+        );
+        return method;
+    }
+
+    internal static MethodBase? GetStartStatusTaskPatchTarget()
+    {
+        NetherInteropPatchBinding binding = NetherLifecycleInteropBindings.StartStatusTask;
+        Type? type = ResolveLoadedType(binding.TypeName);
+        if (type == null)
+        {
+            NetherAutoClimbController.LogDiagnostic(
+                "binding",
+                new("family", "start-status-wrapper-task"),
+                new("outcome", "missing-type"),
+                new("type", binding.TypeName),
+                new("method", binding.Method.Name)
+            );
+            return null;
+        }
+
+        MethodInfo? method = TryResolveExactMethod(
+            type,
+            binding.Method,
+            binding.Flags,
+            out string error
+        );
+        NetherAutoClimbController.LogDiagnostic(
+            "binding",
+            new("family", "start-status-wrapper-task"),
             new("outcome", method != null ? "resolved" : "missing-method"),
             new("type", binding.TypeName),
             new("method", binding.Method.Name),
@@ -1406,7 +1442,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         {
             NetherRuntimePopupResult mapped = controllerType switch
             {
-                CodeSelectPopupControllerTypeName => NetherRuntimePopupResult.Success(new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.CodeOffer }),
+                CodeSelectPopupControllerTypeName => TryMapCodeSelectPopup(registration),
                 CodeListPopupControllerTypeName => TryMapCodeListPopup(registration),
                 ContinuePopupControllerTypeName => NetherRuntimePopupResult.Success(new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.Continue }),
                 ReturnPopupControllerTypeName => NetherRuntimePopupResult.Success(new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.ReturnItems }),
@@ -1430,6 +1466,43 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         {
             return NetherRuntimePopupResult.Failure("popup-map-exception:" + ex.GetType().Name + ":" + ex.Message);
         }
+    }
+
+    private static NetherRuntimePopupResult TryMapCodeSelectPopup(PopupRegistration registration)
+    {
+        bool offerIdsReadable = TryReadMember(
+            registration.Controller,
+            "_mIds",
+            out object? rawOfferIds
+        );
+        int offerIdCount = 0;
+        if (offerIdsReadable && rawOfferIds != null)
+        {
+            if (!NetherRuntimeEnumerableReader.TryRead(
+                    rawOfferIds,
+                    out List<object> offerIds,
+                    out string enumerationDetail
+                ))
+            {
+                return NetherRuntimePopupResult.Failure(
+                    "code-offer-ids-enumeration-unavailable:" + enumerationDetail
+                );
+            }
+            offerIdCount = offerIds.Count;
+        }
+
+        bool modelReadable = TryReadMember(registration.Controller, "_model", out object? rawModel);
+        NetherCodePopupReadinessResult readiness = NetherCodePopupReadiness.Evaluate(
+            offerIdsReadable,
+            offerIdCount,
+            modelReadable,
+            rawModel != null
+        );
+        return readiness.IsReady
+            ? NetherRuntimePopupResult.Success(
+                new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.CodeOffer }
+            )
+            : NetherRuntimePopupResult.Failure(readiness.Detail);
     }
 
     public NetherNativeActionResult Reconcile()
@@ -1650,15 +1723,15 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     public NetherNativeActionResult PollRecoveredCodeParent()
     {
-        object? task;
+        NetherStartStatusParentObservation observation;
         long generation;
         lock (_gate)
         {
             generation = _startStatusCodeGeneration;
             if (generation <= 0
-                || !_startStatusParentCapture.TryGetParentTask(
+                || !_startStatusParentCapture.TryGetParentObservation(
                     _floorSelectionController,
-                    out task
+                    out observation
                 ))
             {
                 return NetherNativeActionResult.BindingUnavailable(
@@ -1667,7 +1740,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
         }
 
-        NetherNativeActionResult result = PollResultTask(task!);
+        NetherNativeActionResult result = observation.State switch
+        {
+            NetherStartStatusParentState.Completed =>
+                NetherNativeActionResult.Completed(observation.Detail),
+            NetherStartStatusParentState.Faulted =>
+                NetherNativeActionResult.UnknownOutcome(observation.Detail),
+            _ => NetherNativeActionResult.Started(observation.Detail),
+        };
         NetherAutoClimbController.LogDiagnostic(
             "recovered-code-parent",
             new("ownerGeneration", generation.ToString()),
@@ -1799,10 +1879,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 new("floorId", data.MNetherMapFloorId.ToString()),
                 new("floorLevel", data.FloorLevel.ToString()),
                 new("apiFloorIndex", data.FloorIndex.ToString()),
-                new("floorResolution", status == NetherSessionStatus.Battle
-                    && data.MNetherMapFloorId == 0
+                new("floorResolution", data.MNetherMapFloorId == 0
                     && result.IsSuccess
-                        ? "unique-coordinate-fallback"
+                        ? status == NetherSessionStatus.Play && requireFreshCharacters
+                            ? "postbattle-unique-coordinate-fallback"
+                            : "unique-coordinate-fallback"
                         : "exact-master-coordinate"),
                 new("resolvedFloorId", result.Snapshot?.CurrentFloorId.ToString() ?? "0"),
                 new("requireFreshCharacters", requireFreshCharacters.ToString()),
@@ -3516,6 +3597,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         bool accepted;
         bool adoptedExistingPopup = false;
         long generation;
+        long runnerIdentity = TryGetStartStatusRunnerIdentity(stateMachine);
         string detail;
         lock (_gate)
         {
@@ -3535,7 +3617,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             {
                 accepted = _startStatusParentCapture.ObserveStateMachineEnter(
                     stateMachine,
-                    controller
+                    controller,
+                    runnerIdentity
                 );
                 adoptedExistingPopup = accepted && TryAdoptRecoveredCodePopupCore();
                 detail = accepted
@@ -3555,8 +3638,50 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("stateMachineType", stateMachine.GetType().FullName ?? stateMachine.GetType().Name),
             new("runtimeGeneration", _runtimeGeneration.ToString()),
             new("ownerGeneration", generation.ToString()),
+            new("runnerIdentity", runnerIdentity.ToString(CultureInfo.InvariantCulture)),
             new("adoptedExistingPopup", adoptedExistingPopup.ToString()),
             new("detail", detail)
+        );
+    }
+
+    private void ObserveStartStatusTaskCore(object controller, object resultTask)
+    {
+        if (controller == null || resultTask == null)
+            return;
+
+        RegisterFloorSelectionCore(controller, "start-status-wrapper-task");
+        bool accepted;
+        bool adoptedExistingPopup;
+        bool ready;
+        long generation;
+        string status = TryReadMember(resultTask, "Status", out object? rawStatus)
+            && rawStatus != null
+                ? rawStatus.ToString() ?? string.Empty
+                : string.Empty;
+        long taskIdentity = TryGetUniTaskSourceIdentity(resultTask);
+        lock (_gate)
+        {
+            accepted = _startStatusParentCapture.ObservePublicTask(
+                controller,
+                resultTask,
+                taskIdentity,
+                status
+            );
+            adoptedExistingPopup = accepted && TryAdoptRecoveredCodePopupCore();
+            ready = _startStatusParentCapture.IsReady(_floorSelectionController);
+            generation = _startStatusCodeGeneration;
+        }
+        NetherAutoClimbController.LogDiagnostic(
+            "runtime-lifecycle",
+            new("action", "start-status-wrapper-task-captured"),
+            new("accepted", accepted.ToString()),
+            new("controllerType", controller.GetType().FullName ?? controller.GetType().Name),
+            new("taskType", resultTask.GetType().FullName ?? resultTask.GetType().Name),
+            new("taskIdentity", taskIdentity.ToString(CultureInfo.InvariantCulture)),
+            new("taskStatus", status),
+            new("ownerGeneration", generation.ToString()),
+            new("ready", ready.ToString()),
+            new("adoptedExistingPopup", adoptedExistingPopup.ToString())
         );
     }
 
@@ -3580,6 +3705,17 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return;
         }
 
+        long runnerIdentity = TryGetStartStatusRunnerIdentity(stateMachine, builder);
+        int state = TryReadMember(stateMachine, "__1__state", out object? rawState)
+            && rawState != null
+            && TryConvertInt32(rawState, out int parsedState)
+                ? parsedState
+                : int.MinValue;
+        string taskStatus = TryReadMember(parentTask, "Status", out object? rawStatus)
+            && rawStatus != null
+                ? rawStatus.ToString() ?? string.Empty
+                : string.Empty;
+        string builderException = TryReadBuilderException(builder);
         bool accepted;
         bool adoptedExistingPopup;
         bool ready;
@@ -3588,7 +3724,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         {
             accepted = _startStatusParentCapture.ObserveStateMachineExit(
                 stateMachine,
-                parentTask
+                parentTask,
+                runnerIdentity,
+                state,
+                taskStatus,
+                builderException
             );
             adoptedExistingPopup = accepted && TryAdoptRecoveredCodePopupCore();
             ready = _startStatusParentCapture.IsReady(_floorSelectionController);
@@ -3602,10 +3742,95 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("stateMachineType", stateMachine.GetType().FullName ?? stateMachine.GetType().Name),
             new("taskType", parentTask.GetType().FullName ?? parentTask.GetType().Name),
             new("ownerGeneration", generation.ToString()),
+            new("runnerIdentity", runnerIdentity.ToString(CultureInfo.InvariantCulture)),
+            new("state", state.ToString(CultureInfo.InvariantCulture)),
+            new("taskStatus", taskStatus),
+            new("builderException", string.IsNullOrEmpty(builderException) ? "-" : builderException),
             new("ready", ready.ToString()),
             new("adoptedExistingPopup", adoptedExistingPopup.ToString()),
             new("detail", accepted ? "builder-task-captured" : "stale-state-machine-exit")
         );
+    }
+
+    private static long TryGetStartStatusRunnerIdentity(
+        object stateMachine,
+        object? knownBuilder = null
+    )
+    {
+        object? builder = knownBuilder;
+        if (builder == null
+            && !TryReadMember(stateMachine, "__t__builder", out builder))
+        {
+            return 0;
+        }
+        if (builder == null
+            || !TryReadMember(builder, "runnerPromise", out object? runner)
+            || runner == null)
+        {
+            return 0;
+        }
+
+        try
+        {
+            PropertyInfo? pointer = runner.GetType().GetProperty(
+                "Pointer",
+                BindingFlags.Instance | BindingFlags.Public
+            );
+            if (pointer?.GetValue(runner) is IntPtr native && native != IntPtr.Zero)
+                return native.ToInt64();
+        }
+        catch (Exception)
+        {
+            // A missing/collected wrapper remains runnerIdentity=0 and cannot replace an
+            // attached parent; fail-closed reference identity still applies.
+        }
+        return 0;
+    }
+
+    private static long TryGetUniTaskSourceIdentity(object task)
+    {
+        if (task == null
+            || !TryReadMember(task, "source", out object? source)
+            || source == null)
+        {
+            return 0;
+        }
+
+        try
+        {
+            PropertyInfo? pointer = source.GetType().GetProperty(
+                "Pointer",
+                BindingFlags.Instance | BindingFlags.Public
+            );
+            return pointer?.GetValue(source) is IntPtr native && native != IntPtr.Zero
+                ? native.ToInt64()
+                : 0;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
+    private static string TryReadBuilderException(object builder)
+    {
+        try
+        {
+            if (!TryReadMember(builder, "ex", out object? exception) || exception == null)
+                return string.Empty;
+            string type = exception.GetType().FullName ?? exception.GetType().Name;
+            string message = TryReadMember(exception, "Message", out object? rawMessage)
+                && rawMessage != null
+                    ? rawMessage.ToString() ?? string.Empty
+                    : exception.ToString() ?? string.Empty;
+            return type + ":" + message;
+        }
+        catch (Exception)
+        {
+            // Task.Status remains authoritative. Failure to inspect the optional builder
+            // exception diagnostic is not itself evidence that the native parent faulted.
+            return string.Empty;
+        }
     }
 
     private bool TryAdoptRecoveredCodePopupCore()

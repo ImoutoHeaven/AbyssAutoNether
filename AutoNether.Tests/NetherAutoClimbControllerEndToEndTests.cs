@@ -79,6 +79,65 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Recovered_code_offer_precedes_persisted_lease_route_gate_then_route_remains_blocked()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            HasRecoveredCodeOffer = true,
+            RecoveredCodePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                OwnerAction = NetherActionKind.RecoveredCodeOffer,
+                OwnerGeneration = 29,
+                Sequence = 31,
+            },
+            CodeCandidates = SafeCodeCandidates(30024),
+        };
+        bridge.RecoveredCodeNativeSteps.Enqueue(
+            NetherBattleResultCodeNativeStep.Completed("scripted-recovered-code-terminal")
+        );
+        bridge.RecoveredCodeParentSteps.Enqueue(
+            NetherNativeActionResult.Completed("scripted-start-status-parent-terminal")
+        );
+        bridge.RecoveredCodeRefreshSteps.Enqueue(
+            NetherNativeActionResult.Completed("scripted-recovered-get-terminal")
+        );
+        var lease = new RecordingLeaseDriver(needsRecovery: true);
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(lease, retryIntervalUpdates: 1);
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+
+            NetherAutoClimbController.Update();
+            Assert.Equal(NetherActionKind.SelectCode, Assert.Single(bridge.RecoveredCodeActions).Kind);
+            Assert.NotEqual(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Equal(0, bridge.BeginFloorParentCount);
+
+            NetherAutoClimbController.Update();
+            NetherAutoClimbController.Update();
+            NetherAutoClimbController.Update();
+
+            Assert.False(bridge.HasRecoveredCodeOffer);
+            Assert.Equal(1, bridge.RecoveredCodeCompletedCount);
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Equal(0, bridge.BeginFloorParentCount);
+
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.BindingUnavailable, NetherAutoClimbController.PauseReason);
+            Assert.Equal(0, bridge.BeginFloorParentCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void F12_hotkey_logs_request_and_enabled_outcome_when_detailed_logging_is_off()
     {
         var bridge = new ScriptedRuntimeBridge();

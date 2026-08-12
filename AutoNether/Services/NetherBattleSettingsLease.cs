@@ -159,6 +159,27 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
         if (!_state.RecoverPersistedActive(lease.OriginalAutoEnabled, lease.OriginalSpeed))
             return FaultDiscovery("persisted-battle-settings-lease-transition-failed");
 
+        // AutoNether forces exactly Auto=true and Speed=3.  If those were also the saved
+        // originals, the previous process made no observable settings change.  The persisted
+        // payload itself therefore proves restoration without requiring a battle-only native
+        // accessor after restart.  Keep every other original pair on the strict accessor path.
+        if (lease.OriginalAutoEnabled && lease.OriginalSpeed == 3)
+        {
+            if (!_state.ObserveRestored(autoEnabled: true, speed: 3))
+                return FaultDiscovery("no-op-battle-settings-lease-transition-failed");
+            if (!TryDeleteLease(out string deleteError))
+            {
+                _state.FailDiscovery("no-op-lease-delete-failed:" + deleteError);
+                return NetherNativeActionResult.UnknownOutcome("no-op-lease-delete-failed:" + deleteError);
+            }
+
+            _startupProbeComplete = true;
+            _lastStartupProbeFault = string.Empty;
+            _recoveryPending = false;
+            Logger.Info("[F12][AutoNether] no-op battle settings lease cleared on startup");
+            return NetherNativeActionResult.Completed("no-op-battle-settings-lease-cleared");
+        }
+
         _startupProbeComplete = true;
         _lastStartupProbeFault = string.Empty;
         _recoveryPending = true;

@@ -40,6 +40,8 @@ internal sealed record NetherAuthoritativeTransitionState
 /// battle scene the graph no longer has a live controller, but the GET-only response still owns
 /// session status, current floor coordinates, resources and code portfolio.  This cache joins
 /// those two sources only when Nether/map identity and the exact current node coordinate agree.
+/// A zero master floor ID is tolerated only during Battle, or on its result-page Play state
+/// when fresh battle-result characters prove that the transition belongs to this combat.
 /// </summary>
 internal sealed class NetherTransitionSnapshotCache
 {
@@ -100,14 +102,25 @@ internal sealed class NetherTransitionSnapshotCache
                 + ":fresh=" + state.NetherId + ":" + state.MapId
             );
         }
+        // The packaged client clears m_nether_map_floor_id to zero twice around a combat:
+        // while Status=Battle, and again on the result page after the clear response has
+        // already changed Status to Play.  The latter is distinguishable from an invalid
+        // ordinary Play snapshot only by fresh, validated battle-result characters owned by
+        // this cache.  Both transitions may recover the master floor solely from one exact
+        // cached (floor_level, floor_index) coordinate.
+        bool battleCoordinateFallback = state.Status == NetherSessionStatus.Battle
+            && state.CurrentFloorId == 0;
+        bool postBattleCoordinateFallback = state.Status == NetherSessionStatus.Play
+            && state.CurrentFloorId == 0
+            && requireFreshBattleCharacters
+            && battleCharacters != null;
+        bool coordinateFallback = battleCoordinateFallback || postBattleCoordinateFallback;
         if (state.FloorLevel < 0 || state.FloorIndex < 0
-            || state.CurrentFloorId <= 0 && state.Status != NetherSessionStatus.Battle)
+            || state.CurrentFloorId <= 0 && !coordinateFallback)
             return NetherRuntimeSnapshotResult.Failure("invalid-authoritative-current-floor");
         if (state.Codes == null || state.AcquiredItems == null)
             return NetherRuntimeSnapshotResult.Failure("missing-authoritative-transition-collections");
 
-        bool coordinateFallback = state.Status == NetherSessionStatus.Battle
-            && state.CurrentFloorId == 0;
         NetherFloorNode[] current = cached.Floors
             .Where(floor => floor != null
                 && (coordinateFallback || floor.FloorId == state.CurrentFloorId)
@@ -119,7 +132,10 @@ internal sealed class NetherTransitionSnapshotCache
             if (coordinateFallback)
             {
                 return NetherRuntimeSnapshotResult.Failure(
-                    "authoritative-battle-coordinate-not-unique:level=" + state.FloorLevel
+                    (battleCoordinateFallback
+                        ? "authoritative-battle-coordinate-not-unique:level="
+                        : "authoritative-postbattle-coordinate-not-unique:level=")
+                    + state.FloorLevel
                     + ":api-index=" + state.FloorIndex
                     + ":matches=" + current.Length
                 );
@@ -158,10 +174,10 @@ internal sealed class NetherTransitionSnapshotCache
             Status = state.Status,
             NetherId = state.NetherId,
             MapId = state.MapId,
-            // The live Battle payload intentionally reports m_nether_map_floor_id=0.  Only
-            // Battle may recover that master ID, and only from one exact cached
-            // (floor_level, floor_index) coordinate.  Play/Wait/Sleep never receive this
-            // fallback and therefore cannot silently drift to a different map node.
+            // Live Battle and its result-page Play transition intentionally report
+            // m_nether_map_floor_id=0.  The Play case is admitted only with fresh result
+            // characters; both cases require one exact cached coordinate.  Ordinary
+            // Play/Wait/Sleep snapshots cannot silently drift to another map node.
             CurrentFloorId = current[0].FloorId,
             CurrentNodeId = current[0].NodeId,
             FloorLevel = state.FloorLevel,

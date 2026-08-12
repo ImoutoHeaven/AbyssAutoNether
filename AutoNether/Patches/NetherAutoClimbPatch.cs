@@ -190,6 +190,30 @@ internal static class NetherAutoClimbStartStatusLifecyclePatch
 }
 
 /// <summary>
+/// Current scene entry bypasses this wrapper, but later native refreshes may call it directly.
+/// Capture its returned UniTask so both entry paths share the same recovered-code owner.
+/// </summary>
+[HarmonyPatch]
+internal static class NetherAutoClimbStartStatusTaskPatch
+{
+    private static MethodBase? TargetMethod() =>
+        NetherRuntimeBridge.GetStartStatusTaskPatchTarget();
+
+    [HarmonyPostfix]
+    private static void Postfix(object __instance, ref UniTask __result)
+    {
+        try
+        {
+            NetherRuntimeBridge.ObserveStartStatusTask(__instance, __result);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("[F12][AutoNether] start-status wrapper task observation failed: " + ex);
+        }
+    }
+}
+
+/// <summary>
 /// Captures the exact result-view initialization task that installs the visible Next button.
 /// The main-thread coordinator waits for this task, invokes the game's generated Next callback
 /// once, and then waits for a strictly newer FloorSelection owner before resuming automation.

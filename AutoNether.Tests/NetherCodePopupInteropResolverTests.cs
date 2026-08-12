@@ -166,6 +166,17 @@ public class NetherCodePopupInteropResolverTests
             "Project.Nether.AbyssCodeSelectPopup.AbyssCodeSelectPopupController"
         );
         Type utility = packaged.RequireType("Project.Nether.NetherUtility");
+        const BindingFlags instanceFlags =
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        Assert.NotNull(
+            controller.GetProperty("_mIds", instanceFlags)
+                ?? (MemberInfo?)controller.GetField("_mIds", instanceFlags)
+        );
+        Assert.NotNull(
+            controller.GetProperty("_model", instanceFlags)
+                ?? (MemberInfo?)controller.GetField("_model", instanceFlags)
+        );
 
         Assert.True(
             NetherCodePopupInteropResolver.TryResolveGeneratedCallbackTarget(

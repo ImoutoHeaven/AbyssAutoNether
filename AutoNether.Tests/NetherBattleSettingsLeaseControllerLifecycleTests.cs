@@ -67,6 +67,25 @@ public class NetherBattleSettingsLeaseControllerLifecycleTests
     }
 
     [Fact]
+    public void ProductionControllerLifecycle_DropsNoOpForcedLeaseBeforeAccessor()
+    {
+        using var harness = new LeaseHarness(autoEnabled: true, speed: 3);
+        Assert.Equal(NetherNativeActionResultKind.Completed, harness.Lease.AcquireAndForce().Kind);
+        Assert.True(File.Exists(harness.LeaseFilePath));
+
+        NetherBattleSettingsLease recoveredLease = harness.CreateLeaseWithoutNative();
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(recoveredLease);
+
+        NetherNativeActionResult discovery = lifecycle.OnControllerInitialized();
+
+        Assert.Equal(NetherNativeActionResultKind.Completed, discovery.Kind);
+        Assert.Contains("no-op", discovery.Detail);
+        Assert.False(File.Exists(harness.LeaseFilePath));
+        Assert.False(lifecycle.BlocksRoute);
+        Assert.False(lifecycle.IsExactAccessorRegistered);
+    }
+
+    [Fact]
     public void ProductionControllerLifecycle_NoLeaseStaysRouteableBeforeBattleAccessor()
     {
         using var harness = new LeaseHarness(autoEnabled: false, speed: 1);

@@ -13,6 +13,18 @@ namespace AutoNether.Tests;
 
 public sealed class NetherLifecycleInteropBindingsTests
 {
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        while (current != null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, "AutoNether")))
+                return current.FullName;
+            current = current.Parent;
+        }
+        throw new DirectoryNotFoundException("repository root not found");
+    }
+
     [Fact]
     public void Packaged_battle_hud_uses_the_mandatory_token_free_settings_initialization_seam()
     {
@@ -168,6 +180,28 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
+    public void Patch_manager_registers_both_start_status_entry_paths()
+    {
+        string source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Patches",
+            "PatchManager.cs"
+        ));
+
+        Assert.Contains(
+            "CreateAndPatchAll(typeof(NetherAutoClimbStartStatusLifecyclePatch))",
+            source,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "CreateAndPatchAll(typeof(NetherAutoClimbStartStatusTaskPatch))",
+            source,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
     public void Packaged_floor_selection_exposes_the_actual_start_status_state_machine_seam()
     {
         using var packaged = PackagedProjectAssembly.Load();
@@ -200,9 +234,27 @@ public sealed class NetherLifecycleInteropBindingsTests
             builder.PropertyType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
             property => property.Name == "Task"
         );
+        PropertyInfo runnerPromise = Assert.Single(
+            builder.PropertyType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            property => property.Name == "runnerPromise"
+        );
+        PropertyInfo builderException = Assert.Single(
+            builder.PropertyType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            property => property.Name == "ex"
+        );
+        PropertyInfo taskSource = Assert.Single(
+            parentTask.PropertyType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            property => property.Name == "source"
+        );
 
         Assert.Equal(NetherLifecycleInteropBindings.StartStatusTask.TypeName, controller.PropertyType.FullName);
         Assert.Equal("Cysharp.Threading.Tasks.UniTask", parentTask.PropertyType.FullName);
+        Assert.Equal(
+            "Cysharp.Threading.Tasks.CompilerServices.IStateMachineRunnerPromise",
+            runnerPromise.PropertyType.FullName
+        );
+        Assert.Equal("Cysharp.Threading.Tasks.IUniTaskSource", taskSource.PropertyType.FullName);
+        Assert.Contains("Exception", builderException.PropertyType.FullName ?? string.Empty);
     }
 
     [Fact]
