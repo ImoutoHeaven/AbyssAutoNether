@@ -2500,6 +2500,45 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_continues_routing_after_category_skill_applies_erosion_relief()
+    {
+        NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
+            NetherSessionStatus.Play,
+            NetherFloorNodeType.Recovery,
+            floorId: 2,
+            gold: 10,
+            hp: 1000
+        ) with
+        {
+            ErosionPoint = 15,
+            CharacterHpHash = "character:1:1000",
+        };
+
+        RunOwnedFloorTransaction(
+            NetherFloorNodeType.Recovery,
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Recovery,
+                Options = new[] { new NetherEventOption(2, new[] { new NetherEffect(NetherEffectKind.Heal, 300) }) },
+            },
+            new NetherFloorEventPartMasterRow(1002, 1, 300, 0, 0, 0, 0, 0, 0, 0),
+            after,
+            NetherActionKind.SelectEventOption,
+            startHp: 1000,
+            assertNextRoute: true,
+            activeCodeErosion: new NetherActiveCodeErosionProjection
+            {
+                ErosionProjectionKnown = true,
+                CodeHash = "nether-codes:safe-category-threshold",
+                ErosionEffects = new[]
+                {
+                    new NetherCodeEffect(30000, NetherCodeEffectKind.ErosionAdditionDown, 5),
+                },
+            }
+        );
+    }
+
+    [Fact]
     public void Production_controller_reconciles_owned_treasure_with_exact_key_contract()
     {
         NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
@@ -3104,9 +3143,12 @@ public class NetherAutoClimbControllerEndToEndTests
         NetherSnapshot after,
         NetherActionKind expectedChild,
         int startHp = 500,
-        bool assertNextRoute = false
+        bool assertNextRoute = false,
+        NetherActiveCodeErosionProjection? activeCodeErosion = null
     )
     {
+        NetherActiveCodeErosionProjection codeProjection =
+            activeCodeErosion ?? ScriptedRuntimeBridge.KnownEmptyCodeProjection();
         NetherSnapshot routeStart = ScriptedRuntimeBridge.OwnedRouteSnapshot(
             NetherSessionStatus.Play,
             kind,
@@ -3132,7 +3174,8 @@ public class NetherAutoClimbControllerEndToEndTests
                 OwnerGeneration = 1,
                 Sequence = 1,
             },
-            RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
+            ActiveCodeErosion = codeProjection,
+            RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(codeProjection),
             InteractivePreEntryFactory = (snapshot, settings) =>
                 ScriptedRuntimeBridge.OwnedInteractivePreEntry(snapshot, settings, kind, eventPart),
         };
@@ -3167,12 +3210,6 @@ public class NetherAutoClimbControllerEndToEndTests
 
     private sealed class ScriptedRuntimeBridge : INetherRuntimeBridge, INetherOwnedPopupNativeStagePort
     {
-        private readonly NetherActiveCodeErosionProjection _knownCodes = new()
-        {
-            ErosionProjectionKnown = true,
-            CodeHash = "nether-codes:none",
-            ErosionEffects = Array.Empty<NetherCodeEffect>(),
-        };
         private bool _eventNativePending;
         private bool _battleClearAvailable;
         private bool _floorParentPending;
@@ -3258,6 +3295,8 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherSnapshot? OwnedPopupAfterSnapshot { get; set; }
         public NetherSnapshot? CodeReloadAfterSnapshot { get; set; }
         public NetherRuntimeRouteSafetyData? RouteSafetyOverride { get; set; }
+        public NetherActiveCodeErosionProjection ActiveCodeErosion { get; set; } =
+            KnownEmptyCodeProjection();
         public Func<NetherSnapshot, NetherAutoClimbSettings, NetherRuntimeInteractivePreEntryInputsResult>? InteractivePreEntryFactory { get; set; }
         public NetherRuntimeCodeCandidatesResult CodeCandidates { get; set; } = new(
             Array.Empty<NetherCodeCandidate>(),
@@ -3353,7 +3392,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
             },
             ActivePartyHp = new NetherActivePartyHpSafety(true, 1000, string.Empty),
-            ActiveCodeErosion = _knownCodes,
+            ActiveCodeErosion = ActiveCodeErosion,
         };
 
         public NetherRuntimeInteractivePreEntryInputsResult TryCaptureInteractivePreEntryInputs(
@@ -3822,7 +3861,7 @@ public class NetherAutoClimbControllerEndToEndTests
 
         public bool TryConsumeBattleClose() => false;
 
-        public NetherActiveCodeErosionProjection TryCaptureActiveCodeErosionProjection() => _knownCodes;
+        public NetherActiveCodeErosionProjection TryCaptureActiveCodeErosionProjection() => ActiveCodeErosion;
 
         public bool TryBeginContinueSceneHandoff(out long ownerGeneration)
         {
@@ -3979,19 +4018,23 @@ public class NetherAutoClimbControllerEndToEndTests
             MapHash = "interactive:" + status + ":" + floorId + ":" + gold,
         };
 
-        internal static NetherRuntimeRouteSafetyData InteractiveRouteSafety() => new()
+        internal static NetherRuntimeRouteSafetyData InteractiveRouteSafety(
+            NetherActiveCodeErosionProjection? activeCodeErosion = null
+        ) => new()
         {
             FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
             {
                 [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
             },
             ActivePartyHp = new NetherActivePartyHpSafety(true, 500, string.Empty),
-            ActiveCodeErosion = new NetherActiveCodeErosionProjection
-            {
-                ErosionProjectionKnown = true,
-                CodeHash = "nether-codes:none",
-                ErosionEffects = Array.Empty<NetherCodeEffect>(),
-            },
+            ActiveCodeErosion = activeCodeErosion ?? KnownEmptyCodeProjection(),
+        };
+
+        internal static NetherActiveCodeErosionProjection KnownEmptyCodeProjection() => new()
+        {
+            ErosionProjectionKnown = true,
+            CodeHash = "nether-codes:none",
+            ErosionEffects = Array.Empty<NetherCodeEffect>(),
         };
 
         internal static NetherRuntimeInteractivePreEntryInputsResult InteractivePreEntry(

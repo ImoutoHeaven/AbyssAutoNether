@@ -95,6 +95,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                         floor,
                         settings,
                         interactivePreEntry,
+                        runtime.ActiveCodeErosion,
                         out NetherFloorSafetyInput interactiveInput,
                         out NetherInteractiveWorstCaseProjection interactiveProjection
                     ))
@@ -301,6 +302,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
         NetherFloorNode floor,
         NetherAutoClimbSettings settings,
         NetherRuntimeInteractivePreEntryInputsResult? interactivePreEntry,
+        NetherActiveCodeErosionProjection? activeCodeErosion,
         out NetherFloorSafetyInput safetyInput,
         out NetherInteractiveWorstCaseProjection worstCaseProjection
     )
@@ -359,6 +361,24 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             return false;
         }
 
+        IReadOnlyList<NetherErosionModifier> erosionModifiers = Array.Empty<NetherErosionModifier>();
+        if (floor.NodeType is NetherFloorNodeType.Event
+            or NetherFloorNodeType.Recovery
+            or NetherFloorNodeType.Treasure)
+        {
+            if (activeCodeErosion == null
+                || !activeCodeErosion.ErosionProjectionKnown
+                || !NetherBattleRouteProjectionBuilder.TryMapModifiers(
+                    activeCodeErosion.ErosionEffects,
+                    out IReadOnlyList<NetherErosionModifier>? mappedModifiers,
+                    out _
+                ))
+            {
+                return false;
+            }
+            erosionModifiers = mappedModifiers!;
+        }
+
         safetyInput = new NetherFloorSafetyInput(
             CurrentErosion: snapshot.ErosionPoint,
             // Selecting an interactive floor has no generic erosion cost. Exact event-option
@@ -376,7 +396,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             AllInputsKnown: true
         )
         {
-            ErosionModifiers = Array.Empty<NetherErosionModifier>(),
+            ErosionModifiers = erosionModifiers,
         };
         return true;
     }

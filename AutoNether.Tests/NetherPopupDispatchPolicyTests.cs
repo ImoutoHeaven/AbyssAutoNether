@@ -69,6 +69,35 @@ public class NetherPopupDispatchPolicyTests
     }
 
     [Fact]
+    public void Recovery_projection_applies_active_category_erosion_relief()
+    {
+        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
+            Snapshot(),
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Recovery,
+                Options = [new NetherEventOption(2, [new NetherEffect(NetherEffectKind.Heal, 300)])],
+            },
+            Settings(),
+            new NetherActiveCodeErosionProjection
+            {
+                ErosionProjectionKnown = true,
+                CodeHash = "nether-codes:safe-category-threshold",
+                ErosionEffects =
+                [
+                    new NetherCodeEffect(30000, NetherCodeEffectKind.ErosionAdditionDown, 5),
+                ],
+            }
+        );
+
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, decision.Kind);
+        Assert.True(decision.HasEffectProjection);
+        Assert.Equal(15, decision.ProjectedErosion);
+        Assert.True(decision.Action.HasExpectedErosionDelta);
+        Assert.Equal(-5, decision.Action.ExpectedErosionDelta);
+    }
+
+    [Fact]
     public void Shop_off_leaves_through_native_close_callback()
     {
         NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(

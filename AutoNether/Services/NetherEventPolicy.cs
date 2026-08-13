@@ -21,6 +21,7 @@ internal sealed record NetherEventDecision
     public int OptionNumber { get; init; }
     public long ReplacementCodeId { get; init; }
     public int ProjectedErosion { get; init; }
+    public int ExpectedErosionDelta { get; init; }
     public int HpDelta { get; init; }
     /// <summary>
     /// Immutable authoritative effect payload for the selected native option.  Reconcile must
@@ -81,18 +82,39 @@ internal sealed class NetherEventPolicy
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings
-    ) => Decide(snapshot, options, settings, isRecovery: false);
+    ) => DecideEvent(snapshot, options, settings, Array.Empty<NetherErosionModifier>());
+
+    public NetherEventDecision DecideEvent(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers
+    ) => Decide(snapshot, options, settings, modifiers, isRecovery: false);
 
     public NetherEventDecision DecideRecovery(
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings
-    ) => Decide(snapshot, options, settings, isRecovery: true);
+    ) => DecideRecovery(snapshot, options, settings, Array.Empty<NetherErosionModifier>());
+
+    public NetherEventDecision DecideRecovery(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers
+    ) => Decide(snapshot, options, settings, modifiers, isRecovery: true);
 
     public NetherEventDecision DecideTreasure(
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings
+    ) => DecideTreasure(snapshot, options, settings, Array.Empty<NetherErosionModifier>());
+
+    public NetherEventDecision DecideTreasure(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers
     )
     {
         ValidateInputs(snapshot, options, settings);
@@ -102,7 +124,7 @@ internal sealed class NetherEventPolicy
         var candidates = new List<EventCandidate>();
         foreach (NetherEventOption option in options)
         {
-            if (!TryValidateOption(option, snapshot, settings, out EventCandidate candidate, out _))
+            if (!TryValidateOption(option, snapshot, settings, modifiers, out EventCandidate candidate, out _))
                 continue;
             int exactKeyCosts = option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount == 1);
             bool hasOnlySafePayments = option.Effects.All(effect => effect.Kind is not NetherEffectKind.Damage and not NetherEffectKind.Erosion);
@@ -169,6 +191,7 @@ internal sealed class NetherEventPolicy
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
         bool isRecovery
     )
     {
@@ -178,7 +201,14 @@ internal sealed class NetherEventPolicy
         string firstDetail = "no-safe-event-option";
         foreach (NetherEventOption option in options)
         {
-            if (!TryValidateOption(option, snapshot, settings, out EventCandidate candidate, out NetherEventDecision rejection))
+            if (!TryValidateOption(
+                    option,
+                    snapshot,
+                    settings,
+                    modifiers,
+                    out EventCandidate candidate,
+                    out NetherEventDecision rejection
+                ))
             {
                 if (firstRejection == NetherPauseReason.NoSafeRoute)
                 {
@@ -217,6 +247,7 @@ internal sealed class NetherEventPolicy
         NetherEventOption option,
         NetherSnapshot snapshot,
         NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
         out EventCandidate candidate,
         out NetherEventDecision rejection
     )
@@ -279,6 +310,7 @@ internal sealed class NetherEventPolicy
         NetherErosionProjection erosion = _erosionPolicy.ProjectEffects(
             snapshot.ErosionPoint,
             option.Effects,
+            modifiers,
             settings.SoftErosionLimit,
             isMandatoryBoss: false
         );
@@ -316,6 +348,7 @@ internal sealed class NetherEventPolicy
         OptionNumber = candidate.Option.OptionNumber,
         ReplacementCodeId = candidate.ReplacementCodeId,
         ProjectedErosion = candidate.ProjectedErosion,
+        ExpectedErosionDelta = candidate.ErosionDelta,
         HpDelta = candidate.HpDelta,
         ExpectedEffects = candidate.Option.Effects.ToArray(),
         StartsBattleAfterSelection = candidate.StartsBattle,

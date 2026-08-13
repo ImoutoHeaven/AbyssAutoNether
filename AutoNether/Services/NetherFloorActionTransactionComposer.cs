@@ -73,6 +73,10 @@ internal static class NetherFloorActionTransactionComposer
             .Where(value => value.ActionKind == NetherActionKind.SelectEventOption)
             .SelectMany(value => value.ExpectedEffects)
             .ToArray();
+        NetherFloorPopupStage? erosionStage = stages.LastOrDefault(value =>
+            value.ActionKind == NetherActionKind.SelectEventOption
+            && value.HasExpectedErosionDelta
+        );
 
         composed = settlement with
         {
@@ -85,6 +89,8 @@ internal static class NetherFloorActionTransactionComposer
             OptionNumber = stage.OptionNumber,
             TargetCharacterId = stage.TargetCharacterId,
             ExpectedEffects = retainedEffects,
+            HasExpectedErosionDelta = erosionStage != null,
+            ExpectedErosionDelta = erosionStage?.ExpectedErosionDelta ?? 0,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
             GoldCost = stage.GoldCost,
@@ -312,7 +318,11 @@ internal static class NetherFloorActionTransactionComposer
             settlement.ReplaceCodeId,
             DecisionEpoch: 0,
             TargetCharacterId: settlement.TargetCharacterId
-        ));
+        )
+        {
+            HasExpectedErosionDelta = settlement.HasExpectedErosionDelta,
+            ExpectedErosionDelta = settlement.ExpectedErosionDelta,
+        });
         return IsWellFormedStage(stages[0]);
     }
 
@@ -353,7 +363,11 @@ internal static class NetherFloorActionTransactionComposer
             child.ReplaceCodeId,
             popup.DecisionEpoch,
             popup.TargetCharacterId
-        );
+        )
+        {
+            HasExpectedErosionDelta = child.HasExpectedErosionDelta,
+            ExpectedErosionDelta = child.ExpectedErosionDelta,
+        };
         return IsWellFormedStage(stage);
     }
 
@@ -371,6 +385,8 @@ internal static class NetherFloorActionTransactionComposer
             OptionNumber = stage.OptionNumber,
             TargetCharacterId = stage.TargetCharacterId,
             ExpectedEffects = stage.ExpectedEffects,
+            HasExpectedErosionDelta = stage.HasExpectedErosionDelta,
+            ExpectedErosionDelta = stage.ExpectedErosionDelta,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
             GoldCost = stage.GoldCost,

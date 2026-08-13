@@ -1027,11 +1027,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     }
 
     /// <summary>
-    /// Reads the live possession store and complete MNetherCodes cache for battle erosion only.
+    /// Reads the live possession store plus complete code and category-skill master caches.
     /// This path never uses the Safe/Risk code-ID policy mapping: IDs 30024/40024 are projected
-    /// solely from their exact master effect type and parameters.  It is read-only and not yet
-    /// a Controller action; a failed extraction deliberately leaves the future route gate
-    /// unknown rather than producing a zero modifier.
+    /// solely from their exact master effect type and parameters. It is read-only; a failed
+    /// extraction deliberately leaves popup projection and route safety unknown rather than
+    /// producing a zero modifier.
     /// </summary>
     public NetherActiveCodeErosionProjection TryCaptureActiveCodeErosionProjection()
     {
@@ -1041,12 +1041,17 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             MasterDataStore? masterDataStore = Engine.Get<MasterDataStore>();
             NetherDataStore? dataStore = userData?.NetherDataStore;
             MNetherCodes[]? masterRows = masterDataStore?.GetCache<MNetherCodes>();
-            if (dataStore == null)
+            MNetherCodeCategorySkills[]? categorySkillRows =
+                masterDataStore?.GetCache<MNetherCodeCategorySkills>();
+            NetherData? netherData = dataStore?.NetherData;
+            if (dataStore == null || netherData == null)
                 return NetherActiveCodeErosionProjectionMapper.Unknown("missing-nether-code-data-store");
 
             return ActiveCodeErosionExtractor.Extract(
                 dataStore.GetPossessionNetherCodeDataEnumerable(),
-                masterRows
+                masterRows,
+                categorySkillRows,
+                netherData.MNetherId
             );
         }
         catch (Exception ex)

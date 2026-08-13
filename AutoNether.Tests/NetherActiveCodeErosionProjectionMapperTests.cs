@@ -131,6 +131,48 @@ public class NetherActiveCodeErosionProjectionMapperTests
         Assert.Equal("nether-codes:none", projection.CodeHash);
     }
 
+    [Fact]
+    public void ActiveCategorySkill_ProjectsItsErosionModifierAtTheExactCodeThreshold()
+    {
+        NetherPossessionCodeErosionInput[] possessions = Enumerable.Range(1, 5)
+            .Select(id => Possession(id))
+            .ToArray();
+        NetherCodeErosionMasterInput[] masters = Enumerable.Range(1, 5)
+            .Select(id => CategorizedMaster(id, category: 3))
+            .ToArray();
+
+        NetherActiveCodeErosionProjection projection = new NetherActiveCodeErosionProjectionMapper().Map(
+            possessions,
+            masters,
+            new[] { CategorySkill(30000, counter: 5, category: 3, effectType: 7, parameter1: 5) },
+            activeNetherId: 1
+        );
+
+        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
+        NetherCodeEffect effect = Assert.Single(projection.ErosionEffects);
+        Assert.Equal(30000, effect.CodeId);
+        Assert.Equal(NetherCodeEffectKind.ErosionAdditionDown, effect.EffectKind);
+        Assert.Equal(5, effect.Amount);
+        Assert.True(Assert.Single(projection.CategorySkillEntries).IsActive);
+        Assert.Contains("category-skills:30000:1:5:3:7:5:0:0:1", projection.CodeHash);
+    }
+
+    [Fact]
+    public void CategorySkillBelowThreshold_IsFingerprintKnownButDoesNotModifyErosion()
+    {
+        NetherActiveCodeErosionProjection projection = new NetherActiveCodeErosionProjectionMapper().Map(
+            Enumerable.Range(1, 4).Select(id => Possession(id)).ToArray(),
+            Enumerable.Range(1, 4).Select(id => CategorizedMaster(id, category: 3)).ToArray(),
+            new[] { CategorySkill(30000, counter: 5, category: 3, effectType: 7, parameter1: 5) },
+            activeNetherId: 1
+        );
+
+        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
+        Assert.Empty(projection.ErosionEffects);
+        Assert.False(Assert.Single(projection.CategorySkillEntries).IsActive);
+        Assert.Contains("category-skills:30000:1:5:3:7:5:0:0:0", projection.CodeHash);
+    }
+
     private static NetherActiveCodeErosionProjection Map(
         IReadOnlyList<NetherPossessionCodeErosionInput> possessions,
         IReadOnlyList<NetherCodeErosionMasterInput> masters
@@ -146,4 +188,19 @@ public class NetherActiveCodeErosionProjectionMapperTests
         long parameter2,
         long parameter3
     ) => new(codeId, effectType, parameter1, parameter2, parameter3);
+
+    private static NetherCodeErosionMasterInput CategorizedMaster(long codeId, int category) =>
+        new(codeId, 1, 0, 0, 0)
+        {
+            NetherId = 1,
+            Category = category,
+        };
+
+    private static NetherCodeCategoryErosionMasterInput CategorySkill(
+        long skillId,
+        int counter,
+        int category,
+        int effectType,
+        long parameter1
+    ) => new(skillId, 1, counter, category, effectType, parameter1, 0, 0);
 }

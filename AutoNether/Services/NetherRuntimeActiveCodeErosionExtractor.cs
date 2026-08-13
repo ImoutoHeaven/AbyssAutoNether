@@ -9,8 +9,8 @@ namespace AutoNether.Services;
 
 /// <summary>
 /// Reflection-only adapter for the exact live code path: possession <c>NetherCodeData</c>
-/// supplies <c>MNetherCodeId</c>/<c>Amount</c>, while <c>MNetherCodes</c> supplies
-/// <c>id</c>, <c>effect_type</c>, and all three <c>effect_parameter_*</c> fields.
+/// supplies <c>MNetherCodeId</c>/<c>Amount</c>, while <c>MNetherCodes</c> and
+/// <c>MNetherCodeCategorySkills</c> supply the exact category thresholds and effect fields.
 /// </summary>
 internal sealed class NetherRuntimeActiveCodeErosionExtractor
 {
@@ -20,6 +20,28 @@ internal sealed class NetherRuntimeActiveCodeErosionExtractor
     private readonly NetherActiveCodeErosionProjectionMapper _mapper = new();
 
     public NetherActiveCodeErosionProjection Extract(object? rawPossessionCodes, object? rawMasterRows)
+        => ExtractCore(rawPossessionCodes, rawMasterRows, null, 0, includeCategorySkills: false);
+
+    public NetherActiveCodeErosionProjection Extract(
+        object? rawPossessionCodes,
+        object? rawMasterRows,
+        object? rawCategorySkillRows,
+        long activeNetherId
+    ) => ExtractCore(
+        rawPossessionCodes,
+        rawMasterRows,
+        rawCategorySkillRows,
+        activeNetherId,
+        includeCategorySkills: true
+    );
+
+    private NetherActiveCodeErosionProjection ExtractCore(
+        object? rawPossessionCodes,
+        object? rawMasterRows,
+        object? rawCategorySkillRows,
+        long activeNetherId,
+        bool includeCategorySkills
+    )
     {
         if (rawPossessionCodes == null)
             return NetherActiveCodeErosionProjectionMapper.Unknown("missing-possession-nether-codes");
@@ -61,8 +83,63 @@ internal sealed class NetherRuntimeActiveCodeErosionExtractor
             {
                 return NetherActiveCodeErosionProjectionMapper.Unknown("missing-m-nether-code-effect-member");
             }
+            long netherId = 0;
+            int category = 0;
+            if (includeCategorySkills
+                && (!TryReadInt64(rawMaster, "m_nether_id", out netherId)
+                    || !TryReadInt32(rawMaster, "category", out category)))
+            {
+                return NetherActiveCodeErosionProjectionMapper.Unknown("missing-m-nether-code-category-member");
+            }
             masters.Add(new NetherCodeErosionMasterInput(
                 codeId,
+                effectType,
+                parameter1,
+                parameter2,
+                parameter3
+            )
+            {
+                NetherId = netherId,
+                Category = category,
+            });
+        }
+
+        if (!includeCategorySkills)
+            return _mapper.Map(possessions, masters);
+        if (rawCategorySkillRows == null)
+            return _mapper.Map(possessions, masters, null, activeNetherId);
+        if (!NetherRuntimeEnumerableReader.TryRead(
+                rawCategorySkillRows,
+                out List<object> rawCategorySkills,
+                out string categorySkillError
+            ))
+        {
+            return NetherActiveCodeErosionProjectionMapper.Unknown(
+                "invalid-m-nether-code-category-skill-collection:" + categorySkillError
+            );
+        }
+
+        var categorySkills = new List<NetherCodeCategoryErosionMasterInput>(rawCategorySkills.Count);
+        foreach (object rawSkill in rawCategorySkills)
+        {
+            if (!TryReadInt64(rawSkill, "id", out long skillId)
+                || !TryReadInt64(rawSkill, "m_nether_id", out long netherId)
+                || !TryReadInt32(rawSkill, "counter", out int counter)
+                || !TryReadInt32(rawSkill, "category", out int category)
+                || !TryReadInt32(rawSkill, "effect_type", out int effectType)
+                || !TryReadInt64(rawSkill, "effect_parameter_1", out long parameter1)
+                || !TryReadInt64(rawSkill, "effect_parameter_2", out long parameter2)
+                || !TryReadInt64(rawSkill, "effect_parameter_3", out long parameter3))
+            {
+                return NetherActiveCodeErosionProjectionMapper.Unknown(
+                    "missing-m-nether-code-category-skill-member"
+                );
+            }
+            categorySkills.Add(new NetherCodeCategoryErosionMasterInput(
+                skillId,
+                netherId,
+                counter,
+                category,
                 effectType,
                 parameter1,
                 parameter2,
@@ -70,7 +147,7 @@ internal sealed class NetherRuntimeActiveCodeErosionExtractor
             ));
         }
 
-        return _mapper.Map(possessions, masters);
+        return _mapper.Map(possessions, masters, categorySkills, activeNetherId);
     }
 
     private static bool TryReadMember(object target, string name, out object? value)

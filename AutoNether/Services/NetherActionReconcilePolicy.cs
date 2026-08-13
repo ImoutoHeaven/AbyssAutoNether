@@ -180,6 +180,8 @@ internal static class NetherActionReconcilePolicy
             OptionNumber = stage.OptionNumber,
             TargetCharacterId = stage.TargetCharacterId,
             ExpectedEffects = stage.ExpectedEffects,
+            HasExpectedErosionDelta = stage.HasExpectedErosionDelta,
+            ExpectedErosionDelta = stage.ExpectedErosionDelta,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
             GoldCost = stage.GoldCost,
@@ -246,12 +248,14 @@ internal static class NetherActionReconcilePolicy
 
         try
         {
-            int erosionDelta = action.ExpectedEffects.Sum(effect => effect.Kind switch
-            {
-                NetherEffectKind.Erosion => effect.Amount,
-                NetherEffectKind.ErosionHeal => -effect.Amount,
-                _ => 0,
-            });
+            int erosionDelta = action.HasExpectedErosionDelta
+                ? action.ExpectedErosionDelta
+                : action.ExpectedEffects.Sum(effect => effect.Kind switch
+                {
+                    NetherEffectKind.Erosion => effect.Amount,
+                    NetherEffectKind.ErosionHeal => -effect.Amount,
+                    _ => 0,
+                });
             int goldDelta = action.ExpectedEffects.Sum(effect => effect.Kind switch
             {
                 NetherEffectKind.NetherGoldUsed => -effect.Amount,

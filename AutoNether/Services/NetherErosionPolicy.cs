@@ -91,12 +91,28 @@ internal sealed class NetherErosionPolicy
         IReadOnlyList<NetherEffect> effects,
         int softLimit,
         bool isMandatoryBoss
+    ) => ProjectEffects(
+        currentErosion,
+        effects,
+        Array.Empty<NetherErosionModifier>(),
+        softLimit,
+        isMandatoryBoss
+    );
+
+    public NetherErosionProjection ProjectEffects(
+        int currentErosion,
+        IReadOnlyList<NetherEffect> effects,
+        IReadOnlyList<NetherErosionModifier> modifiers,
+        int softLimit,
+        bool isMandatoryBoss
     )
     {
         if (!IsValidLimit(softLimit))
             return Pause(currentErosion, NetherPauseReason.InvalidConfiguration, "invalid-soft-limit");
         if (effects == null)
             throw new ArgumentNullException(nameof(effects));
+        if (modifiers == null)
+            throw new ArgumentNullException(nameof(modifiers));
         if (effects.Count > 4)
             return Pause(currentErosion, NetherPauseReason.UnknownEffect, "too-many-event-effects");
 
@@ -118,7 +134,7 @@ internal sealed class NetherErosionPolicy
                     _ => throw new UnknownEffectException(),
                 };
             }
-            return Evaluate(currentErosion, delta, softLimit, isMandatoryBoss);
+            return ProjectBattle(currentErosion, delta, modifiers, softLimit, isMandatoryBoss);
         }
         catch (UnknownEffectException)
         {

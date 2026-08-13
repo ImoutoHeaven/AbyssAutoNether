@@ -575,7 +575,12 @@ internal sealed record NetherFloorPopupStage(
     long ReplaceCodeId,
     long DecisionEpoch = 0,
     long TargetCharacterId = 0
-);
+)
+{
+    /// <summary>True when erosion includes active code/category modifiers, not only raw effects.</summary>
+    public bool HasExpectedErosionDelta { get; init; }
+    public int ExpectedErosionDelta { get; init; }
+}
 
 internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
 {
@@ -591,6 +596,9 @@ internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
     public long TargetCharacterId { get; init; }
     /// <summary>Only fully mapped effects may be used to prove an event postcondition.</summary>
     public IReadOnlyList<NetherEffect> ExpectedEffects { get; init; } = Array.Empty<NetherEffect>();
+    /// <summary>Exact projected erosion delta after active code/category modifiers.</summary>
+    public bool HasExpectedErosionDelta { get; init; }
+    public int ExpectedErosionDelta { get; init; }
     public long ContentId { get; init; }
     public int ContentAmount { get; init; }
     public int GoldCost { get; init; }

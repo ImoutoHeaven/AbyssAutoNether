@@ -742,7 +742,12 @@ internal static class NetherAutoClimbController
         }
 
         NetherSnapshot snapshot = captured.Snapshot!;
-        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(snapshot, popup, settings);
+        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
+            snapshot,
+            popup,
+            settings,
+            _bridge.TryCaptureActiveCodeErosionProjection()
+        );
         if (decision.Kind == NetherPopupDispatchKind.Code)
             return DispatchOwnedCodePopup(ownerParent, settlement, popup, snapshot, settings);
         if (decision.Kind == NetherPopupDispatchKind.AwaitNativeFlow)
@@ -1659,7 +1664,12 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("floorId", snapshot.CurrentFloorId.ToString())
         );
 
-        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(snapshot, popup, settings);
+        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
+            snapshot,
+            popup,
+            settings,
+            _bridge.TryCaptureActiveCodeErosionProjection()
+        );
         switch (decision.Kind)
         {
             case NetherPopupDispatchKind.Code:

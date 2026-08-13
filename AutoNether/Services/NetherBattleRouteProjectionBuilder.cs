@@ -193,7 +193,7 @@ internal sealed class NetherBattleRouteProjectionBuilder
         }
     }
 
-    private static bool TryMapModifiers(
+    internal static bool TryMapModifiers(
         IReadOnlyList<NetherCodeEffect>? effects,
         out IReadOnlyList<NetherErosionModifier>? modifiers,
         out string error

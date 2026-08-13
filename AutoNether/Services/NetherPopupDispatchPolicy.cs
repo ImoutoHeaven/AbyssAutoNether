@@ -92,6 +92,23 @@ internal static class NetherPopupDispatchPolicy
         NetherSnapshot snapshot,
         NetherRuntimePopupContext popup,
         NetherAutoClimbSettings settings
+    ) => Decide(
+        snapshot,
+        popup,
+        settings,
+        new NetherActiveCodeErosionProjection
+        {
+            ErosionProjectionKnown = true,
+            CodeHash = "nether-codes:none",
+            ErosionEffects = Array.Empty<NetherCodeEffect>(),
+        }
+    );
+
+    public static NetherPopupDispatchDecision Decide(
+        NetherSnapshot snapshot,
+        NetherRuntimePopupContext popup,
+        NetherAutoClimbSettings settings,
+        NetherActiveCodeErosionProjection activeCodeErosion
     )
     {
         if (snapshot == null)
@@ -101,15 +118,38 @@ internal static class NetherPopupDispatchPolicy
         if (settings == null)
             throw new ArgumentNullException(nameof(settings));
 
+        IReadOnlyList<NetherErosionModifier> modifiers = Array.Empty<NetherErosionModifier>();
+        if (popup.Kind is NetherRuntimePopupKind.Event
+            or NetherRuntimePopupKind.Recovery
+            or NetherRuntimePopupKind.Treasure)
+        {
+            if (activeCodeErosion == null || !activeCodeErosion.ErosionProjectionKnown)
+            {
+                return Pause(
+                    NetherPauseReason.UnknownEffect,
+                    "active-code-erosion:" + (activeCodeErosion?.Detail ?? "missing")
+                );
+            }
+            if (!NetherBattleRouteProjectionBuilder.TryMapModifiers(
+                    activeCodeErosion.ErosionEffects,
+                    out IReadOnlyList<NetherErosionModifier>? mapped,
+                    out string modifierError
+                ))
+            {
+                return Pause(NetherPauseReason.UnknownEffect, "active-code-erosion:" + modifierError);
+            }
+            modifiers = mapped!;
+        }
+
         return popup.Kind switch
         {
             NetherRuntimePopupKind.CodeOffer => new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.Code },
             NetherRuntimePopupKind.CodeTransform => FromCodeTransform(snapshot),
             NetherRuntimePopupKind.Event when popup.RawFloorType == (int)NetherFloorNodeType.Event =>
-                FromEventDecision(EventPolicy.DecideEvent(snapshot, popup.Options, settings), popup.TargetCharacterId),
+                FromEventDecision(EventPolicy.DecideEvent(snapshot, popup.Options, settings, modifiers), popup.TargetCharacterId),
             NetherRuntimePopupKind.Event => Pause(NetherPauseReason.UnknownFloor, "event-popup-raw-type-mismatch:" + popup.RawFloorType),
-            NetherRuntimePopupKind.Recovery => FromEventDecision(EventPolicy.DecideRecovery(snapshot, popup.Options, settings), 0),
-            NetherRuntimePopupKind.Treasure => FromEventDecision(EventPolicy.DecideTreasure(snapshot, popup.Options, settings), 0),
+            NetherRuntimePopupKind.Recovery => FromEventDecision(EventPolicy.DecideRecovery(snapshot, popup.Options, settings, modifiers), 0),
+            NetherRuntimePopupKind.Treasure => FromEventDecision(EventPolicy.DecideTreasure(snapshot, popup.Options, settings, modifiers), 0),
             NetherRuntimePopupKind.Shop => FromShopDecision(EventPolicy.DecideShop(snapshot, popup.ShopContents, settings)),
             NetherRuntimePopupKind.Continue or NetherRuntimePopupKind.ReturnItems =>
                 new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.AwaitNativeFlow },
@@ -150,6 +190,8 @@ internal static class NetherPopupDispatchPolicy
                 CodeId = decision.ReplacementCodeId,
                 TargetCharacterId = targetCharacterId,
                 ExpectedEffects = decision.ExpectedEffects,
+                HasExpectedErosionDelta = true,
+                ExpectedErosionDelta = decision.ExpectedErosionDelta,
             },
             HasEffectProjection = true,
             ProjectedErosion = decision.ProjectedErosion,

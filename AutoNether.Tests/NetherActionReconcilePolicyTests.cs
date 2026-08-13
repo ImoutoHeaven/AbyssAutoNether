@@ -254,6 +254,40 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
+    public void Composed_recovery_uses_the_projected_category_skill_erosion_delta()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            ErosionPoint = 20,
+            Characters = new[] { new NetherCharacterState(1, 1000) },
+            CharacterHpHash = "1:1000:1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            ErosionPoint = 15,
+            Characters = before.Characters,
+            CharacterHpHash = before.CharacterHpHash,
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Recovery,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 2,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.Heal, 300) },
+            HasExpectedErosionDelta = true,
+            ExpectedErosionDelta = -5,
+        };
+
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(
+            action,
+            before,
+            after with { ErosionPoint = 20 }
+        ));
+    }
+
+    [Fact]
     public void Standalone_full_hp_heal_without_a_parent_postcondition_is_not_treated_as_applied()
     {
         NetherSnapshot snapshot = Snapshot() with
