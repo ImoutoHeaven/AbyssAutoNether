@@ -7,6 +7,7 @@ public class NetherContinueSceneTransitionEvidenceTests
 {
     private const string FloorSelectionType =
         "Project.Nether.FloorSelection.SubViewController";
+    private const string SceneRegistrationSource = "subscene-initialize:scene-member";
 
     [Fact]
     public void Exact_new_owner_after_owned_teardown_settles_once()
@@ -19,11 +20,17 @@ public class NetherContinueSceneTransitionEvidenceTests
         Assert.True(evidence.TrySettle(
             currentGeneration: 11,
             controllerType: FloorSelectionType,
-            expectedControllerType: FloorSelectionType
+            expectedControllerType: FloorSelectionType,
+            registrationSource: SceneRegistrationSource
         ));
         Assert.True(evidence.FloorOwnerTerminated);
         Assert.True(evidence.IsSettledBySceneTransition);
-        Assert.False(evidence.TrySettle(12, FloorSelectionType, FloorSelectionType));
+        Assert.False(evidence.TrySettle(
+            12,
+            FloorSelectionType,
+            FloorSelectionType,
+            SceneRegistrationSource
+        ));
     }
 
     [Fact]
@@ -39,8 +46,34 @@ public class NetherContinueSceneTransitionEvidenceTests
         Assert.True(evidence.TrySettle(
             currentGeneration: 11,
             controllerType: FloorSelectionType,
-            expectedControllerType: FloorSelectionType
+            expectedControllerType: FloorSelectionType,
+            registrationSource: SceneRegistrationSource
         ));
+    }
+
+    [Fact]
+    public void Canceled_start_status_registration_cannot_settle_before_scene_lifecycle_registration()
+    {
+        var evidence = new NetherContinueSceneTransitionEvidence();
+        Assert.True(evidence.Begin(ownerGeneration: 4));
+        evidence.ObserveNativeParentCompleted();
+        evidence.ObserveFloorOwnerTerminated();
+
+        Assert.False(evidence.TrySettle(
+            currentGeneration: 5,
+            controllerType: FloorSelectionType,
+            expectedControllerType: FloorSelectionType,
+            registrationSource: "start-status-state-machine-enter"
+        ));
+        Assert.False(evidence.IsSettledBySceneTransition);
+
+        Assert.True(evidence.TrySettle(
+            currentGeneration: 6,
+            controllerType: FloorSelectionType,
+            expectedControllerType: FloorSelectionType,
+            registrationSource: "subscene-initialize:scene-member"
+        ));
+        Assert.True(evidence.IsSettledBySceneTransition);
     }
 
     [Theory]
@@ -63,7 +96,8 @@ public class NetherContinueSceneTransitionEvidenceTests
         Assert.False(evidence.TrySettle(
             currentGeneration,
             controllerType,
-            FloorSelectionType
+            FloorSelectionType,
+            SceneRegistrationSource
         ));
         Assert.False(evidence.IsSettledBySceneTransition);
     }
@@ -74,7 +108,12 @@ public class NetherContinueSceneTransitionEvidenceTests
         var evidence = new NetherContinueSceneTransitionEvidence();
         Assert.True(evidence.Begin(ownerGeneration: 10));
         evidence.ObserveFloorOwnerTerminated();
-        Assert.True(evidence.TrySettle(11, FloorSelectionType, FloorSelectionType));
+        Assert.True(evidence.TrySettle(
+            11,
+            FloorSelectionType,
+            FloorSelectionType,
+            SceneRegistrationSource
+        ));
 
         evidence.Reset();
 

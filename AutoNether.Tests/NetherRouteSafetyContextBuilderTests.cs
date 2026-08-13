@@ -89,6 +89,46 @@ public class NetherRouteSafetyContextBuilderTests
     }
 
     [Fact]
+    public void Zero_erosion_reduction_does_not_erase_the_only_terminal_path()
+    {
+        NetherErosionModifier[] reduction =
+        [
+            new(NetherErosionOperation.Addition, amount: 5, isIncrease: false),
+        ];
+        NetherRouteSafetyFloorInput[] floors =
+        [
+            Floor(1, 51, NetherFloorNodeType.Recovery, currentErosion: 0),
+            Floor(
+                2,
+                52,
+                NetherFloorNodeType.Event,
+                currentErosion: 0,
+                modifiers: reduction,
+                previous: new long[] { 1 }
+            ),
+            Floor(
+                3,
+                60,
+                NetherFloorNodeType.Boss,
+                currentErosion: 0,
+                minimum: 5,
+                maximum: 5,
+                kind: NetherFloorSafetyKind.NecessaryTerminal,
+                modifiers: reduction,
+                previous: new long[] { 2 }
+            ),
+        ];
+
+        NetherRouteSafetyContext context = Build(floors, terminals: new HashSet<long> { 3 });
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(Snapshot(1, 0, floors), context);
+
+        Assert.True(context.IsKnown(2));
+        Assert.True(context.IsHardSafe(2));
+        Assert.Equal(0, context.MinimumWorstCaseErosionToTerminal[2]);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.SelectedNode).FloorId);
+    }
+
+    [Fact]
     public void MissingSafeExitKey_ProducesAllExplicitUnsafeDictionaryEntriesForThatCandidate()
     {
         NetherRouteSafetyFloorInput[] floors =
@@ -214,6 +254,7 @@ public class NetherRouteSafetyContextBuilderTests
         int? projectedHpDelta = 0,
         int? safeCodeOpportunity = 0,
         bool allInputsKnown = true,
+        IReadOnlyList<NetherErosionModifier>? modifiers = null,
         params long[] previous
     ) => new(
         ServerNode: new NetherFloorNode(floorId, floorLevel, (int)floorId, nodeType)
@@ -235,7 +276,10 @@ public class NetherRouteSafetyContextBuilderTests
             SoftErosionLimit: 90,
             HardErosionLimit: 100,
             AllInputsKnown: allInputsKnown
-        ),
+        )
+        {
+            ErosionModifiers = modifiers ?? System.Array.Empty<NetherErosionModifier>(),
+        },
         ProjectedHpDelta: projectedHpDelta,
         SafeCodeOpportunity: safeCodeOpportunity
     );

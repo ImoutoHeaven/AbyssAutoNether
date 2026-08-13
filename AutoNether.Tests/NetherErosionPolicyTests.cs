@@ -71,6 +71,29 @@ public class NetherErosionPolicyTests
     }
 
     [Fact]
+    public void Reduction_at_zero_clamps_to_the_native_erosion_floor()
+    {
+        NetherErosionProjection projection = new NetherErosionPolicy().ProjectBattle(
+            currentErosion: 0,
+            baseDelta: 0,
+            modifiers:
+            [
+                new NetherErosionModifier(
+                    NetherErosionOperation.Addition,
+                    amount: 5,
+                    isIncrease: false
+                ),
+            ],
+            softLimit: 90,
+            isMandatoryBoss: false
+        );
+
+        Assert.True(projection.IsAllowed);
+        Assert.Equal(0, projection.ProjectedErosion);
+        Assert.Equal(NetherPauseReason.None, projection.PauseReason);
+    }
+
+    [Fact]
     public void Unknown_rate_or_addition_effect_pauses()
     {
         NetherErosionProjection projection = new NetherErosionPolicy().ProjectBattle(

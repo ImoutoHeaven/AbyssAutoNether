@@ -170,7 +170,11 @@ internal sealed class NetherErosionPolicy
         try
         {
             int projected = checked(currentErosion + delta);
-            if (projected < 0 || projected >= 100)
+            // The native erosion gauge is lower-bounded at zero. Reduction codes and healing
+            // effects can exceed the currently accumulated erosion; that is a safe zero result,
+            // not an impossible negative state that disconnects every downstream route node.
+            projected = Math.Max(0, projected);
+            if (projected >= 100)
                 return Pause(projected, NetherPauseReason.UnsafeErosion, "hard-erosion-limit");
             if (!isMandatoryBoss && projected >= softLimit)
                 return Pause(projected, NetherPauseReason.UnsafeErosion, "soft-erosion-limit");

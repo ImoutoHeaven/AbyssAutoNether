@@ -200,6 +200,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private object? _checkpointStartStatusController;
     private object? _floorSelectionController;
     private long _runtimeGeneration;
+    private long _sceneObservedRuntimeGeneration;
     private long _startStatusCodeGeneration;
     private object? _battleResultViewController;
     private long _battleResultCodeGeneration;
@@ -270,9 +271,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         get
         {
             lock (_gate)
-                return NetherRuntimeGenerationVisibility.ForLiveFloorSelection(
+                return NetherRuntimeGenerationVisibility.ForAuthoritativeFloorSelection(
                     _floorSelectionController,
-                    _runtimeGeneration
+                    _runtimeGeneration,
+                    _sceneObservedRuntimeGeneration
                 );
         }
     }
@@ -284,6 +286,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             lock (_gate)
             {
                 return _floorSelectionController != null
+                    && _sceneObservedRuntimeGeneration == _runtimeGeneration
                     && string.Equals(
                         _floorSelectionController.GetType().FullName,
                         FloorSelectionTypeName,
@@ -2836,6 +2839,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         {
             _floorSelectionController = null;
             _runtimeGeneration = 0;
+            _sceneObservedRuntimeGeneration = 0;
             _startStatusParentCapture.Clear();
             _startStatusCodeGeneration = 0;
             _battleResultViewController = null;
@@ -2899,6 +2903,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         if (controller == null)
             return;
         bool replaced;
+        bool authoritativeSceneRegistration =
+            NetherContinueSceneTransitionEvidence.IsAuthoritativeSceneRegistration(source);
         bool settledContinueBySceneTransition = false;
         long generation;
         long continueOwnerGeneration = 0;
@@ -2915,6 +2921,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     ClearBattleResultCodeOwnerCore();
                 ClearRecoveredCodeOfferCore();
                 _runtimeGeneration = checked(_runtimeGeneration + 1);
+                _sceneObservedRuntimeGeneration = 0;
                 _recoveredFloorEventTaskLease.Reset();
                 _recoveredFloorEventSequenceTaskFlow.Reset();
                 _contentAcquiredConfirmLease.Reset();
@@ -2923,11 +2930,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
             _floorSelectionController = controller;
             generation = _runtimeGeneration;
-            if (replaced
-                && _continueSceneTransition.TrySettle(
+            if (authoritativeSceneRegistration)
+                _sceneObservedRuntimeGeneration = generation;
+            if (_continueSceneTransition.TrySettle(
                     generation,
                     controller.GetType().FullName,
-                    FloorSelectionTypeName
+                    FloorSelectionTypeName,
+                    source
                 ))
             {
                 // A recovered StartStatus parent can remain Pending even after the game has
@@ -2944,7 +2953,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("action", replaced ? "floor-selection-registered" : "floor-selection-reobserved"),
             new("generation", generation.ToString()),
             new("type", controllerType),
-            new("source", source)
+            new("source", source),
+            new("sceneAuthoritative", authoritativeSceneRegistration.ToString())
         );
         if (settledContinueBySceneTransition)
         {
@@ -2976,6 +2986,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 // only floor-owned callbacks/tasks and retain Result evidence for the global
                 // scene coordinator to poll.
                 _floorSelectionController = null;
+                _sceneObservedRuntimeGeneration = 0;
                 ClearRecoveredCodeOfferCore();
                 _recoveredFloorEventTaskLease.Reset();
                 _recoveredFloorEventSequenceTaskFlow.Reset();
