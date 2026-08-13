@@ -71,6 +71,20 @@ public class NetherActiveCodeErosionProjectionMapperTests
         Assert.Contains("2:1:2:66:55:44", projection.CodeHash);
     }
 
+    [Fact]
+    public void ResearchPointEffectTwelve_IsKnownButDoesNotAlterErosionProjection()
+    {
+        NetherActiveCodeErosionProjection projection = Map(
+            new[] { Possession(30026) },
+            new[] { Master(30026, 12, 3, 100, 0) }
+        );
+
+        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
+        Assert.Empty(projection.ErosionEffects);
+        Assert.Equal(new long[] { 30026 }, projection.SortedCodeIds);
+        Assert.Contains("30026:1:12:3:100:0", projection.CodeHash);
+    }
+
     [Theory]
     [InlineData(10, 1, 0, 0)]
     [InlineData(6, 0, 0, 0)]

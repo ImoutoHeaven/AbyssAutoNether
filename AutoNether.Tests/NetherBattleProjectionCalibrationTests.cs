@@ -28,6 +28,30 @@ public class NetherBattleProjectionCalibrationTests
     }
 
     [Fact]
+    public void Non_decreasing_pre_offer_snapshot_below_projected_minimum_rebaselines()
+    {
+        var calibration = new NetherBattleProjectionCalibration();
+        NetherBattleSettlementContract contract = Contract(
+            projectedMinimum: 30,
+            projectedMaximum: 30,
+            preBattleErosion: 25
+        );
+
+        NetherBattleProjectionCalibrationObservation observation = calibration.Observe(
+            contract,
+            Snapshot(NetherSessionStatus.Battle, erosion: 25),
+            Snapshot(NetherSessionStatus.Play, erosion: 25),
+            ActiveCodes("code-before")
+        );
+
+        Assert.True(observation.IsAccepted);
+        Assert.True(observation.RequiresRebaseline);
+        Assert.Equal(0, observation.ActualErosionDelta);
+        Assert.Equal(NetherPauseReason.None, observation.PauseReason);
+        Assert.Contains("below-minimum", observation.Detail);
+    }
+
+    [Fact]
     public void Actual_erosion_outside_projection_or_decrease_is_named_drift()
     {
         var calibration = new NetherBattleProjectionCalibration();

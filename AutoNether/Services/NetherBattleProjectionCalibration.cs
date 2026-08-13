@@ -73,8 +73,9 @@ internal sealed class NetherBattleProjectionCalibration
             return Unknown("battle-authoritative-erosion-invalid");
         if (actualDelta < 0)
             return Drift("battle-actual-erosion-decreased:" + actualDelta.ToString(CultureInfo.InvariantCulture));
-        if (after.ErosionPoint < projection.ProjectedMinimumErosion
-            || after.ErosionPoint > projection.ProjectedMaximumErosion)
+        // The upper bound is the fail-closed safety boundary.  A lower, non-decreasing
+        // snapshot can be the authoritative pre-offer state; the code workflow rebases again.
+        if (after.ErosionPoint > projection.ProjectedMaximumErosion)
         {
             return Drift(
                 "battle-actual-erosion-outside-projection:actual="
@@ -86,13 +87,22 @@ internal sealed class NetherBattleProjectionCalibration
             );
         }
 
+        string rebaselineDetail = after.ErosionPoint < projection.ProjectedMinimumErosion
+            ? "battle-projection-rebaseline-below-minimum:actual="
+                + after.ErosionPoint.ToString(CultureInfo.InvariantCulture)
+                + ":minimum="
+                + projection.ProjectedMinimumErosion.ToString(CultureInfo.InvariantCulture)
+                + ":actual-delta="
+                + actualDelta.ToString(CultureInfo.InvariantCulture)
+            : "battle-projection-rebaseline:actual-delta="
+                + actualDelta.ToString(CultureInfo.InvariantCulture);
+
         return new NetherBattleProjectionCalibrationObservation(
             IsAccepted: true,
             RequiresRebaseline: true,
             ActualErosionDelta: actualDelta,
             PauseReason: NetherPauseReason.None,
-            Detail: "battle-projection-rebaseline:actual-delta="
-                + actualDelta.ToString(CultureInfo.InvariantCulture)
+            Detail: rebaselineDetail
         );
     }
 

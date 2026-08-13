@@ -63,7 +63,7 @@ internal sealed record NetherActiveCodeErosionProjection
 
 /// <summary>
 /// Builds a fail-closed erosion projection from live possession code models and exact master
-/// rows.  Effect types 1/2 are confirmed non-erosion inputs: they stay in the fingerprint but
+/// rows.  Effect types 1/2/12 are confirmed non-erosion inputs: they stay in the fingerprint but
 /// produce no modifier.  Types 6–9 map directly to the existing <see cref="NetherCodeEffect"/>
 /// model.  No code ID, including 30024 or 40024, has a special erosion meaning here.
 /// </summary>
@@ -133,10 +133,11 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
 
             switch (master.EffectType)
             {
-                // Confirmed ordinary/party effects: their raw values remain in the entry/hash,
-                // but they do not alter battle erosion.
+                // Confirmed ordinary/party effects and category research-point rewards: their
+                // raw values remain in the entry/hash, but they do not alter battle erosion.
                 case 1:
                 case 2:
+                case 12:
                     break;
                 case 6:
                 case 7:

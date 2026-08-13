@@ -102,7 +102,7 @@ internal enum NetherPauseReason
     BattleSettlementWrongTarget,
     /// <summary>The authoritative post-battle snapshot cannot prove the immutable safety projection.</summary>
     BattleProjectionUnknown,
-    /// <summary>The authoritative post-battle state drifted outside the immutable battle projection.</summary>
+    /// <summary>The authoritative post-battle state exceeded or contradicted the immutable safety projection.</summary>
     BattleProjectionDrift,
     BattleSceneLost,
     ContinueLifecycleFault,

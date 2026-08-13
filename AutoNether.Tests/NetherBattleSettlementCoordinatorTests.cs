@@ -161,6 +161,32 @@ public class NetherBattleSettlementCoordinatorTests
     }
 
     [Fact]
+    public void Non_decreasing_pre_offer_settlement_below_projected_minimum_is_settled()
+    {
+        NetherSnapshot before = BattleSnapshot();
+        NetherSnapshot preOffer = Snapshot(NetherSessionStatus.Play, mapId: 2, floorId: 10);
+        var driver = new FakeDriver(
+            lifecycle: new[] { NetherNativeActionResult.Completed("battle-clear-parent-terminal") },
+            clearObserved: true,
+            closeObserved: false,
+            appliedSnapshot: preOffer
+        );
+        var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
+
+        Assert.True(coordinator.Begin(Action(projectedMinimum: 25), before));
+        coordinator.Pump();
+        coordinator.Pump();
+
+        NetherBattleSettlementStep result = coordinator.Pump();
+
+        Assert.Equal(NetherBattleSettlementStepKind.Settled, result.Kind);
+        Assert.Equal(NetherPauseReason.None, result.PauseReason);
+        Assert.Contains("below-minimum", result.Detail);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
     public void Changed_authoritative_code_hash_is_named_drift_after_get_only_settlement()
     {
         NetherSnapshot before = BattleSnapshot();
@@ -187,7 +213,7 @@ public class NetherBattleSettlementCoordinatorTests
         Assert.Contains("code-hash", result.Detail);
     }
 
-    private static NetherPlannedAction Action() => new(NetherActionKind.BattleSettlement)
+    private static NetherPlannedAction Action(int projectedMinimum = 20) => new(NetherActionKind.BattleSettlement)
     {
         BattleSettlement = new NetherBattleSettlementContract(
             EntryMapId: 2,
@@ -205,7 +231,7 @@ public class NetherBattleSettlementCoordinatorTests
                 PreBattleErosion: 20,
                 FloorMinimumErosion: 0,
                 FloorMaximumErosion: 10,
-                ProjectedMinimumErosion: 20,
+                ProjectedMinimumErosion: projectedMinimum,
                 ProjectedMaximumErosion: 30,
                 CodeHash: "active-code-hash",
                 ProjectionIdentity: "battle-2-10"
