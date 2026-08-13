@@ -201,6 +201,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private object? _floorSelectionController;
     private long _runtimeGeneration;
     private long _sceneObservedRuntimeGeneration;
+    private long _sceneEnteredRuntimeGeneration;
     private long _startStatusCodeGeneration;
     private object? _battleResultViewController;
     private long _battleResultCodeGeneration;
@@ -2804,26 +2805,34 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             NetherRuntimePopupResult popup = snapshot.Snapshot!.Status == NetherSessionStatus.Wait
                 ? TryGetActivePopup()
                 : new NetherRuntimePopupResult(null, string.Empty);
+            bool hasSceneEntry = _sceneEnteredRuntimeGeneration == _runtimeGeneration;
             if (!NetherBattleResultReboundReadiness.IsReady(
                     snapshot.Snapshot.Status,
-                    popup.IsSuccess
+                    popup.IsSuccess,
+                    hasSceneEntry
                 ))
             {
+                string waitBoundary = hasSceneEntry
+                    ? "battle-result-rebound-modal"
+                    : "battle-result-rebound-scene-entry";
+                string waitDetail = hasSceneEntry
+                    ? popup.Detail
+                    : "awaiting-subscene-entered";
                 NetherNativeActionResult wait = _battleResultSnapshotWait.AwaitRegistration(
-                    "battle-result-rebound-modal"
+                    waitBoundary
                 );
                 if (wait.Kind == NetherNativeActionResultKind.Started)
                 {
                     return new(
                         NetherBattleResultContinuationStepKind.AwaitingFloorRebind,
-                        "battle-result-rebound-modal:" + popup.Detail
+                        waitBoundary + ":" + waitDetail
                     );
                 }
 
                 _battleResultContinuation.Reset();
                 return new(
                     NetherBattleResultContinuationStepKind.BindingUnavailable,
-                    wait.Detail + ":" + popup.Detail
+                    wait.Detail + ":" + waitDetail
                 );
             }
 
@@ -2840,6 +2849,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _floorSelectionController = null;
             _runtimeGeneration = 0;
             _sceneObservedRuntimeGeneration = 0;
+            _sceneEnteredRuntimeGeneration = 0;
             _startStatusParentCapture.Clear();
             _startStatusCodeGeneration = 0;
             _battleResultViewController = null;
@@ -2905,6 +2915,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         bool replaced;
         bool authoritativeSceneRegistration =
             NetherContinueSceneTransitionEvidence.IsAuthoritativeSceneRegistration(source);
+        bool enteredSceneRegistration = source.StartsWith(
+            "subscene-entered:",
+            StringComparison.Ordinal
+        );
         bool settledContinueBySceneTransition = false;
         long generation;
         long continueOwnerGeneration = 0;
@@ -2922,6 +2936,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ClearRecoveredCodeOfferCore();
                 _runtimeGeneration = checked(_runtimeGeneration + 1);
                 _sceneObservedRuntimeGeneration = 0;
+                _sceneEnteredRuntimeGeneration = 0;
                 _recoveredFloorEventTaskLease.Reset();
                 _recoveredFloorEventSequenceTaskFlow.Reset();
                 _contentAcquiredConfirmLease.Reset();
@@ -2932,6 +2947,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             generation = _runtimeGeneration;
             if (authoritativeSceneRegistration)
                 _sceneObservedRuntimeGeneration = generation;
+            if (enteredSceneRegistration)
+                _sceneEnteredRuntimeGeneration = generation;
             if (_continueSceneTransition.TrySettle(
                     generation,
                     controller.GetType().FullName,
@@ -2987,6 +3004,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 // scene coordinator to poll.
                 _floorSelectionController = null;
                 _sceneObservedRuntimeGeneration = 0;
+                _sceneEnteredRuntimeGeneration = 0;
                 ClearRecoveredCodeOfferCore();
                 _recoveredFloorEventTaskLease.Reset();
                 _recoveredFloorEventSequenceTaskFlow.Reset();

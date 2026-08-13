@@ -1224,6 +1224,7 @@ public class NetherAutoClimbControllerEndToEndTests
             AutoCompleteBattleResultContinuation = false,
             BattleResultRebound = false,
             BattleResultReboundSnapshot = null,
+            BattleResultReboundSceneEntered = false,
             CodeCandidates = SafeCodeCandidates(30024),
             BattleResultCodePopup = new NetherRuntimePopupContext
             {
@@ -1275,7 +1276,14 @@ public class NetherAutoClimbControllerEndToEndTests
             bridge.BattleResultReboundSnapshot = bridge.AfterBattle;
             bridge.BattleResultRebound = true;
 
-            NetherAutoClimbController.Update(); // fresh floor snapshot is ready
+            NetherAutoClimbController.Update(); // Play snapshot exists before SubScene.OnEntered
+            Assert.Equal(
+                NetherAutoClimbPhase.AwaitingBattleResultContinuation,
+                NetherAutoClimbController.Phase
+            );
+
+            bridge.BattleResultReboundSceneEntered = true;
+            NetherAutoClimbController.Update(); // exact FloorSelection scene has now entered
             Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
             Assert.True(bridge.HasRegisteredFloorSelection);
             Assert.Single(bridge.BattleResultCodeActions);
@@ -3429,6 +3437,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public bool HasObservedNetherBattleResult { get; set; }
         public bool AutoCompleteBattleResultContinuation { get; set; } = true;
         public bool BattleResultRebound { get; set; } = true;
+        public bool BattleResultReboundSceneEntered { get; set; } = true;
         public NetherSnapshot? BattleResultReboundSnapshot { get; set; }
         public NetherRuntimePopupContext? BattleResultReboundPopup { get; set; }
         public NetherSnapshot? BattleSettlementSnapshotOverride { get; set; }
@@ -4018,7 +4027,8 @@ public class NetherAutoClimbControllerEndToEndTests
                 && BattleResultReboundSnapshot != null
                 && !NetherBattleResultReboundReadiness.IsReady(
                     BattleResultReboundSnapshot.Status,
-                    BattleResultReboundPopup != null
+                    BattleResultReboundPopup != null,
+                    BattleResultReboundSceneEntered
                 ))
             {
                 HasRegisteredFloorSelection = true;
