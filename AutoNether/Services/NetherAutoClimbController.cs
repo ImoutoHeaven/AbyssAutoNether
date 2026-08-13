@@ -1632,6 +1632,15 @@ internal static class NetherAutoClimbController
             if (foreground.IsSuccess)
             {
                 NetherRuntimePopupContext popup = foreground.Popup!;
+                if (popup.HasRecoveredFloorEventTaskEvidence
+                    && popup.OwnerAction == NetherActionKind.None
+                    && popup.Kind is NetherRuntimePopupKind.Event
+                        or NetherRuntimePopupKind.Recovery
+                        or NetherRuntimePopupKind.Treasure)
+                {
+                    PlanNativePopup(snapshot, settings, popup);
+                    return;
+                }
                 FailClosed(
                     NetherPauseReason.UnsupportedPopup,
                     "foreground-popup-blocks-play-route:"

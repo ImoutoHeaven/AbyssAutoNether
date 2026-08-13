@@ -5,12 +5,15 @@ using System;
 namespace AutoNether.Services;
 
 /// <summary>
-/// Retains the exact lifecycle evidence that can supersede a recovered Continue parent which
-/// remains Pending after the game has already crossed into the next Nether segment.
+/// Retains the exact lifecycle evidence for a Continue scene transition.  The native parent can
+/// become terminal before Unity destroys its old FloorSelection owner, so completing that task
+/// must not disarm the later owner-termination/rebind proof.
 /// </summary>
 internal sealed class NetherContinueSceneTransitionEvidence
 {
     public long OwnerGeneration { get; private set; }
+
+    public bool NativeParentPending { get; private set; }
 
     public bool FloorOwnerTerminated { get; private set; }
 
@@ -22,9 +25,16 @@ internal sealed class NetherContinueSceneTransitionEvidence
             return false;
 
         OwnerGeneration = ownerGeneration;
+        NativeParentPending = true;
         FloorOwnerTerminated = false;
         IsSettledBySceneTransition = false;
         return true;
+    }
+
+    public void ObserveNativeParentCompleted()
+    {
+        if (OwnerGeneration > 0)
+            NativeParentPending = false;
     }
 
     public void ObserveFloorOwnerTerminated()
@@ -56,6 +66,7 @@ internal sealed class NetherContinueSceneTransitionEvidence
     public void Reset()
     {
         OwnerGeneration = 0;
+        NativeParentPending = false;
         FloorOwnerTerminated = false;
         IsSettledBySceneTransition = false;
     }

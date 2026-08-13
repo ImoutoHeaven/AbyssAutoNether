@@ -36,6 +36,13 @@ internal sealed record NetherRuntimePopupContext
     public long OwnerGeneration { get; init; }
     public long Sequence { get; init; }
     /// <summary>
+    /// True only when the bridge has correlated this otherwise ownerless popup with an exact
+    /// floor-event sequence task from the current FloorSelection controller/runtime generation.
+    /// This lets a native multi-stage event remain actionable when the server has already
+    /// returned to Play, without relaxing fail-closed handling for arbitrary foreground popups.
+    /// </summary>
+    public bool HasRecoveredFloorEventTaskEvidence { get; init; }
+    /// <summary>
     /// A CodeOffer can remain the same live native popup while its exact RerollAsync task
     /// rebuilds the server-provided candidates.  The bridge advances this only after that task
     /// and a fresh authoritative candidate read both succeed; it is never a visual-frame

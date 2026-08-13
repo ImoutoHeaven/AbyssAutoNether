@@ -237,6 +237,59 @@ public sealed class NetherTransitionSnapshotCacheTests
     }
 
     [Fact]
+    public void Postbattle_reused_master_floor_id_resolves_the_exact_authoritative_coordinate()
+    {
+        var cache = new NetherTransitionSnapshotCache();
+        NetherSnapshot cached = Snapshot(
+            NetherSessionStatus.Play,
+            floorId: 219,
+            floorLevel: 47,
+            apiFloorIndex: 1
+        ) with
+        {
+            CurrentNodeId = 206158430211,
+            Floors = new[]
+            {
+                new NetherFloorNode(219, 47, 1, NetherFloorNodeType.Battle)
+                {
+                    NodeId = 206158430211,
+                    ApiFloorIndex = 1,
+                    IsUnlocked = true,
+                },
+                new NetherFloorNode(219, 48, 1, NetherFloorNodeType.MiniBoss)
+                {
+                    NodeId = 210453397506,
+                    ApiFloorIndex = 1,
+                    IsUnlocked = true,
+                    PreviousFloorIds = new[] { 206158430211L },
+                },
+            },
+        };
+        cache.ObserveFullSnapshot(cached);
+        cache.BeginBattle();
+        Assert.True(cache.ObserveBattleResultCharacters(new[]
+        {
+            new NetherCharacterState(1001, 720, true),
+            new NetherCharacterState(1002, 0, false),
+        }));
+
+        NetherRuntimeSnapshotResult result = cache.TryCompose(
+            TransitionState(
+                NetherSessionStatus.Play,
+                floorId: 219,
+                floorLevel: 48,
+                apiFloorIndex: 1
+            ),
+            requireFreshBattleCharacters: true
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.Equal(219, result.Snapshot!.CurrentFloorId);
+        Assert.Equal(210453397506, result.Snapshot.CurrentNodeId);
+        Assert.Equal(48, result.Snapshot.FloorLevel);
+    }
+
+    [Fact]
     public void Postbattle_snapshot_fails_closed_without_authoritative_result_characters()
     {
         var cache = new NetherTransitionSnapshotCache();

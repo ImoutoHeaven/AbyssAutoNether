@@ -5,9 +5,9 @@ using System;
 namespace AutoNether.Services;
 
 /// <summary>
-/// Correlates an exact floor-event sequence observed before F12 enable with the one popup it
-/// subsequently creates.  A task can be claimed once only, and only by the same live
-/// FloorSelection controller generation and exact popup instance/sequence.
+/// Correlates an exact floor-event sequence with its one popup even when native callbacks expose
+/// those two pieces of evidence in either order.  A task can be claimed once only, and only by
+/// the same live FloorSelection controller generation and exact popup instance/sequence.
 /// </summary>
 internal sealed class NetherRecoveredFloorEventTaskLease
 {
@@ -17,6 +17,8 @@ internal sealed class NetherRecoveredFloorEventTaskLease
     private long _generation;
     private long _popupSequenceBaseline;
     private long _popupSequence;
+
+    public bool HasBoundPopup => _task != null && _popup != null;
 
     public bool ObserveSequence(
         object? controller,
@@ -28,23 +30,69 @@ internal sealed class NetherRecoveredFloorEventTaskLease
         if (controller == null || task == null || generation < 1 || popupSequenceBaseline < 0)
             return false;
 
+        bool adoptsExistingPopup = _task == null
+            && _popup != null
+            && ReferenceEquals(_controller, controller)
+            && _generation == generation
+            && _popupSequence == popupSequenceBaseline;
+        object? existingPopup = adoptsExistingPopup ? _popup : null;
+        long existingPopupSequence = adoptsExistingPopup ? _popupSequence : 0;
+
         Reset();
         _controller = controller;
         _generation = generation;
         _task = task;
         _popupSequenceBaseline = popupSequenceBaseline;
+        _popup = existingPopup;
+        _popupSequence = existingPopupSequence;
         return true;
     }
 
-    public bool BindPopup(object? popup, long sequence)
+    public bool ObservePopup(
+        object? controller,
+        long generation,
+        object? popup,
+        long sequence
+    )
     {
-        if (_task == null || popup == null || sequence <= _popupSequenceBaseline)
+        if (controller == null || popup == null || generation < 1 || sequence < 1)
             return false;
+
+        if (_task == null)
+        {
+            Reset();
+            _controller = controller;
+            _generation = generation;
+            _popup = popup;
+            _popupSequenceBaseline = sequence;
+            _popupSequence = sequence;
+            return false;
+        }
+
+        if (!ReferenceEquals(_controller, controller)
+            || _generation != generation
+            || sequence <= _popupSequenceBaseline)
+        {
+            return false;
+        }
 
         _popup = popup;
         _popupSequence = sequence;
         return true;
     }
+
+    public bool CanClaim(
+        object? controller,
+        long generation,
+        object? popup,
+        long sequence
+    ) => _task != null
+        && controller != null
+        && popup != null
+        && ReferenceEquals(_controller, controller)
+        && generation == _generation
+        && ReferenceEquals(_popup, popup)
+        && sequence == _popupSequence;
 
     public bool TryClaim(
         object? controller,
@@ -55,16 +103,8 @@ internal sealed class NetherRecoveredFloorEventTaskLease
     )
     {
         task = null;
-        if (_task == null
-            || controller == null
-            || popup == null
-            || !ReferenceEquals(_controller, controller)
-            || generation != _generation
-            || !ReferenceEquals(_popup, popup)
-            || sequence != _popupSequence)
-        {
+        if (!CanClaim(controller, generation, popup, sequence))
             return false;
-        }
 
         task = _task;
         Reset();

@@ -1438,9 +1438,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         string controllerType = registration.Controller.GetType().FullName ?? string.Empty;
         long decisionEpoch = 0;
-        if (controllerType == CodeSelectPopupControllerTypeName)
+        bool hasRecoveredFloorEventTaskEvidence = false;
+        lock (_gate)
         {
-            lock (_gate)
+            if (controllerType == CodeSelectPopupControllerTypeName)
             {
                 decisionEpoch = GetOwnedPopupDecisionEpoch(new NetherOwnedPopupStageOwner(
                     registration.OwnerAction,
@@ -1448,6 +1449,19 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     registration.Sequence,
                     0
                 ));
+            }
+            if (registration.OwnerAction == NetherActionKind.None
+                && controllerType is EventPopupControllerTypeName
+                    or RecoverPopupControllerTypeName
+                    or TreasurePopupControllerTypeName
+                && _floorSelectionController != null)
+            {
+                hasRecoveredFloorEventTaskEvidence = _recoveredFloorEventTaskLease.CanClaim(
+                    _floorSelectionController,
+                    _runtimeGeneration,
+                    registration.Popup,
+                    registration.Sequence
+                );
             }
         }
         try
@@ -1472,6 +1486,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     OwnerGeneration = registration.OwnerGeneration,
                     Sequence = registration.Sequence,
                     DecisionEpoch = decisionEpoch,
+                    HasRecoveredFloorEventTaskEvidence = hasRecoveredFloorEventTaskEvidence,
                 });
         }
         catch (Exception ex)
@@ -1547,16 +1562,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     public NetherReadOnlySnapshotResult TryCaptureAppliedSnapshot()
     {
-        NetherRuntimeSnapshotResult captured = TryCaptureSnapshot();
-        if (!captured.IsSuccess
-            && string.Equals(
-                captured.Detail,
-                "missing-floor-selection-controller",
-                StringComparison.Ordinal
-            ))
-        {
-            captured = TryCaptureTransitionSnapshot();
-        }
+        bool requireFreshBattleResultCharacters;
+        lock (_gate)
+            requireFreshBattleResultCharacters = _battleResultCharactersRequired;
+        NetherRuntimeSnapshotResult captured = NetherAppliedSnapshotCapturePolicy.Capture(
+            requireFreshBattleResultCharacters,
+            TryCaptureSnapshot,
+            TryCaptureTransitionSnapshot
+        );
         return captured.IsSuccess
             ? NetherReadOnlySnapshotResult.Success(captured.Snapshot!)
             : NetherReadOnlySnapshotResult.Failure(captured.Detail);
@@ -2911,7 +2924,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _floorSelectionController = controller;
             generation = _runtimeGeneration;
             if (replaced
-                && _pendingCheckpointAction?.Kind == NetherActionKind.Continue
                 && _continueSceneTransition.TrySettle(
                     generation,
                     controller.GetType().FullName,
@@ -2952,6 +2964,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         if (controller == null)
             return;
         bool terminatedCurrentOwner = false;
+        long continueOwnerGeneration = 0;
+        bool continueParentPending = false;
+        bool continueOwnerTerminated = false;
         lock (_gate)
         {
             if (ReferenceEquals(_floorSelectionController, controller))
@@ -2966,13 +2981,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _recoveredFloorEventSequenceTaskFlow.Reset();
                 _contentAcquiredConfirmLease.Reset();
                 _floorEventHintConfirmLease.Reset();
-                if (_pendingCheckpointAction?.Kind == NetherActionKind.Continue)
-                {
-                    // Continue owns a parent task which normally survives this old scene
-                    // teardown.  Preserve its evidence until either the task reaches terminal
-                    // state or a strictly newer exact FloorSelection proves the scene crossed.
-                    _continueSceneTransition.ObserveFloorOwnerTerminated();
-                }
+                // Let the per-Continue evidence decide whether this exact owner termination is
+                // still relevant.  The native parent can become terminal before Unity destroys
+                // the old FloorSelection owner.
+                _continueSceneTransition.ObserveFloorOwnerTerminated();
+                continueOwnerGeneration = _continueSceneTransition.OwnerGeneration;
+                continueParentPending = _continueSceneTransition.NativeParentPending;
+                continueOwnerTerminated = _continueSceneTransition.FloorOwnerTerminated;
                 ClearFloorParentCore();
                 _popupOwnership.Clear();
                 _eventPopup = null;
@@ -3006,7 +3021,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 "runtime-lifecycle",
                 new("action", "floor-selection-unregistered"),
                 new("type", controller.GetType().FullName ?? controller.GetType().Name),
-                new("continuePending", (_pendingCheckpointAction?.Kind == NetherActionKind.Continue).ToString())
+                new("continuePending", (_pendingCheckpointAction?.Kind == NetherActionKind.Continue).ToString()),
+                new("continueOwnerGeneration", continueOwnerGeneration.ToString()),
+                new("continueParentPending", continueParentPending.ToString()),
+                new("continueOwnerTerminated", continueOwnerTerminated.ToString())
             );
             NetherAutoClimbController.OnNetherFloorSelectionTerminated();
         }
@@ -3265,7 +3283,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     or RecoverPopupControllerTypeName
                     or TreasurePopupControllerTypeName)
             {
-                recoveredTaskBound = _recoveredFloorEventTaskLease.BindPopup(popup, sequence);
+                recoveredTaskBound = _recoveredFloorEventTaskLease.ObservePopup(
+                    _floorSelectionController,
+                    _runtimeGeneration,
+                    popup,
+                    sequence
+                );
             }
         }
         NetherAutoClimbController.LogDiagnostic(
@@ -3825,7 +3848,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 }
                 mode = "recovered-candidate";
                 detail = accepted
-                    ? "awaiting-correlated-popup"
+                    ? (_recoveredFloorEventTaskLease.HasBoundPopup
+                        ? "correlated-existing-popup"
+                        : "awaiting-correlated-popup")
                     : "recovered-sequence-not-accepted";
             }
             else
@@ -5578,6 +5603,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private void CompleteCheckpointNativeFlow()
     {
+        _continueSceneTransition.ObserveNativeParentCompleted();
         _pendingCheckpointAction = null;
         _checkpointFlow.Complete();
         _checkpointPopupWait.Reset();

@@ -2949,6 +2949,82 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_allows_bridge_proven_recovered_event_while_snapshot_is_play()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = new ScriptedRuntimeBridge().AfterInteractive,
+            ActivePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Event,
+                OwnerAction = NetherActionKind.None,
+                HasRecoveredFloorEventTaskEvidence = true,
+                RawFloorType = (int)NetherFloorNodeType.Event,
+                Options = new[]
+                {
+                    new NetherEventOption(1, new[] { new NetherEffect(NetherEffectKind.NetherGoldGain, 1) }),
+                },
+            },
+        };
+        var lease = new RecordingLeaseDriver();
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(lease, retryIntervalUpdates: 1);
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            Pump(4);
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Equal(new[] { NetherActionKind.SelectEventOption }, bridge.Invocations);
+            Assert.Equal(1, bridge.GetOnlyBeginCount);
+            Assert.Equal(1, bridge.GetOnlyPollCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_controller_keeps_unproven_foreground_event_fail_closed_while_play()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = new ScriptedRuntimeBridge().AfterInteractive,
+            ActivePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Event,
+                OwnerAction = NetherActionKind.None,
+                RawFloorType = (int)NetherFloorNodeType.Event,
+                Options = new[]
+                {
+                    new NetherEventOption(1, new[] { new NetherEffect(NetherEffectKind.NetherGoldGain, 1) }),
+                },
+            },
+        };
+        var lease = new RecordingLeaseDriver();
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(lease, retryIntervalUpdates: 1);
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            Pump(1);
+
+            Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Empty(bridge.Invocations);
+            Assert.Equal(0, bridge.GetOnlyBeginCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_drains_midflight_off_without_reenable_or_duplicate_mutation()
     {
         var bridge = new ScriptedRuntimeBridge();

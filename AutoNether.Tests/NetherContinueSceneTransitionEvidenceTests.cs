@@ -26,6 +26,23 @@ public class NetherContinueSceneTransitionEvidenceTests
         Assert.False(evidence.TrySettle(12, FloorSelectionType, FloorSelectionType));
     }
 
+    [Fact]
+    public void Native_parent_completion_before_owned_teardown_keeps_transition_evidence_armed()
+    {
+        var evidence = new NetherContinueSceneTransitionEvidence();
+        Assert.True(evidence.Begin(ownerGeneration: 10));
+
+        evidence.ObserveNativeParentCompleted();
+        evidence.ObserveFloorOwnerTerminated();
+
+        Assert.True(evidence.FloorOwnerTerminated);
+        Assert.True(evidence.TrySettle(
+            currentGeneration: 11,
+            controllerType: FloorSelectionType,
+            expectedControllerType: FloorSelectionType
+        ));
+    }
+
     [Theory]
     [InlineData(false, 11, FloorSelectionType)]
     [InlineData(true, 10, FloorSelectionType)]
@@ -62,6 +79,7 @@ public class NetherContinueSceneTransitionEvidenceTests
         evidence.Reset();
 
         Assert.Equal(0, evidence.OwnerGeneration);
+        Assert.False(evidence.NativeParentPending);
         Assert.False(evidence.FloorOwnerTerminated);
         Assert.False(evidence.IsSettledBySceneTransition);
     }
