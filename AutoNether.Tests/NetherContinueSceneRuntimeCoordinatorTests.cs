@@ -151,14 +151,14 @@ public class NetherContinueSceneRuntimeCoordinatorTests
         TicketCost = 1,
         ExpectedMapId = 3,
         ExpectedFloorId = 33,
-        ExpectedSegmentFloorLevel = 11,
+        ExpectedSegmentFloorLevel = 10,
     };
 
     private static NetherSnapshot BeforeSnapshot() => Snapshot(
         NetherSessionStatus.Sleep, mapId: 2, floorId: 23, floorLevel: 10, ticketCount: 3, mapHash: "map-2");
 
     private static NetherSnapshot AppliedSnapshot() => Snapshot(
-        NetherSessionStatus.Play, mapId: 3, floorId: 33, floorLevel: 11, ticketCount: 2, mapHash: "map-3");
+        NetherSessionStatus.Play, mapId: 3, floorId: 33, floorLevel: 10, ticketCount: 2, mapHash: "map-3");
 
     private static NetherSnapshot Snapshot(
         NetherSessionStatus status,

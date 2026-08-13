@@ -365,18 +365,27 @@ internal static class NetherActionReconcilePolicy
         NetherSnapshot after
     )
     {
+        bool hasPredictedDestination = action.ExpectedMapId > 0
+            && action.ExpectedFloorId > 0;
+        bool hasServerAssignedDestination = action.ExpectedMapId == 0
+            && action.ExpectedFloorId == 0;
         if (action.TicketCost <= 0
-            || action.ExpectedMapId <= 0
-            || action.ExpectedFloorId <= 0
+            || (!hasPredictedDestination && !hasServerAssignedDestination)
             || action.ExpectedSegmentFloorLevel <= 0
             || before.TicketCount < action.TicketCost)
         {
             return NetherActionOutcome.Ambiguous;
         }
 
+        bool destinationApplied = hasPredictedDestination
+            ? after.MapId == action.ExpectedMapId
+                && after.CurrentFloorId == action.ExpectedFloorId
+            : after.MapId > 0
+                && after.CurrentFloorId > 0
+                && (after.MapId != before.MapId
+                    || after.CurrentFloorId != before.CurrentFloorId);
         return after.TicketCount == before.TicketCount - action.TicketCost
-            && after.MapId == action.ExpectedMapId
-            && after.CurrentFloorId == action.ExpectedFloorId
+            && destinationApplied
             && after.FloorLevel == action.ExpectedSegmentFloorLevel
                 ? NetherActionOutcome.Applied
                 : UnchangedOrAmbiguous(before, after);

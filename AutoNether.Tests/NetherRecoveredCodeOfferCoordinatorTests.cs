@@ -95,6 +95,53 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
     }
 
     [Fact]
+    public void Pending_start_status_parent_hands_existing_sleep_checkpoint_to_continue_without_get_or_completion()
+    {
+        var driver = new Driver
+        {
+            RecoveredCheckpoint = NetherRecoveredCheckpointObservation.Ready(
+                AppliedCodeSnapshot() with
+                {
+                    Status = NetherSessionStatus.Sleep,
+                    FloorLevel = 20,
+                    FloorIndex = 20,
+                    TicketCount = 3,
+                    LockReward = 0,
+                    ContinuationTarget = new NetherContinuationTarget(2, 200, 20),
+                    MapHash = "sleep-checkpoint",
+                },
+                "existing-continue-popup"
+            ),
+        };
+        var flow = new NetherRecoveredCodeOfferCoordinator(maximumPopupPolls: 3);
+
+        Assert.Equal(
+            NetherRecoveredCodeOfferStepKind.AwaitingNative,
+            flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
+        );
+        driver.NativeSteps.Enqueue(NetherBattleResultCodeNativeStep.Completed("code-terminal"));
+        Assert.Equal(
+            NetherRecoveredCodeOfferStepKind.AwaitingParent,
+            flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
+        );
+        driver.ParentSteps.Enqueue(NetherNativeActionResult.Started("combined-parent-awaiting-continue"));
+
+        NetherRecoveredCodeOfferStep handoff = flow.Pump(
+            driver,
+            Settings(),
+            null,
+            allowInvoke: true
+        );
+
+        Assert.Equal(NetherRecoveredCodeOfferStepKind.CheckpointReady, handoff.Kind);
+        Assert.Equal(NetherSessionStatus.Sleep, handoff.Snapshot!.Status);
+        Assert.False(flow.IsActive);
+        Assert.Equal(0, driver.RefreshStarts);
+        Assert.Equal(0, driver.CompletedOwners);
+        Assert.Equal(1, driver.RecoveredCheckpointPolls);
+    }
+
+    [Fact]
     public void F12_off_before_recovered_offer_mutation_leaves_native_popup_for_user()
     {
         var driver = new Driver();
@@ -149,6 +196,109 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
     }
 
     [Fact]
+    public void Consumed_parent_fault_status_after_a_successful_code_child_is_resolved_by_exact_get_reconcile()
+    {
+        var driver = new Driver();
+        var flow = new NetherRecoveredCodeOfferCoordinator(maximumPopupPolls: 3);
+
+        Assert.Equal(
+            NetherRecoveredCodeOfferStepKind.AwaitingNative,
+            flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
+        );
+        driver.NativeSteps.Enqueue(NetherBattleResultCodeNativeStep.Completed("code-terminal"));
+        Assert.Equal(
+            NetherRecoveredCodeOfferStepKind.AwaitingParent,
+            flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
+        );
+
+        driver.ParentSteps.Enqueue(NetherNativeActionResult.UnknownOutcome(
+            "native-start-status-terminal-faulted"
+        ));
+        NetherRecoveredCodeOfferStep reconcile = flow.Pump(
+            driver,
+            Settings(),
+            null,
+            allowInvoke: true
+        );
+        Assert.Equal(NetherRecoveredCodeOfferStepKind.AwaitingRefresh, reconcile.Kind);
+        Assert.Contains("parent-unknown", reconcile.Detail);
+        Assert.Equal(1, driver.RefreshStarts);
+
+        driver.RefreshSteps.Enqueue(NetherNativeActionResult.Completed("get-terminal"));
+        NetherRecoveredCodeOfferStep completed = flow.Pump(
+            driver,
+            Settings(),
+            null,
+            allowInvoke: true
+        );
+        Assert.Equal(NetherRecoveredCodeOfferStepKind.Completed, completed.Kind);
+        Assert.Equal(1, driver.CompletedOwners);
+        Assert.Single(driver.InvokedActions);
+        NetherRecoveredCodeReconcileDiagnostic diagnostic = Assert.IsType<NetherRecoveredCodeReconcileDiagnostic>(
+            completed.ReconcileDiagnostic
+        );
+        Assert.Equal(NetherActionOutcome.Applied, diagnostic.Outcome);
+        Assert.Equal(NetherActionKind.SelectCode, diagnostic.ActionKind);
+        Assert.Equal(30024, diagnostic.TargetCodeId);
+        Assert.Equal(0, diagnostic.ReplaceCodeId);
+        Assert.Equal(0, diagnostic.ReloadActions);
+        Assert.Equal(1, diagnostic.BeforeReloadCount);
+        Assert.Equal(1, diagnostic.ExpectedReloadCount);
+        Assert.Equal(1, diagnostic.AfterReloadCount);
+        Assert.False(diagnostic.TargetPresentBefore);
+        Assert.True(diagnostic.TargetPresentAfter);
+        Assert.Equal("none", diagnostic.BeforeCodeIds);
+        Assert.Equal("30024", diagnostic.AfterCodeIds);
+    }
+
+    [Fact]
+    public void Parent_unknown_get_reconcile_still_fails_closed_when_selected_code_is_absent()
+    {
+        var driver = new Driver
+        {
+            AppliedSnapshot = Snapshot(),
+        };
+        var flow = new NetherRecoveredCodeOfferCoordinator(maximumPopupPolls: 3);
+
+        Assert.Equal(
+            NetherRecoveredCodeOfferStepKind.AwaitingNative,
+            flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
+        );
+        driver.NativeSteps.Enqueue(NetherBattleResultCodeNativeStep.Completed("code-terminal"));
+        Assert.Equal(
+            NetherRecoveredCodeOfferStepKind.AwaitingParent,
+            flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
+        );
+        driver.ParentSteps.Enqueue(NetherNativeActionResult.UnknownOutcome(
+            "native-start-status-terminal-faulted"
+        ));
+        Assert.Equal(
+            NetherRecoveredCodeOfferStepKind.AwaitingRefresh,
+            flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
+        );
+
+        driver.RefreshSteps.Enqueue(NetherNativeActionResult.Completed("get-terminal"));
+        NetherRecoveredCodeOfferStep faulted = flow.Pump(
+            driver,
+            Settings(),
+            null,
+            allowInvoke: true
+        );
+        Assert.Equal(NetherRecoveredCodeOfferStepKind.Faulted, faulted.Kind);
+        Assert.Contains("recovered-code-reconcile", faulted.Detail);
+        Assert.Equal(0, driver.CompletedOwners);
+        Assert.Single(driver.InvokedActions);
+        NetherRecoveredCodeReconcileDiagnostic diagnostic = Assert.IsType<NetherRecoveredCodeReconcileDiagnostic>(
+            faulted.ReconcileDiagnostic
+        );
+        Assert.Equal(NetherActionOutcome.NotApplied, diagnostic.Outcome);
+        Assert.False(diagnostic.TargetPresentBefore);
+        Assert.False(diagnostic.TargetPresentAfter);
+        Assert.Equal("none", diagnostic.BeforeCodeIds);
+        Assert.Equal("none", diagnostic.AfterCodeIds);
+    }
+
+    [Fact]
     public void Popup_from_any_other_owner_is_rejected_before_mutation()
     {
         var driver = new Driver
@@ -198,6 +348,19 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
         MapHash = "map",
     };
 
+    private static NetherSnapshot AppliedCodeSnapshot() => Snapshot() with
+    {
+        Codes = new[]
+        {
+            new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1)
+            {
+                Category = NetherCodeCategory.ErosionResistance,
+                Rarity = 1,
+            },
+        },
+        CodeHash = "30024:1:1",
+    };
+
     private static NetherAutoClimbSettings Settings() => new()
     {
         CombatLane = NetherCombatLane.Auto,
@@ -212,7 +375,12 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
         public Queue<NetherBattleResultCodeNativeStep> NativeSteps { get; } = new();
         public Queue<NetherNativeActionResult> ParentSteps { get; } = new();
         public Queue<NetherNativeActionResult> RefreshSteps { get; } = new();
+        public NetherSnapshot AppliedSnapshot { get; set; } = AppliedCodeSnapshot();
+        public NetherRecoveredCheckpointObservation RecoveredCheckpoint { get; set; } =
+            NetherRecoveredCheckpointObservation.Waiting("checkpoint-popup-not-yet-registered");
         public int ParentPolls { get; private set; }
+        public int RecoveredCheckpointPolls { get; private set; }
+        public int RecoveredCheckpointHandoffs { get; private set; }
         public int RefreshStarts { get; private set; }
         public int CompletedOwners { get; private set; }
 
@@ -260,6 +428,19 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
                 : ParentSteps.Dequeue();
         }
 
+        public NetherRecoveredCheckpointObservation ObserveRecoveredCheckpoint()
+        {
+            RecoveredCheckpointPolls++;
+            return RecoveredCheckpoint;
+        }
+
+        public NetherNativeActionResult PrepareRecoveredCheckpointHandoff()
+        {
+            RecoveredCheckpointHandoffs++;
+            HasRecoveredCodeOffer = false;
+            return NetherNativeActionResult.Completed("checkpoint-handoff-prepared");
+        }
+
         public NetherNativeActionResult BeginRecoveredCodeRefresh()
         {
             RefreshStarts++;
@@ -272,7 +453,7 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
                 : RefreshSteps.Dequeue();
 
         public NetherRuntimeSnapshotResult TryCaptureRecoveredCodeAppliedSnapshot() =>
-            NetherRuntimeSnapshotResult.Success(Snapshot());
+            NetherRuntimeSnapshotResult.Success(AppliedSnapshot);
 
         public void CompleteRecoveredCodeOffer() => CompletedOwners++;
     }

@@ -72,6 +72,19 @@ public class NetherAutoClimbRouteSafetyWiringTests
         Assert.Null(rejectedBoss.SelectedBattleProjection);
     }
 
+    [Fact]
+    public void Boss_route_carries_sleep_as_its_exact_postbattle_settlement_status()
+    {
+        NetherAutoClimbRouteSafetyDecision decision = DecideBoss(20, Bounds((2, 0, 0)));
+
+        Assert.True(decision.Route.HasSelection);
+        Assert.NotNull(decision.SelectedBattleProjection);
+        Assert.Equal(
+            NetherSessionStatus.Sleep,
+            decision.SelectedBattleProjection!.ExpectedSettlementStatus
+        );
+    }
+
     private static NetherAutoClimbRouteSafetyDecision Decide(
         int erosion = 40,
         NetherActivePartyHpSafety? hp = null,

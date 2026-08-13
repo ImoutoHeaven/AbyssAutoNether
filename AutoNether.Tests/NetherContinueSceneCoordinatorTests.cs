@@ -48,6 +48,82 @@ public class NetherContinueSceneCoordinatorTests
     }
 
     [Fact]
+    public void Server_assigned_destination_completes_when_ticket_status_segment_and_new_identity_are_exact()
+    {
+        var driver = ReadyForReconcileDriver(AppliedSnapshot());
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+        var contract = new NetherContinueSceneContract(
+            ExpectedMapId: 0,
+            ExpectedFloorId: 0,
+            ExpectedSegmentFloorLevel: 10,
+            TicketCost: 1,
+            ExpectedStatus: NetherSessionStatus.Play
+        );
+
+        Assert.True(coordinator.Begin(contract, BeforeSnapshot(), ownerGeneration: 10));
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+        driver.FloorOwnerTerminated = true;
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
+        driver.CurrentRuntimeGeneration = 11;
+        driver.IsExpectedNetherTopScene = true;
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
+        Assert.Equal(3, terminal.Snapshot!.MapId);
+        Assert.Equal(33, terminal.Snapshot.CurrentFloorId);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+    }
+
+    [Fact]
+    public void Server_assigned_destination_rejects_an_unchanged_or_invalid_identity()
+    {
+        NetherSnapshot unchangedIdentity = AppliedSnapshot() with
+        {
+            MapId = BeforeSnapshot().MapId,
+            CurrentFloorId = BeforeSnapshot().CurrentFloorId,
+        };
+        var driver = ReadyForReconcileDriver(unchangedIdentity);
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+        var contract = new NetherContinueSceneContract(
+            ExpectedMapId: 0,
+            ExpectedFloorId: 0,
+            ExpectedSegmentFloorLevel: 10,
+            TicketCost: 1,
+            ExpectedStatus: NetherSessionStatus.Play
+        );
+
+        NetherContinueSceneStep terminal = DriveToTerminal(
+            coordinator,
+            driver,
+            contract
+        );
+
+        Assert.Equal(NetherContinueSceneStepKind.Pause, terminal.Kind);
+        Assert.Contains("wrong-destination", terminal.Detail);
+    }
+
+    [Fact]
+    public void Continue_rejects_a_response_that_fabricates_first_floor_progress()
+    {
+        NetherSnapshot advancedWithoutSelectingNode = AppliedSnapshot() with { FloorLevel = 11 };
+        var driver = ReadyForReconcileDriver(advancedWithoutSelectingNode);
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+
+        NetherContinueSceneStep terminal = DriveToTerminal(
+            coordinator,
+            driver,
+            Contract()
+        );
+
+        Assert.Equal(NetherContinueSceneStepKind.Pause, terminal.Kind);
+        Assert.Contains("wrong-segment", terminal.Detail);
+    }
+
+    [Fact]
     public void Rebind_in_a_wrong_scene_pauses_before_get_reconcile()
     {
         var driver = TerminalParentDriver();
@@ -176,8 +252,15 @@ public class NetherContinueSceneCoordinatorTests
     }
 
     private static NetherContinueSceneStep DriveToTerminal(NetherContinueSceneCoordinator coordinator, FakeDriver driver)
+        => DriveToTerminal(coordinator, driver, Contract());
+
+    private static NetherContinueSceneStep DriveToTerminal(
+        NetherContinueSceneCoordinator coordinator,
+        FakeDriver driver,
+        NetherContinueSceneContract contract
+    )
     {
-        Assert.True(coordinator.Begin(Contract(), BeforeSnapshot(), ownerGeneration: 10));
+        Assert.True(coordinator.Begin(contract, BeforeSnapshot(), ownerGeneration: 10));
         Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
         driver.FloorOwnerTerminated = true;
         Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
@@ -207,7 +290,7 @@ public class NetherContinueSceneCoordinatorTests
     private static NetherContinueSceneContract Contract() => new(
         ExpectedMapId: 3,
         ExpectedFloorId: 33,
-        ExpectedSegmentFloorLevel: 11,
+        ExpectedSegmentFloorLevel: 10,
         TicketCost: 1,
         ExpectedStatus: NetherSessionStatus.Play
     );
@@ -225,7 +308,7 @@ public class NetherContinueSceneCoordinatorTests
         status: NetherSessionStatus.Play,
         mapId: 3,
         floorId: 33,
-        floorLevel: 11,
+        floorLevel: 10,
         ticketCount: 2,
         mapHash: "map-3"
     );

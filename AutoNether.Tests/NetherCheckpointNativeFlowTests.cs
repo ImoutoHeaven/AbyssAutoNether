@@ -37,6 +37,36 @@ public class NetherCheckpointNativeFlowTests
     }
 
     [Fact]
+    public void Continue_without_unlocked_return_reward_skips_return_item_popup()
+    {
+        var flow = new NetherCheckpointNativeFlow();
+        Assert.True(flow.Begin(new NetherPlannedAction(NetherActionKind.Continue)
+        {
+            ReturnLockReward = 0,
+        }));
+
+        Assert.True(flow.SubmitContinue(canBoost: false));
+
+        Assert.Equal(NetherCheckpointNativeStage.AwaitingTerminalTask, flow.Stage);
+        Assert.False(flow.CanSubmitReturnSelection);
+    }
+
+    [Fact]
+    public void Continue_with_unlocked_return_reward_waits_for_return_popup_even_without_boost()
+    {
+        var flow = new NetherCheckpointNativeFlow();
+        Assert.True(flow.Begin(new NetherPlannedAction(NetherActionKind.Continue)
+        {
+            ReturnLockReward = 2,
+        }));
+
+        Assert.True(flow.SubmitContinue(canBoost: false));
+
+        Assert.Equal(NetherCheckpointNativeStage.AwaitingPristineReturnPopup, flow.Stage);
+        Assert.True(flow.CanSubmitReturnSelection);
+    }
+
+    [Fact]
     public void Sequence_rejects_a_second_checkpoint_while_first_is_in_flight()
     {
         var flow = new NetherCheckpointNativeFlow();

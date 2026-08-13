@@ -93,22 +93,24 @@ public class NetherActionReconcilePolicyTests
     public void Exact_continue_ticket_map_floor_and_segment_is_applied_but_wrong_target_is_not()
     {
         NetherSnapshot before = Snapshot(ticketCount: 3, mapId: 2, floorLevel: 10);
-        NetherSnapshot exact = Snapshot(floorId: 33, ticketCount: 2, mapId: 3, floorLevel: 11);
-        NetherSnapshot wrongTicket = Snapshot(floorId: 33, ticketCount: 1, mapId: 3, floorLevel: 11);
-        NetherSnapshot wrongMap = Snapshot(floorId: 33, ticketCount: 2, mapId: 4, floorLevel: 11);
-        NetherSnapshot wrongFloor = Snapshot(floorId: 34, ticketCount: 2, mapId: 3, floorLevel: 11);
+        NetherSnapshot exact = Snapshot(floorId: 33, ticketCount: 2, mapId: 3, floorLevel: 10);
+        NetherSnapshot wrongTicket = Snapshot(floorId: 33, ticketCount: 1, mapId: 3, floorLevel: 10);
+        NetherSnapshot wrongMap = Snapshot(floorId: 33, ticketCount: 2, mapId: 4, floorLevel: 10);
+        NetherSnapshot wrongFloor = Snapshot(floorId: 34, ticketCount: 2, mapId: 3, floorLevel: 10);
+        NetherSnapshot wrongSegment = Snapshot(floorId: 33, ticketCount: 2, mapId: 3, floorLevel: 11);
         NetherPlannedAction action = new(NetherActionKind.Continue)
         {
             TicketCost = 1,
             ExpectedMapId = 3,
             ExpectedFloorId = 33,
-            ExpectedSegmentFloorLevel = 11,
+            ExpectedSegmentFloorLevel = 10,
         };
 
         Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongTicket));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongMap));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongFloor));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongSegment));
     }
 
     [Fact]
@@ -204,6 +206,26 @@ public class NetherActionReconcilePolicyTests
 
         Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongItem));
+    }
+
+    [Fact]
+    public void Server_assigned_continue_target_requires_exact_ticket_segment_and_a_new_positive_identity()
+    {
+        NetherSnapshot before = Snapshot(floorId: 23, ticketCount: 3, mapId: 2, floorLevel: 10);
+        NetherSnapshot assigned = Snapshot(floorId: 33, ticketCount: 2, mapId: 3, floorLevel: 10);
+        NetherSnapshot unchangedIdentity = Snapshot(floorId: 23, ticketCount: 2, mapId: 2, floorLevel: 10);
+        NetherSnapshot invalidIdentity = Snapshot(floorId: 0, ticketCount: 2, mapId: 0, floorLevel: 10);
+        NetherPlannedAction action = new(NetherActionKind.Continue)
+        {
+            TicketCost = 1,
+            ExpectedMapId = 0,
+            ExpectedFloorId = 0,
+            ExpectedSegmentFloorLevel = 10,
+        };
+
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, assigned));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, unchangedIdentity));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, invalidIdentity));
     }
 
     [Fact]

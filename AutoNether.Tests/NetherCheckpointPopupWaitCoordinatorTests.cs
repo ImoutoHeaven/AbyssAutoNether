@@ -134,6 +134,26 @@ public class NetherCheckpointPopupWaitCoordinatorTests
     }
 
     [Fact]
+    public void Nested_scroll_may_share_its_owner_popup_sequence_without_becoming_stale()
+    {
+        var driver = new FakeParentDriver(NetherNativeActionResult.Started("parent-pending"));
+        var waits = new NetherCheckpointPopupWaitCoordinator(driver);
+        Assert.True(waits.Begin(NetherActionKind.Continue, ownerGeneration: 21, minimumSequence: 100));
+
+        Assert.Equal(
+            NetherCheckpointPopupWaitResultKind.Ready,
+            waits.WaitFor(NetherCheckpointPopupKind.Return, Fresh(NetherCheckpointPopupKind.Return, 101)).Kind
+        );
+        Assert.Equal(
+            NetherCheckpointPopupWaitResultKind.Ready,
+            waits.WaitFor(
+                NetherCheckpointPopupKind.ReturnScroll,
+                Fresh(NetherCheckpointPopupKind.ReturnScroll, 101)
+            ).Kind
+        );
+    }
+
+    [Fact]
     public void Finish_can_wait_for_its_continue_confirmation_but_never_owns_return_stages()
     {
         var driver = new FakeParentDriver(NetherNativeActionResult.Started("parent-pending"));

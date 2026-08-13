@@ -57,6 +57,24 @@ internal sealed class NetherPopupOwnershipRegistry
     }
 
     /// <summary>
+    /// Re-owns a popup which was first observed outside this registry. The caller supplies the
+    /// external/global sequence as a strict lower bound, preserving the stale-popup invariant
+    /// when an already-open native modal is handed into a newly-created action owner.
+    /// </summary>
+    public NetherPopupOwnership RegisterAfter(
+        object popup,
+        NetherActionKind action,
+        long generation,
+        long minimumExclusiveSequence
+    )
+    {
+        if (minimumExclusiveSequence < 0)
+            throw new ArgumentOutOfRangeException(nameof(minimumExclusiveSequence));
+        _nextSequence = Math.Max(_nextSequence, minimumExclusiveSequence);
+        return Register(popup, action, generation);
+    }
+
+    /// <summary>
     /// Allocates a fresh sequence for a native child modal without replacing the parent's
     /// current dispatch identity.  This uses the same monotonic counter as Register so a
     /// confirmation popup can never look older after a scene-level registry Clear.

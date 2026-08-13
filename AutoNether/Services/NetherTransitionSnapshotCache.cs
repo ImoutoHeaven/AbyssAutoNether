@@ -40,8 +40,8 @@ internal sealed record NetherAuthoritativeTransitionState
 /// battle scene the graph no longer has a live controller, but the GET-only response still owns
 /// session status, current floor coordinates, resources and code portfolio.  This cache joins
 /// those two sources only when Nether/map identity and the exact current node coordinate agree.
-/// A zero master floor ID is tolerated only during Battle, or on its result-page Play state
-/// when fresh battle-result characters prove that the transition belongs to this combat.
+/// A zero master floor ID is tolerated only during Battle, or on its result-page Play/Sleep
+/// state when fresh battle-result characters prove that the transition belongs to this combat.
 /// </summary>
 internal sealed class NetherTransitionSnapshotCache
 {
@@ -104,13 +104,15 @@ internal sealed class NetherTransitionSnapshotCache
         }
         // The packaged client clears m_nether_map_floor_id to zero twice around a combat:
         // while Status=Battle, and again on the result page after the clear response has
-        // already changed Status to Play.  The latter is distinguishable from an invalid
-        // ordinary Play snapshot only by fresh, validated battle-result characters owned by
-        // this cache.  Both transitions may recover the master floor solely from one exact
-        // cached (floor_level, floor_index) coordinate.
+        // already changed Status to Play or (for a segment-ending Boss) Sleep.  Those latter
+        // states are distinguishable from invalid ordinary snapshots only by fresh, validated
+        // battle-result characters owned by this cache.  All transitions may recover the
+        // master floor solely from one exact cached (floor_level, floor_index) coordinate.
         bool battleCoordinateFallback = state.Status == NetherSessionStatus.Battle
             && state.CurrentFloorId == 0;
-        bool postBattleCoordinateFallback = state.Status == NetherSessionStatus.Play
+        bool postBattleCoordinateFallback = state.Status is (
+                NetherSessionStatus.Play or NetherSessionStatus.Sleep
+            )
             && state.CurrentFloorId == 0
             && requireFreshBattleCharacters
             && battleCharacters != null;
@@ -174,9 +176,9 @@ internal sealed class NetherTransitionSnapshotCache
             Status = state.Status,
             NetherId = state.NetherId,
             MapId = state.MapId,
-            // Live Battle and its result-page Play transition intentionally report
-            // m_nether_map_floor_id=0.  The Play case is admitted only with fresh result
-            // characters; both cases require one exact cached coordinate.  Ordinary
+            // Live Battle and its result-page Play/Sleep transition intentionally report
+            // m_nether_map_floor_id=0.  Post-battle cases are admitted only with fresh result
+            // characters; all cases require one exact cached coordinate.  Ordinary
             // Play/Wait/Sleep snapshots cannot silently drift to another map node.
             CurrentFloorId = current[0].FloorId,
             CurrentNodeId = current[0].NodeId,

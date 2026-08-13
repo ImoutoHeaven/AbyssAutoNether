@@ -460,7 +460,12 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             ProjectedMaximumErosion: projection.ProjectedMaximumErosion!.Value,
             CodeHash: codeHash,
             ProjectionIdentity: projection.ProjectionIdentity
-        );
+        )
+        {
+            ExpectedSettlementStatus = floor.NodeType == NetherFloorNodeType.Boss
+                ? NetherSessionStatus.Sleep
+                : NetherSessionStatus.Play,
+        };
     }
 
     private static bool IsCombat(NetherFloorNodeType type) => type is

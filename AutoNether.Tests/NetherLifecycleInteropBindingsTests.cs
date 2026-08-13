@@ -571,6 +571,33 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
+    public void Packaged_return_popup_exposes_its_exact_nested_scroll_controller()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        Type popup = packaged.RequireType(
+            "Project.Nether.NetherReturnItemSelectionPopup.NetherReturnItemSelectionPopup"
+        );
+        PropertyInfo scroll = Assert.Single(
+            popup.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            property => property.Name == "ReturnableItemScrollViewController"
+        );
+
+        Assert.Equal(
+            "Project.Nether.NetherReturnItemSelectionPopup.NetherReturnableItemScrollViewController",
+            scroll.PropertyType.FullName
+        );
+        Type scrollType = scroll.PropertyType;
+        Assert.Contains(
+            scrollType.GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            member => member.Name == "_contentModelList"
+        );
+        Assert.Contains(
+            scrollType.GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            member => member.Name == "_maxSelectedCount"
+        );
+    }
+
+    [Fact]
     public void Packaged_code_transform_callbacks_and_generated_task_have_exact_interop_bindings()
     {
         using var packaged = PackagedProjectAssembly.Load();

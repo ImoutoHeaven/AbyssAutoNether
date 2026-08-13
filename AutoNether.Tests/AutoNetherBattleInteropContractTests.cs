@@ -49,6 +49,24 @@ public sealed class AutoNetherBattleInteropContractTests
         Assert.Contains("NetherCodePopupReadiness.Evaluate(", runtime);
     }
 
+    [Fact]
+    public void Return_popup_owns_its_already_initialized_nested_scroll_without_waiting_for_a_wrapper_hook()
+    {
+        string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+
+        Assert.Contains(
+            "TryBindReturnScrollFromCurrentPopupCore(\"checkpoint-poll\")",
+            runtime,
+            StringComparison.Ordinal
+        );
+        Assert.DoesNotContain(
+            "TryBindReturnScrollFromPopupCore(registration, \"popup-registration\")",
+            runtime,
+            StringComparison.Ordinal
+        );
+        Assert.Contains("ParentPopup", runtime, StringComparison.Ordinal);
+    }
+
     private static string Read(params string[] path) =>
         File.ReadAllText(Path.Combine(new[] { FindRepositoryRoot() }.Concat(path).ToArray()));
 

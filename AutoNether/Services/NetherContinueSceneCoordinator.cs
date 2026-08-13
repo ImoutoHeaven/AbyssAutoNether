@@ -31,7 +31,13 @@ internal interface INetherContinueSceneDriver : INetherReadOnlyReconcileDriver
     bool IsExpectedNetherTopScene { get; }
 }
 
-/// <summary>Immutable server-owned postcondition required after a one-ticket continuation.</summary>
+/// <summary>
+/// Immutable postcondition required after a one-ticket continuation. Positive map/floor IDs are
+/// an exact packaged-master prediction; a zero/zero pair means that the Continue endpoint will
+/// assign the next segment and reconciliation must prove a new positive destination instead.
+/// ExpectedSegmentFloorLevel is the completed checkpoint floor: Continue changes the map owner,
+/// but choosing the first floor in that map is a later, independent mutation.
+/// </summary>
 internal readonly record struct NetherContinueSceneContract(
     long ExpectedMapId,
     long ExpectedFloorId,
@@ -253,10 +259,19 @@ internal sealed class NetherContinueSceneCoordinator
         NetherSnapshot before = _before!;
         if (after.TicketCount != before.TicketCount - _contract.TicketCost)
             return TerminalPause("continue-settlement-wrong-ticket");
-        if (after.MapId != _contract.ExpectedMapId)
-            return TerminalPause("continue-settlement-wrong-map");
-        if (after.CurrentFloorId != _contract.ExpectedFloorId)
-            return TerminalPause("continue-settlement-wrong-floor");
+        if (HasPredictedDestination(_contract))
+        {
+            if (after.MapId != _contract.ExpectedMapId)
+                return TerminalPause("continue-settlement-wrong-map");
+            if (after.CurrentFloorId != _contract.ExpectedFloorId)
+                return TerminalPause("continue-settlement-wrong-floor");
+        }
+        else if (after.MapId <= 0
+            || after.CurrentFloorId <= 0
+            || (after.MapId == before.MapId && after.CurrentFloorId == before.CurrentFloorId))
+        {
+            return TerminalPause("continue-settlement-wrong-destination");
+        }
         if (after.FloorLevel != _contract.ExpectedSegmentFloorLevel)
             return TerminalPause("continue-settlement-wrong-segment");
         if (after.Status != _contract.ExpectedStatus)
@@ -287,12 +302,19 @@ internal sealed class NetherContinueSceneCoordinator
         NetherContinueSceneContract contract,
         NetherSnapshot before,
         long ownerGeneration
-    ) => contract.ExpectedMapId > 0
-        && contract.ExpectedFloorId > 0
+    ) => HasValidDestinationContract(contract)
         && contract.ExpectedSegmentFloorLevel > 0
+        && contract.ExpectedSegmentFloorLevel == before.FloorLevel
         && contract.TicketCost == 1
         && contract.ExpectedStatus != NetherSessionStatus.Unknown
         && before.Status == NetherSessionStatus.Sleep
         && before.TicketCount >= contract.TicketCost
         && ownerGeneration > 0;
+
+    private static bool HasPredictedDestination(NetherContinueSceneContract contract) =>
+        contract.ExpectedMapId > 0 && contract.ExpectedFloorId > 0;
+
+    private static bool HasValidDestinationContract(NetherContinueSceneContract contract) =>
+        HasPredictedDestination(contract)
+        || (contract.ExpectedMapId == 0 && contract.ExpectedFloorId == 0);
 }

@@ -58,4 +58,28 @@ public class NetherPopupOwnershipRegistryTests
         Assert.Same(parentPopup, current.Popup);
         Assert.Equal(parent.Sequence, current.Sequence);
     }
+
+    [Fact]
+    public void Register_after_external_sequence_is_strictly_newer()
+    {
+        var registry = new NetherPopupOwnershipRegistry();
+        long generation = registry.BeginOwner(NetherActionKind.Continue);
+        object popup = new();
+
+        NetherPopupOwnership ownership = registry.RegisterAfter(
+            popup,
+            NetherActionKind.Continue,
+            generation,
+            minimumExclusiveSequence: 41
+        );
+
+        Assert.True(ownership.Sequence > 41);
+        Assert.True(registry.TryGetOwned(
+            NetherActionKind.Continue,
+            generation,
+            out NetherPopupOwnership current
+        ));
+        Assert.Same(popup, current.Popup);
+        Assert.Equal(ownership.Sequence, current.Sequence);
+    }
 }

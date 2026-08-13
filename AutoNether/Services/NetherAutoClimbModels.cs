@@ -454,9 +454,12 @@ internal sealed record NetherAutoClimbSettings
 }
 
 /// <summary>
-/// Exact, pre-mutation target for a Sleep continuation, derived from the current map-floor
-/// master chain.  A missing target is intentionally represented as null on the snapshot so the
-/// controller pauses before issuing Continue rather than inferring the next segment.
+/// Optional identity prediction for a Sleep continuation, derived from the current packaged
+/// map-floor master chain.  RequestNetherContinueAsync carries the current absolute floor plus
+/// the exact one-ticket count (and optional return items). Continue installs the next map without
+/// itself clearing its first node, so the segment-entry floor remains the completed checkpoint
+/// floor. The response remains authoritative for map/floor identity when the local master has no
+/// next-floor link.
 /// </summary>
 internal sealed record NetherContinuationTarget(
     long MapId,
@@ -542,7 +545,14 @@ internal sealed record NetherBattleProjectionPayload(
     int ProjectedMaximumErosion,
     string CodeHash,
     string ProjectionIdentity
-);
+)
+{
+    /// <summary>
+    /// Exact server status expected after this combat is settled. Ordinary battles and
+    /// minibosses return to Play; a segment-ending Boss enters the Sleep checkpoint flow.
+    /// </summary>
+    public NetherSessionStatus ExpectedSettlementStatus { get; init; } = NetherSessionStatus.Play;
+}
 
 /// <summary>
 /// One immutable, owned modal stage in a SelectFloor native parent chain.  A floor parent can
@@ -588,6 +598,10 @@ internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
     public long ExpectedMapId { get; init; }
     /// <summary>Exact post-Continue floor ID, not the source floor-selection ID.</summary>
     public long ExpectedFloorId { get; init; }
+    /// <summary>
+    /// Exact completed floor at post-Continue segment entry; never raw continuance_floor_level.
+    /// It remains equal to the checkpoint until the first node in the new map is selected.
+    /// </summary>
     public int ExpectedSegmentFloorLevel { get; init; }
     /// <summary>
     /// Once a SelectFloor parent has opened an owned popup, these two fields retain the

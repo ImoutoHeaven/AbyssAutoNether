@@ -40,6 +40,7 @@ internal static class NetherAutoClimbController
         NetherBattleSettingsLease.Instance
     );
     private static readonly NetherNativeWaitGate BattleAccessorWait = new(maximumMissingPolls: 3600);
+    private static readonly NetherNativeWaitGate ExistingCheckpointWait = new(maximumMissingPolls: 600);
     // F12 can arrive a few frames before FloorSelection/Result registers its exact native
     // owner.  Preserve that user intent only for a bounded registration window; no route,
     // popup, or server mutation is allowed until one of those authoritative owners exists.
@@ -50,6 +51,7 @@ internal static class NetherAutoClimbController
     private static NetherBattleProjectionPayload? _pendingBattleProjection;
     private static int _deferredEnableRemainingUpdates;
     private static string _lastTransition = string.Empty;
+    private static readonly NetherDiagnosticTransitionGate RecoveredCodeDiagnosticGate = new();
 
     public static bool IsEnabled => State.IsEnabled;
 
@@ -119,7 +121,9 @@ internal static class NetherAutoClimbController
         _pendingBattleProjection = null;
         _deferredEnableRemainingUpdates = 0;
         BattleAccessorWait.Clear();
+        ExistingCheckpointWait.Clear();
         _lastTransition = string.Empty;
+        RecoveredCodeDiagnosticGate.Reset();
         return scope;
     }
 
@@ -453,8 +457,10 @@ internal static class NetherAutoClimbController
         _pendingBattleProjection = null;
         _deferredEnableRemainingUpdates = 0;
         BattleAccessorWait.Clear();
+        ExistingCheckpointWait.Clear();
         ProjectionCalibration.Clear();
         _lastTransition = string.Empty;
+        RecoveredCodeDiagnosticGate.Reset();
     }
 
     private static void ObserveDeferredEnableIntent()
@@ -1111,18 +1117,28 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("replaceCodeId", step.Action?.ReplaceCodeId.ToString() ?? "0"),
             new NetherDetailedAuditField("lane", step.LockedLane?.ToString() ?? "none")
         );
-        LogDiagnostic(
-            "recovered-code",
-            new("step", step.Kind.ToString()),
-            new("detail", step.Detail),
-            new("enabled", State.IsEnabled.ToString()),
-            new("phase", State.Phase.ToString()),
-            new("action", step.Action?.Kind.ToString() ?? "none"),
-            new("codeId", step.Action?.CodeId.ToString() ?? "0"),
-            new("replaceCodeId", step.Action?.ReplaceCodeId.ToString() ?? "0"),
-            new("lane", step.LockedLane?.ToString() ?? "none"),
-            new("hasSnapshot", (step.Snapshot != null).ToString())
-        );
+        string diagnosticSignature = step.Kind + "|" + step.Detail + "|"
+            + State.IsEnabled + "|" + State.Phase + "|"
+            + (step.Action?.Kind.ToString() ?? "none") + "|"
+            + (step.Action?.CodeId.ToString() ?? "0") + "|"
+            + (step.Action?.ReplaceCodeId.ToString() ?? "0");
+        if (RecoveredCodeDiagnosticGate.ShouldEmit("controller", diagnosticSignature))
+        {
+            LogDiagnostic(
+                "recovered-code",
+                new("step", step.Kind.ToString()),
+                new("detail", step.Detail),
+                new("enabled", State.IsEnabled.ToString()),
+                new("phase", State.Phase.ToString()),
+                new("action", step.Action?.Kind.ToString() ?? "none"),
+                new("codeId", step.Action?.CodeId.ToString() ?? "0"),
+                new("replaceCodeId", step.Action?.ReplaceCodeId.ToString() ?? "0"),
+                new("lane", step.LockedLane?.ToString() ?? "none"),
+                new("hasSnapshot", (step.Snapshot != null).ToString())
+            );
+        }
+        if (step.ReconcileDiagnostic is NetherRecoveredCodeReconcileDiagnostic reconcile)
+            LogRecoveredCodeReconcile(reconcile);
 
         switch (step.Kind)
         {
@@ -1132,6 +1148,34 @@ internal static class NetherAutoClimbController
             case NetherRecoveredCodeOfferStepKind.ReloadReady:
             case NetherRecoveredCodeOfferStepKind.AwaitingParent:
             case NetherRecoveredCodeOfferStepKind.AwaitingRefresh:
+                return;
+            case NetherRecoveredCodeOfferStepKind.CheckpointReady:
+                if (step.Snapshot == null || step.Snapshot.Status != NetherSessionStatus.Sleep)
+                {
+                    FailClosed(
+                        NetherPauseReason.BindingUnavailable,
+                        "recovered-checkpoint-handoff-without-sleep-snapshot"
+                    );
+                    return;
+                }
+                _lockedCombatLane = step.LockedLane ?? _lockedCombatLane;
+                AuditSnapshot(step.Snapshot, "recovered-checkpoint-handoff");
+                LogSnapshotDiagnostic(step.Snapshot, "recovered-checkpoint-handoff");
+                State.ObserveStable(step.Snapshot.Fingerprint);
+                if (State.Phase != NetherAutoClimbPhase.Stable)
+                {
+                    FailClosed(
+                        NetherPauseReason.ContinueLifecycleFault,
+                        "recovered-checkpoint-handoff-not-stable"
+                    );
+                    return;
+                }
+                PlanCheckpointBoundary(
+                    step.Snapshot,
+                    step.CapturedSettings ?? capturedSettings ?? BuildSettings(),
+                    "recovered-code-parent",
+                    existingCheckpointHandoffPrepared: true
+                );
                 return;
             case NetherRecoveredCodeOfferStepKind.Completed:
                 if (step.Snapshot == null)
@@ -1437,6 +1481,20 @@ internal static class NetherAutoClimbController
     private static void ObserveContinueSceneHandoff()
     {
         NetherContinueSceneStep step = ContinueSceneFlow.Pump();
+        string diagnosticSignature = step.Kind + "|" + step.Detail + "|"
+            + State.Phase + "|" + (State.PendingAction?.Kind ?? NetherActionKind.None);
+        if (RecoveredCodeDiagnosticGate.ShouldEmit("continue-scene", diagnosticSignature))
+        {
+            LogDiagnostic(
+                "continue-handoff",
+                new("step", step.Kind.ToString()),
+                new("detail", step.Detail),
+                new("phase", State.Phase.ToString()),
+                new("enabled", State.IsEnabled.ToString()),
+                new("pending", (State.PendingAction?.Kind ?? NetherActionKind.None).ToString()),
+                new("hasSnapshot", (step.Snapshot != null).ToString())
+            );
+        }
         switch (step.Kind)
         {
             case NetherContinueSceneStepKind.WaitForTeardown:
@@ -1504,10 +1562,20 @@ internal static class NetherAutoClimbController
         if (!EnsureBattleSettingsLifecycleReady("stable-route-boundary"))
             return;
 
+        PlanCheckpointBoundary(snapshot, settings, "stable");
+    }
+
+    private static void PlanCheckpointBoundary(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        string boundary,
+        bool existingCheckpointHandoffPrepared = false
+    )
+    {
         NetherCheckpointDecision checkpoint = CheckpointPolicy.Decide(snapshot, settings);
         Audit(
             NetherDetailedAuditKind.Checkpoint,
-            "checkpoint-policy:" + snapshot.Fingerprint + ":" + settings.MaxDepth,
+            "checkpoint-policy:" + boundary + ":" + snapshot.Fingerprint + ":" + settings.MaxDepth,
             new NetherDetailedAuditField("status", snapshot.Status.ToString()),
             new NetherDetailedAuditField("currentFloor", snapshot.FloorLevel.ToString()),
             new NetherDetailedAuditField("configuredMaxDepth", settings.MaxDepth.ToString()),
@@ -1528,7 +1596,7 @@ internal static class NetherAutoClimbController
                 return;
             case NetherCheckpointDecisionKind.ContinueOneTicket:
             case NetherCheckpointDecisionKind.FinishNormally:
-                PlanCheckpoint(snapshot, checkpoint);
+                PlanCheckpoint(snapshot, checkpoint, existingCheckpointHandoffPrepared);
                 return;
         }
 
@@ -1628,7 +1696,11 @@ internal static class NetherAutoClimbController
         }
     }
 
-    private static void PlanCheckpoint(NetherSnapshot snapshot, NetherCheckpointDecision checkpoint)
+    private static void PlanCheckpoint(
+        NetherSnapshot snapshot,
+        NetherCheckpointDecision checkpoint,
+        bool existingCheckpointHandoffPrepared
+    )
     {
         if (!NetherPreserveItemIdParser.TryParse(
                 Config.CheckpointPreserveItemIds.Value,
@@ -1646,22 +1718,112 @@ internal static class NetherAutoClimbController
         // Finish transitions directly to result and carries no return selection information.
 
         NetherPlannedAction action;
+        NetherContinuationTarget? continuationTarget = null;
         if (checkpoint.Kind == NetherCheckpointDecisionKind.ContinueOneTicket)
         {
-            NetherContinuationTarget? target = snapshot.ContinuationTarget;
-            if (target == null)
+            NetherRecoveredCheckpointObservation existingCheckpoint = existingCheckpointHandoffPrepared
+                ? NetherRecoveredCheckpointObservation.NotObserved(
+                    "existing-checkpoint-handoff-already-prepared"
+                )
+                : _bridge.ObserveRecoveredCheckpoint();
+            Audit(
+                NetherDetailedAuditKind.Checkpoint,
+                "checkpoint-existing-parent:" + existingCheckpoint.Kind + ":" + snapshot.Fingerprint,
+                new NetherDetailedAuditField("outcome", existingCheckpoint.Kind.ToString()),
+                new NetherDetailedAuditField("detail", existingCheckpoint.Detail),
+                new NetherDetailedAuditField("status", snapshot.Status.ToString())
+            );
+            if (RecoveredCodeDiagnosticGate.ShouldEmit(
+                    "checkpoint-existing-parent",
+                    existingCheckpoint.Kind + "|" + existingCheckpoint.Detail
+                ))
             {
-                FailClosed(NetherPauseReason.UnknownMasterData, "continue-target-unavailable-before-native-mutation");
+                LogDiagnostic(
+                    "checkpoint-existing-parent",
+                    new("outcome", existingCheckpoint.Kind.ToString()),
+                    new("detail", existingCheckpoint.Detail),
+                    new("status", snapshot.Status.ToString()),
+                    new("floorLevel", snapshot.FloorLevel.ToString()),
+                    new("continuanceFloorLevel", snapshot.ContinuanceFloorLevel.ToString())
+                );
+            }
+
+            if (existingCheckpoint.Kind == NetherRecoveredCheckpointObservationKind.Waiting)
+            {
+                NetherNativeActionResult wait = ExistingCheckpointWait.AwaitRegistration(
+                    "existing-checkpoint-popup"
+                );
+                if (wait.Kind == NetherNativeActionResultKind.Started)
+                    return;
+                FailClosed(
+                    NetherPauseReason.BindingUnavailable,
+                    "existing-checkpoint-wait:" + wait.Detail + ":" + existingCheckpoint.Detail
+                );
                 return;
             }
+            if (existingCheckpoint.Kind == NetherRecoveredCheckpointObservationKind.BindingUnavailable)
+            {
+                ExistingCheckpointWait.Clear();
+                FailClosed(
+                    NetherPauseReason.BindingUnavailable,
+                    "existing-checkpoint-observation:" + existingCheckpoint.Detail
+                );
+                return;
+            }
+            if (existingCheckpoint.Kind == NetherRecoveredCheckpointObservationKind.Ready)
+            {
+                ExistingCheckpointWait.ObserveRegistration();
+                if (existingCheckpoint.Snapshot == null
+                    || existingCheckpoint.Snapshot.Status != NetherSessionStatus.Sleep
+                    || existingCheckpoint.Snapshot.Fingerprint != snapshot.Fingerprint)
+                {
+                    FailClosed(
+                        NetherPauseReason.BindingUnavailable,
+                        "existing-checkpoint-snapshot-changed-before-handoff"
+                    );
+                    return;
+                }
+                NetherNativeActionResult handoff = _bridge.PrepareRecoveredCheckpointHandoff();
+                if (handoff.Kind != NetherNativeActionResultKind.Completed)
+                {
+                    FailClosed(
+                        NetherPauseReason.BindingUnavailable,
+                        "existing-checkpoint-handoff:" + handoff.Detail
+                    );
+                    return;
+                }
+                snapshot = existingCheckpoint.Snapshot;
+            }
+            else
+            {
+                ExistingCheckpointWait.Clear();
+            }
+
+            NetherContinuationTarget? target = snapshot.ContinuationTarget;
+            continuationTarget = target;
+            // The live server keeps continuance_floor_level as the prior paid-segment marker
+            // (for example current floor 20 with marker 10). Continue installs the next map, but
+            // it does not clear a floor: the authoritative current/completed floor therefore
+            // remains 20 until the client selects a node on floor 21. Map/floor master IDs remain
+            // an optional prediction and are still proven against the authoritative response.
+            if (snapshot.FloorLevel <= 0)
+            {
+                FailClosed(
+                    NetherPauseReason.UnknownMasterData,
+                    "continue-entry-floor-invalid-before-native-mutation:current="
+                        + snapshot.FloorLevel
+                );
+                return;
+            }
+            int expectedSegmentFloorLevel = snapshot.FloorLevel;
 
             action = new NetherPlannedAction(NetherActionKind.Continue)
             {
                 TicketCount = checkpoint.TicketCount,
                 TicketCost = 1,
-                ExpectedMapId = target.MapId,
-                ExpectedFloorId = target.FloorId,
-                ExpectedSegmentFloorLevel = target.SegmentFloorLevel,
+                ExpectedMapId = target?.MapId ?? 0,
+                ExpectedFloorId = target?.FloorId ?? 0,
+                ExpectedSegmentFloorLevel = expectedSegmentFloorLevel,
                 ReturnLockReward = snapshot.LockReward,
                 ReturnPreserveItemIds = preserveIds.OrderBy(itemId => itemId).ToArray(),
             };
@@ -1680,6 +1842,12 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("ticketCount", action.TicketCount.ToString()),
             new NetherDetailedAuditField("lockReward", action.ReturnLockReward.ToString()),
             new NetherDetailedAuditField("preserveCount", action.ReturnPreserveItemIds.Count.ToString()),
+            new NetherDetailedAuditField("targetSource", action.ExpectedMapId > 0 ? "local-master" : "server-assigned"),
+            new NetherDetailedAuditField("expectedMapId", action.ExpectedMapId.ToString()),
+            new NetherDetailedAuditField("expectedFloorId", action.ExpectedFloorId.ToString()),
+            new NetherDetailedAuditField("expectedSegment", action.ExpectedSegmentFloorLevel.ToString()),
+            new NetherDetailedAuditField("rawContinuanceFloor", snapshot.ContinuanceFloorLevel.ToString()),
+            new NetherDetailedAuditField("masterPredictedSegment", continuationTarget?.SegmentFloorLevel.ToString() ?? "none"),
             new NetherDetailedAuditField("order", action.Kind == NetherActionKind.Continue ? "continue-preflight-return" : "finish-no-return")
         );
         ExecuteNativeAction(snapshot, action, "checkpoint");
@@ -1817,7 +1985,7 @@ internal static class NetherAutoClimbController
                 EntryStatus: NetherSessionStatus.Battle,
                 ExpectedMapId: snapshot.MapId,
                 ExpectedFloorId: snapshot.CurrentFloorId,
-                ExpectedStatus: NetherSessionStatus.Play,
+                ExpectedStatus: entryProjection.ExpectedSettlementStatus,
                 ProjectionIdentity: entryProjection.ProjectionIdentity
             )
             {
@@ -1832,6 +2000,7 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("preErosion", entryProjection.PreBattleErosion.ToString()),
             new NetherDetailedAuditField("projectedMin", entryProjection.ProjectedMinimumErosion.ToString()),
             new NetherDetailedAuditField("projectedMax", entryProjection.ProjectedMaximumErosion.ToString()),
+            new NetherDetailedAuditField("expectedSettlementStatus", entryProjection.ExpectedSettlementStatus.ToString()),
             new NetherDetailedAuditField("codeHash", entryProjection.CodeHash),
             new NetherDetailedAuditField("identity", entryProjection.ProjectionIdentity)
         );
@@ -2219,6 +2388,46 @@ internal static class NetherAutoClimbController
         params NetherAutoClimbDiagnosticField[] fields
     ) => Logger.Info(NetherAutoClimbDiagnostics.Format(eventName, fields));
 
+    private static void LogRecoveredCodeReconcile(
+        NetherRecoveredCodeReconcileDiagnostic diagnostic
+    )
+    {
+        if (!Config.NetherAutoClimbDetailedLogging.Value)
+            return;
+
+        string reload = diagnostic.BeforeReloadCount + "->" + diagnostic.AfterReloadCount;
+        LogDiagnostic(
+            "recovered-code-reconcile",
+            new("outcome", diagnostic.Outcome.ToString()),
+            new("action", diagnostic.ActionKind.ToString()),
+            new("target", diagnostic.TargetCodeId.ToString()),
+            new("replace", diagnostic.ReplaceCodeId.ToString()),
+            new("reload", reload),
+            new("reloadActions", diagnostic.ReloadActions.ToString()),
+            new("expectedReload", diagnostic.ExpectedReloadCount.ToString()),
+            new("targetBefore", diagnostic.TargetPresentBefore.ToString()),
+            new("targetAfter", diagnostic.TargetPresentAfter.ToString()),
+            new("replaceBefore", diagnostic.ReplacementPresentBefore.ToString()),
+            new("replaceAfter", diagnostic.ReplacementPresentAfter.ToString()),
+            new("reason", diagnostic.Reason)
+        );
+        Audit(
+            NetherDetailedAuditKind.Reconcile,
+            "recovered-code:" + diagnostic.Outcome + ":" + diagnostic.TargetCodeId,
+            new NetherDetailedAuditField("outcome", diagnostic.Outcome.ToString()),
+            new NetherDetailedAuditField("action", diagnostic.ActionKind.ToString()),
+            new NetherDetailedAuditField("target", diagnostic.TargetCodeId.ToString()),
+            new NetherDetailedAuditField("replace", diagnostic.ReplaceCodeId.ToString()),
+            new NetherDetailedAuditField("reload", reload),
+            new NetherDetailedAuditField("reloadActions", diagnostic.ReloadActions.ToString()),
+            new NetherDetailedAuditField("expectedReload", diagnostic.ExpectedReloadCount.ToString()),
+            new NetherDetailedAuditField("portfolioSame", diagnostic.PortfolioUnchanged.ToString()),
+            new NetherDetailedAuditField("beforeCodes", diagnostic.BeforeCodeIds),
+            new NetherDetailedAuditField("afterCodes", diagnostic.AfterCodeIds),
+            new NetherDetailedAuditField("reason", diagnostic.Reason)
+        );
+    }
+
     private static void Audit(
         NetherDetailedAuditKind kind,
         string key,
@@ -2592,6 +2801,7 @@ internal static class NetherAutoClimbController
             new("currentMasterId", snapshot.CurrentFloorId.ToString()),
             new("currentNodeId", snapshot.CurrentNodeId.ToString()),
             new("floorLevel", snapshot.FloorLevel.ToString()),
+            new("continuanceFloorLevel", snapshot.ContinuanceFloorLevel.ToString()),
             new("apiFloorIndex", snapshot.FloorIndex.ToString()),
             new("serverReachedFloor", snapshot.MaxFloorLevel.ToString()),
             new("masterMaxDepth", snapshot.MasterMaxFloorLevel.ToString()),
