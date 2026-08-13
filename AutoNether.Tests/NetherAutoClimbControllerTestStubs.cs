@@ -82,6 +82,9 @@ internal sealed class NetherRuntimeBridge
         public bool FloorOwnerTerminated => false;
         public long CurrentRuntimeGeneration => 0;
         public bool IsExpectedNetherTopScene => false;
+        public NetherFloorSceneSnapshotResult TryCaptureReadyFloorSceneSnapshot(
+            long minimumGenerationExclusive = 0
+        ) => NetherFloorSceneSnapshotResult.Waiting(0, "test-unconfigured-floor-scene");
         public NetherRuntimeSnapshotResult TryCaptureSnapshot() => NetherRuntimeSnapshotResult.Failure("test-unconfigured-snapshot");
         public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors) => new();
         public NetherRuntimeInteractivePreEntryInputsResult TryCaptureInteractivePreEntryInputs(NetherSnapshot snapshot, NetherAutoClimbSettings settings) =>

@@ -221,5 +221,26 @@ public class NetherContinueSceneRuntimeCoordinatorTests
 
         public NetherReadOnlySnapshotResult TryCaptureAppliedSnapshot() =>
             NetherReadOnlySnapshotResult.Success(_after);
+
+        public NetherFloorSceneSnapshotResult TryCaptureReadyFloorSceneSnapshot(
+            long minimumGenerationExclusive = 0
+        )
+        {
+            NetherFloorSceneReadinessDecision readiness = NetherFloorSceneReadiness.Evaluate(new(
+                minimumGenerationExclusive,
+                CurrentRuntimeGeneration,
+                HasCurrentController: CurrentRuntimeGeneration > 0,
+                IsExpectedCurrentController: IsExpectedNetherTopScene,
+                HasEnteredCurrentGeneration: true,
+                HasAuthoritativeSnapshot: true,
+                CaptureStayedOnCurrentController: true
+            ));
+            return readiness.IsReady
+                ? NetherFloorSceneSnapshotResult.Ready(CurrentRuntimeGeneration, _after)
+                : NetherFloorSceneSnapshotResult.Waiting(
+                    CurrentRuntimeGeneration,
+                    readiness.Detail
+                );
+        }
     }
 }

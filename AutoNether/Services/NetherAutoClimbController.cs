@@ -41,6 +41,7 @@ internal static class NetherAutoClimbController
     );
     private static readonly NetherNativeWaitGate BattleAccessorWait = new(maximumMissingPolls: 3600);
     private static readonly NetherNativeWaitGate ExistingCheckpointWait = new(maximumMissingPolls: 600);
+    private static readonly NetherNativeWaitGate FloorSceneReadinessWait = new(maximumMissingPolls: 600);
     // F12 can arrive a few frames before FloorSelection/Result registers its exact native
     // owner.  Preserve that user intent only for a bounded registration window; no route,
     // popup, or server mutation is allowed until one of those authoritative owners exists.
@@ -51,7 +52,10 @@ internal static class NetherAutoClimbController
     private static NetherBattleProjectionPayload? _pendingBattleProjection;
     private static int _deferredEnableRemainingUpdates;
     private static string _lastTransition = string.Empty;
+    private static bool _awaitingReconcileFloorSceneSnapshot;
     private static readonly NetherDiagnosticTransitionGate RecoveredCodeDiagnosticGate = new();
+    private static readonly NetherDiagnosticTransitionGate FloorSceneReadinessDiagnosticGate = new();
+    private static readonly NetherDiagnosticTransitionGate BattleResultDiagnosticGate = new();
 
     public static bool IsEnabled => State.IsEnabled;
 
@@ -102,7 +106,8 @@ internal static class NetherAutoClimbController
             _lockedCombatLane,
             _pendingBattleProjection,
             _deferredEnableRemainingUpdates,
-            _lastTransition
+            _lastTransition,
+            _awaitingReconcileFloorSceneSnapshot
         );
         _bridge = bridge;
         State = new NetherAutoClimbStateMachine();
@@ -120,10 +125,14 @@ internal static class NetherAutoClimbController
         _lockedCombatLane = null;
         _pendingBattleProjection = null;
         _deferredEnableRemainingUpdates = 0;
+        _awaitingReconcileFloorSceneSnapshot = false;
         BattleAccessorWait.Clear();
         ExistingCheckpointWait.Clear();
+        FloorSceneReadinessWait.Clear();
         _lastTransition = string.Empty;
         RecoveredCodeDiagnosticGate.Reset();
+        FloorSceneReadinessDiagnosticGate.Reset();
+        BattleResultDiagnosticGate.Reset();
         return scope;
     }
 
@@ -244,6 +253,7 @@ internal static class NetherAutoClimbController
         }
 
         _deferredEnableRemainingUpdates = 0;
+        _awaitingReconcileFloorSceneSnapshot = false;
         NetherRuntimeSnapshotResult captured = _bridge.TryCaptureSnapshot();
         if (!captured.IsSuccess)
         {
@@ -400,7 +410,10 @@ internal static class NetherAutoClimbController
         if (!State.IsEnabled && !disabledReconciliation)
             return;
 
-        if (!_bridge.HasRegisteredFloorSelection)
+        bool phaseOwnsFloorSceneReadiness = State.Phase is (
+            NetherAutoClimbPhase.Reconciling or NetherAutoClimbPhase.Stable
+        );
+        if (!_bridge.HasRegisteredFloorSelection && !phaseOwnsFloorSceneReadiness)
         {
             if (State.PendingAction?.Kind == NetherActionKind.BattleSettlement)
             {
@@ -456,11 +469,15 @@ internal static class NetherAutoClimbController
         _lockedCombatLane = null;
         _pendingBattleProjection = null;
         _deferredEnableRemainingUpdates = 0;
+        _awaitingReconcileFloorSceneSnapshot = false;
         BattleAccessorWait.Clear();
         ExistingCheckpointWait.Clear();
+        FloorSceneReadinessWait.Clear();
         ProjectionCalibration.Clear();
         _lastTransition = string.Empty;
         RecoveredCodeDiagnosticGate.Reset();
+        FloorSceneReadinessDiagnosticGate.Reset();
+        BattleResultDiagnosticGate.Reset();
     }
 
     private static void ObserveDeferredEnableIntent()
@@ -883,6 +900,24 @@ internal static class NetherAutoClimbController
 
     private static void Reconcile()
     {
+        if (_awaitingReconcileFloorSceneSnapshot)
+        {
+            if (!TryCaptureReadyFloorSceneSnapshot(
+                    "reconcile-after-refresh",
+                    out NetherSnapshot reboundSnapshot
+                ))
+            {
+                return;
+            }
+
+            _awaitingReconcileFloorSceneSnapshot = false;
+            CompleteReconcile(reboundSnapshot);
+            return;
+        }
+
+        if (!TryCaptureReadyFloorSceneSnapshot("reconcile-before-refresh", out _))
+            return;
+
         NetherReadOnlyReconcileStep refresh = ReadOnlyReconcileFlow.Pump();
         Audit(
             NetherDetailedAuditKind.Reconcile,
@@ -894,16 +929,32 @@ internal static class NetherAutoClimbController
             return;
         if (refresh.Kind == NetherReadOnlyReconcileStepKind.BindingUnavailable)
         {
+            _awaitingReconcileFloorSceneSnapshot = false;
             FailClosed(NetherPauseReason.BindingUnavailable, refresh.Detail);
             return;
         }
         if (refresh.Kind != NetherReadOnlyReconcileStepKind.Applied || refresh.Snapshot == null)
         {
+            _awaitingReconcileFloorSceneSnapshot = false;
             FailClosed(NetherPauseReason.AmbiguousServerOutcome, refresh.Detail);
             return;
         }
 
-        NetherSnapshot snapshot = refresh.Snapshot;
+        _awaitingReconcileFloorSceneSnapshot = true;
+        if (!TryCaptureReadyFloorSceneSnapshot(
+                "reconcile-after-refresh",
+                out NetherSnapshot snapshot
+            ))
+        {
+            return;
+        }
+
+        _awaitingReconcileFloorSceneSnapshot = false;
+        CompleteReconcile(snapshot);
+    }
+
+    private static void CompleteReconcile(NetherSnapshot snapshot)
+    {
         AuditSnapshot(snapshot, "reconcile");
         NetherProjectionObservation projection = ProjectionCalibration.Observe(snapshot);
         Audit(
@@ -1034,6 +1085,7 @@ internal static class NetherAutoClimbController
                     return;
                 }
                 BattleResultCodeFlow.Reset();
+                BattleResultDiagnosticGate.Reset();
                 if (!State.BeginBattleResultContinuation())
                 {
                     FailClosedTerminal(
@@ -1238,16 +1290,30 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("replaceCodeId", codeStep.Action?.ReplaceCodeId.ToString() ?? "0"),
             new NetherDetailedAuditField("lane", codeStep.LockedLane?.ToString() ?? "none")
         );
-        LogDiagnostic(
-            "battle-result-code",
-            new("step", codeStep.Kind.ToString()),
-            new("detail", codeStep.Detail),
-            new("enabled", State.IsEnabled.ToString()),
-            new("action", codeStep.Action?.Kind.ToString() ?? "none"),
-            new("codeId", codeStep.Action?.CodeId.ToString() ?? "0"),
-            new("replaceCodeId", codeStep.Action?.ReplaceCodeId.ToString() ?? "0"),
-            new("lane", codeStep.LockedLane?.ToString() ?? "none")
-        );
+        string codeDiagnosticSignature = codeStep.Kind
+            + "|"
+            + codeStep.Detail
+            + "|"
+            + (codeStep.Action?.Kind.ToString() ?? "none")
+            + "|"
+            + (codeStep.Action?.CodeId.ToString() ?? "0")
+            + "|"
+            + (codeStep.Action?.ReplaceCodeId.ToString() ?? "0")
+            + "|"
+            + (codeStep.LockedLane?.ToString() ?? "none");
+        if (BattleResultDiagnosticGate.ShouldEmit("code", codeDiagnosticSignature))
+        {
+            LogDiagnostic(
+                "battle-result-code",
+                new("step", codeStep.Kind.ToString()),
+                new("detail", codeStep.Detail),
+                new("enabled", State.IsEnabled.ToString()),
+                new("action", codeStep.Action?.Kind.ToString() ?? "none"),
+                new("codeId", codeStep.Action?.CodeId.ToString() ?? "0"),
+                new("replaceCodeId", codeStep.Action?.ReplaceCodeId.ToString() ?? "0"),
+                new("lane", codeStep.LockedLane?.ToString() ?? "none")
+            );
+        }
         switch (codeStep.Kind)
         {
             case NetherBattleResultCodeStepKind.AwaitingPopup:
@@ -1294,14 +1360,27 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("phase", State.Phase.ToString()),
             new NetherDetailedAuditField("pending", State.PendingAction?.Kind.ToString() ?? "none")
         );
-        LogDiagnostic(
-            "battle-result-continuation",
-            new("step", step.Kind.ToString()),
-            new("detail", step.Detail),
-            new("enabled", State.IsEnabled.ToString()),
-            new("phase", State.Phase.ToString()),
-            new("hasSnapshot", (step.Snapshot != null).ToString())
-        );
+        string continuationDiagnosticSignature = step.Kind
+            + "|"
+            + step.Detail
+            + "|"
+            + State.Phase
+            + "|"
+            + (step.Snapshot != null);
+        if (BattleResultDiagnosticGate.ShouldEmit(
+                "continuation",
+                continuationDiagnosticSignature
+            ))
+        {
+            LogDiagnostic(
+                "battle-result-continuation",
+                new("step", step.Kind.ToString()),
+                new("detail", step.Detail),
+                new("enabled", State.IsEnabled.ToString()),
+                new("phase", State.Phase.ToString()),
+                new("hasSnapshot", (step.Snapshot != null).ToString())
+            );
+        }
 
         switch (step.Kind)
         {
@@ -1530,14 +1609,9 @@ internal static class NetherAutoClimbController
 
     private static void PlanStableBoundary()
     {
-        NetherRuntimeSnapshotResult captured = _bridge.TryCaptureSnapshot();
-        if (!captured.IsSuccess)
-        {
-            FailClosed(NetherPauseReason.UnknownMasterData, "stable-snapshot:" + captured.Detail);
+        if (!TryCaptureReadyFloorSceneSnapshot("stable", out NetherSnapshot snapshot))
             return;
-        }
 
-        NetherSnapshot snapshot = captured.Snapshot!;
         AuditSnapshot(snapshot, "stable");
         State.ObserveStable(snapshot.Fingerprint);
         if (State.Phase != NetherAutoClimbPhase.Stable)
@@ -1569,6 +1643,60 @@ internal static class NetherAutoClimbController
             return;
 
         PlanCheckpointBoundary(snapshot, settings, "stable");
+    }
+
+    private static bool TryCaptureReadyFloorSceneSnapshot(
+        string boundary,
+        out NetherSnapshot snapshot
+    )
+    {
+        NetherFloorSceneSnapshotResult ready =
+            _bridge.TryCaptureReadyFloorSceneSnapshot();
+        if (ready.IsReady)
+        {
+            FloorSceneReadinessWait.ObserveRegistration();
+            snapshot = ready.Snapshot!;
+            if (FloorSceneReadinessDiagnosticGate.ShouldEmit(boundary, ready.Detail))
+            {
+                LogDiagnostic(
+                    "floor-scene-readiness",
+                    new("boundary", boundary),
+                    new("outcome", "ready"),
+                    new("generation", ready.RuntimeGeneration.ToString()),
+                    new("detail", ready.Detail)
+                );
+            }
+            return true;
+        }
+
+        snapshot = null!;
+        NetherNativeActionResult wait = FloorSceneReadinessWait.AwaitRegistration(
+            "floor-scene-readiness"
+        );
+        string signature = wait.Kind + "|" + ready.RuntimeGeneration + "|" + ready.Detail;
+        if (FloorSceneReadinessDiagnosticGate.ShouldEmit(boundary, signature))
+        {
+            LogDiagnostic(
+                "floor-scene-readiness",
+                new("boundary", boundary),
+                new("outcome", wait.Kind.ToString()),
+                new("generation", ready.RuntimeGeneration.ToString()),
+                new("detail", ready.Detail)
+            );
+        }
+        if (wait.Kind != NetherNativeActionResultKind.Started)
+        {
+            FailClosed(
+                NetherPauseReason.BindingUnavailable,
+                "floor-scene-readiness-timeout:"
+                    + boundary
+                    + ":"
+                    + wait.Detail
+                    + ":"
+                    + ready.Detail
+            );
+        }
+        return false;
     }
 
     private static void PlanCheckpointBoundary(
@@ -2217,6 +2345,7 @@ internal static class NetherAutoClimbController
 
     private static void FailClosed(NetherPauseReason reason, string detail)
     {
+        _awaitingReconcileFloorSceneSnapshot = false;
         if (State.Phase != NetherAutoClimbPhase.Paused)
             State.Pause(reason, detail);
         ProjectionCalibration.Clear();
@@ -2238,6 +2367,7 @@ internal static class NetherAutoClimbController
 
     private static void FailClosedTerminal(NetherPauseReason reason, string detail)
     {
+        _awaitingReconcileFloorSceneSnapshot = false;
         // Unlike an ordinary pause, a terminal battle fault must invalidate the pending
         // action evidence.  Re-enabling F12 cannot replay or reconcile a task after the
         // native scene/controller that owned it has faulted, been canceled, or disappeared.
@@ -2851,6 +2981,7 @@ internal static class NetherAutoClimbController
         private readonly NetherBattleProjectionPayload? _pendingBattleProjection;
         private readonly int _deferredEnableRemainingUpdates;
         private readonly string _lastTransition;
+        private readonly bool _awaitingReconcileFloorSceneSnapshot;
         private bool _disposed;
 
         public RuntimeBridgeTestScope(
@@ -2870,7 +3001,8 @@ internal static class NetherAutoClimbController
             NetherCombatLane? lockedCombatLane,
             NetherBattleProjectionPayload? pendingBattleProjection,
             int deferredEnableRemainingUpdates,
-            string lastTransition
+            string lastTransition,
+            bool awaitingReconcileFloorSceneSnapshot
         )
         {
             _bridge = bridge;
@@ -2890,6 +3022,7 @@ internal static class NetherAutoClimbController
             _pendingBattleProjection = pendingBattleProjection;
             _deferredEnableRemainingUpdates = deferredEnableRemainingUpdates;
             _lastTransition = lastTransition;
+            _awaitingReconcileFloorSceneSnapshot = awaitingReconcileFloorSceneSnapshot;
         }
 
         public void Dispose()
@@ -2914,6 +3047,8 @@ internal static class NetherAutoClimbController
             NetherAutoClimbController._pendingBattleProjection = _pendingBattleProjection;
             NetherAutoClimbController._deferredEnableRemainingUpdates = _deferredEnableRemainingUpdates;
             NetherAutoClimbController._lastTransition = _lastTransition;
+            NetherAutoClimbController._awaitingReconcileFloorSceneSnapshot =
+                _awaitingReconcileFloorSceneSnapshot;
         }
     }
 }

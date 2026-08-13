@@ -103,6 +103,7 @@
     <Compile Include="..\AutoNether\Services\NetherTransitionSnapshotCache.cs" Link="NetherTransitionSnapshotCache.cs" Condition="Exists('..\AutoNether\Services\NetherTransitionSnapshotCache.cs')" />
     <Compile Include="..\AutoNether\Services\NetherAppliedSnapshotCapturePolicy.cs" Link="NetherAppliedSnapshotCapturePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherAppliedSnapshotCapturePolicy.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleResultNextNativeBinding.cs" Link="NetherBattleResultNextNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherBattleResultNextNativeBinding.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherFloorSceneReadiness.cs" Link="NetherFloorSceneReadiness.cs" Condition="Exists('..\AutoNether\Services\NetherFloorSceneReadiness.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleResultReboundReadiness.cs" Link="NetherBattleResultReboundReadiness.cs" Condition="Exists('..\AutoNether\Services\NetherBattleResultReboundReadiness.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleIngressCoordinator.cs" Link="NetherBattleIngressCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleIngressCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherResultSceneCoordinator.cs" Link="NetherResultSceneCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherResultSceneCoordinator.cs')" />

@@ -194,6 +194,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherDiagnosticTransitionGate _recoveredCodeDiagnosticGate = new();
     private readonly NetherDiagnosticTransitionGate _battleResultCodeDiagnosticGate = new();
     private readonly NetherDiagnosticTransitionGate _checkpointDiagnosticGate = new();
+    private readonly NetherDiagnosticTransitionGate _codeMasterAuditDiagnosticGate = new();
     private readonly NetherContinueSceneTransitionEvidence _continueSceneTransition = new();
     private bool _recoveredCheckpointHandoffPrepared;
     private bool _checkpointUsesStartStatusParent;
@@ -1106,6 +1107,95 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             out _,
             out _,
             out _
+        );
+    }
+
+    public NetherFloorSceneSnapshotResult TryCaptureReadyFloorSceneSnapshot(
+        long minimumGenerationExclusive = 0
+    )
+    {
+        object? controllerBefore;
+        long generationBefore;
+        long observedBefore;
+        long enteredBefore;
+        lock (_gate)
+        {
+            controllerBefore = _floorSelectionController;
+            generationBefore = _runtimeGeneration;
+            observedBefore = _sceneObservedRuntimeGeneration;
+            enteredBefore = _sceneEnteredRuntimeGeneration;
+        }
+
+        bool expectedBefore = controllerBefore != null
+            && observedBefore == generationBefore
+            && string.Equals(
+                controllerBefore.GetType().FullName,
+                FloorSelectionTypeName,
+                StringComparison.Ordinal
+            );
+        NetherFloorSceneReadinessDecision structural = NetherFloorSceneReadiness.Evaluate(new(
+            minimumGenerationExclusive,
+            generationBefore,
+            HasCurrentController: controllerBefore != null,
+            IsExpectedCurrentController: expectedBefore,
+            HasEnteredCurrentGeneration: enteredBefore == generationBefore
+                && generationBefore > 0,
+            HasAuthoritativeSnapshot: true,
+            CaptureStayedOnCurrentController: true
+        ));
+        if (!structural.IsReady)
+        {
+            return NetherFloorSceneSnapshotResult.Waiting(
+                generationBefore,
+                structural.Detail
+            );
+        }
+
+        NetherRuntimeSnapshotResult captured = TryCaptureSnapshot();
+        object? controllerAfter;
+        long generationAfter;
+        long observedAfter;
+        long enteredAfter;
+        lock (_gate)
+        {
+            controllerAfter = _floorSelectionController;
+            generationAfter = _runtimeGeneration;
+            observedAfter = _sceneObservedRuntimeGeneration;
+            enteredAfter = _sceneEnteredRuntimeGeneration;
+        }
+
+        bool stableCapture = ReferenceEquals(controllerBefore, controllerAfter)
+            && generationBefore == generationAfter
+            && observedBefore == observedAfter
+            && enteredBefore == enteredAfter;
+        bool expectedAfter = controllerAfter != null
+            && observedAfter == generationAfter
+            && string.Equals(
+                controllerAfter.GetType().FullName,
+                FloorSelectionTypeName,
+                StringComparison.Ordinal
+            );
+        NetherFloorSceneReadinessDecision complete = NetherFloorSceneReadiness.Evaluate(new(
+            minimumGenerationExclusive,
+            generationAfter,
+            HasCurrentController: controllerAfter != null,
+            IsExpectedCurrentController: expectedAfter,
+            HasEnteredCurrentGeneration: enteredAfter == generationAfter
+                && generationAfter > 0,
+            HasAuthoritativeSnapshot: captured.IsSuccess,
+            CaptureStayedOnCurrentController: stableCapture
+        ));
+        if (!complete.IsReady)
+        {
+            string detail = complete.Detail;
+            if (!captured.IsSuccess && captured.Detail.Length > 0)
+                detail += ":" + captured.Detail;
+            return NetherFloorSceneSnapshotResult.Waiting(generationAfter, detail);
+        }
+
+        return NetherFloorSceneSnapshotResult.Ready(
+            generationAfter,
+            captured.Snapshot!
         );
     }
 
@@ -2781,43 +2871,40 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             if (step.Kind != NetherBattleResultContinuationStepKind.Completed)
                 return step;
 
-            NetherRuntimeSnapshotResult snapshot = TryCaptureSnapshot();
-            if (!snapshot.IsSuccess)
+            NetherFloorSceneSnapshotResult ready = TryCaptureReadyFloorSceneSnapshot(
+                _battleResultContinuation.FloorGenerationBeforeResult
+            );
+            if (!ready.IsReady)
             {
                 NetherNativeActionResult wait = _battleResultSnapshotWait.AwaitRegistration(
-                    "battle-result-rebound-snapshot"
+                    "battle-result-rebound-floor-scene"
                 );
                 if (wait.Kind == NetherNativeActionResultKind.Started)
                 {
                     return new(
                         NetherBattleResultContinuationStepKind.AwaitingFloorRebind,
-                        "battle-result-rebound-snapshot:" + snapshot.Detail
+                        "battle-result-rebound-floor-scene:" + ready.Detail
                     );
                 }
 
                 _battleResultContinuation.Reset();
                 return new(
                     NetherBattleResultContinuationStepKind.BindingUnavailable,
-                    wait.Detail + ":" + snapshot.Detail
+                    wait.Detail + ":" + ready.Detail
                 );
             }
 
-            NetherRuntimePopupResult popup = snapshot.Snapshot!.Status == NetherSessionStatus.Wait
+            NetherSnapshot snapshot = ready.Snapshot!;
+            NetherRuntimePopupResult popup = snapshot.Status == NetherSessionStatus.Wait
                 ? TryGetActivePopup()
                 : new NetherRuntimePopupResult(null, string.Empty);
-            bool hasSceneEntry = _sceneEnteredRuntimeGeneration == _runtimeGeneration;
-            if (!NetherBattleResultReboundReadiness.IsReady(
-                    snapshot.Snapshot.Status,
-                    popup.IsSuccess,
-                    hasSceneEntry
+            if (!NetherBattleResultReboundReadiness.IsModalReady(
+                    snapshot.Status,
+                    popup.IsSuccess
                 ))
             {
-                string waitBoundary = hasSceneEntry
-                    ? "battle-result-rebound-modal"
-                    : "battle-result-rebound-scene-entry";
-                string waitDetail = hasSceneEntry
-                    ? popup.Detail
-                    : "awaiting-subscene-entered";
+                const string waitBoundary = "battle-result-rebound-modal";
+                string waitDetail = popup.Detail;
                 NetherNativeActionResult wait = _battleResultSnapshotWait.AwaitRegistration(
                     waitBoundary
                 );
@@ -2838,7 +2925,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
             _battleResultSnapshotWait.Clear();
             _battleResultContinuation.Reset();
-            return step with { Snapshot = snapshot.Snapshot };
+            return step with { Snapshot = snapshot };
         }
     }
 
@@ -2900,6 +2987,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _battleResultCodeDiagnosticGate.Reset();
             _recoveredCodeDiagnosticGate.Reset();
             _checkpointDiagnosticGate.Reset();
+            _codeMasterAuditDiagnosticGate.Reset();
         }
         _transitionSnapshotCache.Clear();
         NetherAutoClimbController.LogDiagnostic(
@@ -6689,7 +6777,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         return 1;
     }
 
-    private static void LogCodeMasterSemanticAudit(IEnumerable<MNetherCodes> rows, bool detailedLogging)
+    private void LogCodeMasterSemanticAudit(IEnumerable<MNetherCodes> rows, bool detailedLogging)
     {
         if (!detailedLogging)
             return;
@@ -6702,14 +6790,17 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 .Select(row => CreateCodeMasterAudit(row, abilityStore))
                 .ToArray();
             string? audit = NetherCodeDiagnosticAudit.Format(detailedLogging, audits);
-            if (audit != null)
+            if (audit != null
+                && _codeMasterAuditDiagnosticGate.ShouldEmit("semantic-master", audit))
                 Logger.Info("[F12][AutoNether] " + audit);
         }
         catch (Exception ex)
         {
             // Diagnostics never alter category/rarity/level selection or erosion projection.
             // The exception type is sufficient to request a focused live dump.
-            Logger.Info("[F12][AutoNether] code-master-audit=unavailable:" + ex.GetType().Name);
+            string detail = "code-master-audit=unavailable:" + ex.GetType().Name;
+            if (_codeMasterAuditDiagnosticGate.ShouldEmit("semantic-master", detail))
+                Logger.Info("[F12][AutoNether] " + detail);
         }
     }
 

@@ -46,6 +46,8 @@ internal sealed class NetherBattleResultContinuationFlow
 
     public bool NextInvoked => _nextInvoked;
 
+    public long FloorGenerationBeforeResult => _floorGenerationBeforeResult;
+
     public void Observe(object? controller, object? initializeTask, long floorGenerationBeforeResult)
     {
         if (controller == null || initializeTask == null || floorGenerationBeforeResult < 0)

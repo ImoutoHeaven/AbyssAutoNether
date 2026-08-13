@@ -12,7 +12,8 @@ namespace AutoNether.Services;
 /// injection, so that exact post-GET snapshot gap is also awaited for a bounded period.
 /// Nothing in this component starts, resumes, or repeats a Nether action.
 /// </summary>
-internal interface INetherContinueSceneDriver : INetherReadOnlyReconcileDriver
+internal interface INetherContinueSceneDriver : INetherReadOnlyReconcileDriver,
+    INetherFloorSceneReadinessDriver
 {
     /// <summary>Polls only the already-started native Continue parent task.</summary>
     NetherNativeActionResult PollContinueParent();
@@ -225,10 +226,10 @@ internal sealed class NetherContinueSceneCoordinator
 
     private bool TryObserveExactSceneTransition(out long generation)
     {
-        generation = _driver.CurrentRuntimeGeneration;
-        return _driver.FloorOwnerTerminated
-            && generation > _ownerGeneration
-            && _driver.IsExpectedNetherTopScene;
+        NetherFloorSceneSnapshotResult ready =
+            _driver.TryCaptureReadyFloorSceneSnapshot(_ownerGeneration);
+        generation = ready.RuntimeGeneration;
+        return _driver.FloorOwnerTerminated && ready.IsReady;
     }
 
     private NetherContinueSceneStep PumpTeardown()
@@ -265,9 +266,30 @@ internal sealed class NetherContinueSceneCoordinator
         if (!_driver.IsExpectedNetherTopScene)
             return TerminalPause("continue-runtime-rebind-wrong-scene");
 
+        NetherFloorSceneSnapshotResult ready =
+            _driver.TryCaptureReadyFloorSceneSnapshot(_ownerGeneration);
+        if (!ready.IsReady)
+        {
+            NetherNativeActionResult wait = _rebindWait.AwaitRegistration(
+                "continue-runtime-readiness"
+            );
+            return wait.Kind == NetherNativeActionResultKind.Started
+                ? NetherContinueSceneStep.WaitForRebind(
+                    "continue-runtime-readiness:" + ready.Detail
+                )
+                : TerminalPause(
+                    "continue-runtime-readiness-timeout:"
+                        + wait.Detail
+                        + ":"
+                        + ready.Detail
+                );
+        }
+
         _rebindWait.ObserveRegistration();
         _stage = Stage.Reconciling;
-        return NetherContinueSceneStep.Reconcile("continue-runtime-rebound:" + generation);
+        return NetherContinueSceneStep.Reconcile(
+            "continue-runtime-rebound:" + ready.RuntimeGeneration
+        );
     }
 
     private NetherContinueSceneStep PumpReconcile()
@@ -287,47 +309,61 @@ internal sealed class NetherContinueSceneCoordinator
         if (refresh.Kind != NetherReadOnlyReconcileStepKind.Applied || refresh.Snapshot == null)
             return TerminalPause("continue-read-only-refresh-fault:" + refresh.Detail);
 
-        return ValidateSettlement(refresh.Snapshot);
+        _stage = Stage.AwaitingAppliedSnapshot;
+        return PumpAppliedSnapshot();
     }
 
     private NetherContinueSceneStep PumpAppliedSnapshot()
     {
-        NetherReadOnlySnapshotResult captured = _driver.TryCaptureAppliedSnapshot();
-        if (captured.IsSuccess)
-        {
-            _snapshotWait.ObserveRegistration();
-            return ValidateSettlement(captured.Snapshot!);
-        }
-        if (!string.Equals(captured.Detail, MissingNetherModelSnapshot, StringComparison.Ordinal))
-        {
-            return TerminalPause(
-                "continue-read-only-refresh-binding:read-only-refresh-snapshot:" + captured.Detail
-            );
-        }
-
-        return AwaitAppliedSnapshot();
+        NetherFloorSceneSnapshotResult ready =
+            _driver.TryCaptureReadyFloorSceneSnapshot(_ownerGeneration);
+        return ready.IsReady
+            ? ValidateSettlement(ready.Snapshot!)
+            : AwaitAppliedSnapshot(ready.Detail);
     }
 
-    private NetherContinueSceneStep AwaitAppliedSnapshot()
+    private NetherContinueSceneStep AwaitAppliedSnapshot(
+        string detail = MissingNetherModelSnapshot
+    )
     {
         NetherNativeActionResult wait = _snapshotWait.AwaitRegistration(
             "continue-applied-snapshot"
         );
         return wait.Kind == NetherNativeActionResultKind.Started
             ? NetherContinueSceneStep.Reconcile(
-                "continue-read-only-refresh-awaiting-snapshot:" + MissingNetherModelSnapshot
+                "continue-read-only-refresh-awaiting-snapshot:" + detail
             )
             : TerminalPause(
                 "continue-read-only-refresh-snapshot-timeout:"
                     + wait.Detail
                     + ":"
-                    + MissingNetherModelSnapshot
+                    + detail
             );
     }
 
     private NetherContinueSceneStep ValidateSettlement(NetherSnapshot after)
     {
         NetherSnapshot before = _before!;
+        if (IsExactSettlement(before, after))
+        {
+            _snapshotWait.ObserveRegistration();
+            return TerminalComplete(after, "continue-settlement-exact");
+        }
+        if (IsPlausiblePartialPropagation(before, after))
+        {
+            _stage = Stage.AwaitingAppliedSnapshot;
+            return AwaitAppliedSnapshot(
+                "awaiting-applied-snapshot:status="
+                    + after.Status
+                    + ":ticket="
+                    + after.TicketCount
+                    + ":map="
+                    + after.MapId
+                    + ":floor="
+                    + after.CurrentFloorId
+            );
+        }
+
         if (after.TicketCount != before.TicketCount - _contract.TicketCost)
             return TerminalPause("continue-settlement-wrong-ticket");
         if (HasPredictedDestination(_contract))
@@ -348,7 +384,49 @@ internal sealed class NetherContinueSceneCoordinator
         if (after.Status != _contract.ExpectedStatus)
             return TerminalPause("continue-settlement-wrong-status");
 
-        return TerminalComplete(after, "continue-settlement-exact");
+        return TerminalPause("continue-settlement-incomplete");
+    }
+
+    private bool IsExactSettlement(NetherSnapshot before, NetherSnapshot after)
+    {
+        bool destinationMatches = HasPredictedDestination(_contract)
+            ? after.MapId == _contract.ExpectedMapId
+                && after.CurrentFloorId == _contract.ExpectedFloorId
+            : after.MapId > 0
+                && after.CurrentFloorId > 0
+                && (after.MapId != before.MapId
+                    || after.CurrentFloorId != before.CurrentFloorId);
+        return after.TicketCount == before.TicketCount - _contract.TicketCost
+            && destinationMatches
+            && after.FloorLevel == _contract.ExpectedSegmentFloorLevel
+            && after.Status == _contract.ExpectedStatus;
+    }
+
+    private bool IsPlausiblePartialPropagation(NetherSnapshot before, NetherSnapshot after)
+    {
+        int expectedTicket = before.TicketCount - _contract.TicketCost;
+        bool ticketCanConverge = after.TicketCount == before.TicketCount
+            || after.TicketCount == expectedTicket;
+        bool statusCanConverge = after.Status == before.Status
+            || after.Status == _contract.ExpectedStatus;
+        bool segmentCanConverge = after.FloorLevel == before.FloorLevel
+            || after.FloorLevel == _contract.ExpectedSegmentFloorLevel;
+        if (!ticketCanConverge || !statusCanConverge || !segmentCanConverge)
+            return false;
+
+        if (HasPredictedDestination(_contract))
+        {
+            bool mapCanConverge = after.MapId == before.MapId
+                || after.MapId == _contract.ExpectedMapId;
+            bool floorCanConverge = after.CurrentFloorId == before.CurrentFloorId
+                || after.CurrentFloorId == _contract.ExpectedFloorId;
+            return mapCanConverge && floorCanConverge;
+        }
+
+        return after.MapId > 0
+            && after.CurrentFloorId > 0
+            && (after.MapId == before.MapId
+                || after.CurrentFloorId == before.CurrentFloorId);
     }
 
     private NetherContinueSceneStep TerminalComplete(NetherSnapshot snapshot, string detail)

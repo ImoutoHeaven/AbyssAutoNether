@@ -19,6 +19,45 @@ public sealed class NetherControllerRuntimeCollection
 public class NetherAutoClimbControllerEndToEndTests
 {
     [Fact]
+    public void Production_controller_does_not_plan_until_current_floor_scene_has_entered()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            FloorSceneEntered = false,
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Empty(bridge.Invocations);
+            Assert.Equal(0, bridge.BeginFloorParentCount);
+
+            bridge.FloorSceneEntered = true;
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherActionKind.SelectFloor, Assert.Single(bridge.Invocations));
+            Assert.Equal(1, bridge.BeginFloorParentCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_finishes_recovered_code_parent_before_any_floor_route()
     {
         var bridge = new ScriptedRuntimeBridge
@@ -642,6 +681,64 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Battle_result_poll_diagnostics_emit_transitions_instead_of_every_update()
+    {
+        bool previousDetailedLogging = Config.NetherAutoClimbDetailedLogging.Value;
+        var bridge = new ScriptedRuntimeBridge
+        {
+            HasRegisteredFloorSelection = false,
+            HasObservedNetherBattleResult = true,
+            AutoCompleteBattleResultContinuation = false,
+            BattleResultRebound = false,
+            CodeCandidates = SafeCodeCandidates(30024),
+            BattleResultCodePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                OwnerAction = NetherActionKind.BattleSettlement,
+                OwnerGeneration = 9,
+                Sequence = 20,
+            },
+        };
+        bridge.BattleResultCodeNativeSteps.Enqueue(
+            NetherBattleResultCodeNativeStep.Completed("scripted-result-code-complete")
+        );
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+        Config.NetherAutoClimbDetailedLogging.Value = false;
+        Logger.Reset();
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            for (int update = 0; update < 6; update++)
+                NetherAutoClimbController.Update();
+
+            Assert.Single(Logger.Messages, message =>
+                message.Contains("event=battle-result-code")
+                && message.Contains("step=Completed")
+                && message.Contains("detail=battle-result-code-completed")
+            );
+            Assert.Single(Logger.Messages, message =>
+                message.Contains("event=battle-result-continuation")
+                && message.Contains("detail=scripted-awaiting-floor-rebind")
+            );
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+            Config.NetherAutoClimbDetailedLogging.Value = previousDetailedLogging;
+            Logger.Reset();
+        }
+    }
+
+    [Fact]
     public void Unknown_combat_route_logs_runtime_inputs_and_per_candidate_component_failure()
     {
         var bridge = new ScriptedRuntimeBridge
@@ -1209,6 +1306,89 @@ public class NetherAutoClimbControllerEndToEndTests
             Assert.Equal(1, bridge.GetOnlyBeginCount);
             Assert.Equal(1, bridge.GetOnlyPollCount);
             Assert.Equal(2, bridge.OwnedPopupInvokeCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_reconcile_does_not_repeat_get_when_scene_changes_during_refresh()
+    {
+        NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(
+            NetherSessionStatus.Play,
+            floorId: 1,
+            gold: 10
+        );
+        NetherSnapshot popupWait = ScriptedRuntimeBridge.InteractiveRouteSnapshot(
+            NetherSessionStatus.Wait,
+            floorId: 2,
+            gold: 10
+        );
+        NetherSnapshot afterEvent = ScriptedRuntimeBridge.InteractiveRouteSnapshot(
+            NetherSessionStatus.Play,
+            floorId: 2,
+            gold: 11
+        );
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = routeStart,
+            FloorSelectionDispatchSnapshot = popupWait,
+            OwnedPopupAfterSnapshot = afterEvent,
+            OwnedPopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Event,
+                OwnerAction = NetherActionKind.SelectFloor,
+                OwnerGeneration = 1,
+                Sequence = 1,
+                RawFloorType = (int)NetherFloorNodeType.Event,
+                Options = new[]
+                {
+                    new NetherEventOption(
+                        1,
+                        new[] { new NetherEffect(NetherEffectKind.NetherGoldGain, 1) }
+                    ),
+                },
+            },
+            RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
+            InteractivePreEntryFactory = (snapshot, settings) =>
+                ScriptedRuntimeBridge.InteractivePreEntry(snapshot, settings),
+            DropFloorSceneReadinessOnNextGetPoll = true,
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update(); // SelectFloor parent.
+            NetherAutoClimbController.Update(); // Event child.
+            NetherAutoClimbController.Update(); // Parent terminal.
+            NetherAutoClimbController.Update(); // GET begin.
+            NetherAutoClimbController.Update(); // GET terminal; OnEntered proof disappears.
+
+            Assert.Equal(NetherAutoClimbPhase.Reconciling, NetherAutoClimbController.Phase);
+            Assert.Equal(1, bridge.GetOnlyBeginCount);
+            Assert.Equal(1, bridge.GetOnlyPollCount);
+
+            NetherAutoClimbController.Update(); // Still waiting; never issue a second GET.
+            Assert.Equal(1, bridge.GetOnlyBeginCount);
+            Assert.Equal(1, bridge.GetOnlyPollCount);
+
+            bridge.FloorSceneEntered = true;
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Equal(1, bridge.GetOnlyBeginCount);
+            Assert.Equal(1, bridge.GetOnlyPollCount);
         }
         finally
         {
@@ -3428,6 +3608,9 @@ public class NetherAutoClimbControllerEndToEndTests
         public bool FloorParentCompleted { get; set; }
         public bool FloorOwnerTerminated { get; set; }
         public long CurrentRuntimeGeneration { get; set; } = 1;
+        public bool FloorSceneEntered { get; set; } = true;
+        public bool FloorSceneHasAuthoritativeSnapshot { get; set; } = true;
+        public bool DropFloorSceneReadinessOnNextGetPoll { get; set; }
         public bool DelayBattleSnapshotUntilStartTerminal { get; set; }
         public bool BattleStartRegistered { get; set; }
         public bool BattleStartCompleted { get; set; }
@@ -3466,6 +3649,30 @@ public class NetherAutoClimbControllerEndToEndTests
         public bool IsBattleActive => CurrentSnapshot.Status == NetherSessionStatus.Battle;
         public bool IsResultObserved => CurrentSnapshot.Status == NetherSessionStatus.Clear;
         public bool IsExpectedNetherTopScene => true;
+
+        public NetherFloorSceneSnapshotResult TryCaptureReadyFloorSceneSnapshot(
+            long minimumGenerationExclusive = 0
+        )
+        {
+            NetherFloorSceneReadinessDecision readiness = NetherFloorSceneReadiness.Evaluate(new(
+                minimumGenerationExclusive,
+                CurrentRuntimeGeneration,
+                HasCurrentController: HasRegisteredFloorSelection,
+                IsExpectedCurrentController: IsExpectedNetherTopScene,
+                HasEnteredCurrentGeneration: FloorSceneEntered,
+                HasAuthoritativeSnapshot: FloorSceneHasAuthoritativeSnapshot,
+                CaptureStayedOnCurrentController: true
+            ));
+            return readiness.IsReady
+                ? NetherFloorSceneSnapshotResult.Ready(
+                    CurrentRuntimeGeneration,
+                    CurrentSnapshot
+                )
+                : NetherFloorSceneSnapshotResult.Waiting(
+                    CurrentRuntimeGeneration,
+                    readiness.Detail
+                );
+        }
 
         public NetherRuntimeSnapshotResult TryCaptureSnapshot() => NetherRuntimeSnapshotResult.Success(CurrentSnapshot);
 
@@ -3901,6 +4108,11 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherNativeActionResult PollGetOnlyRefresh()
         {
             GetOnlyPollCount++;
+            if (DropFloorSceneReadinessOnNextGetPoll)
+            {
+                DropFloorSceneReadinessOnNextGetPoll = false;
+                FloorSceneEntered = false;
+            }
             return NetherNativeActionResult.Completed("native-get-only-applied");
         }
 
@@ -4025,11 +4237,11 @@ public class NetherAutoClimbControllerEndToEndTests
 
             if (!AutoCompleteBattleResultContinuation
                 && BattleResultReboundSnapshot != null
-                && !NetherBattleResultReboundReadiness.IsReady(
-                    BattleResultReboundSnapshot.Status,
-                    BattleResultReboundPopup != null,
-                    BattleResultReboundSceneEntered
-                ))
+                && (!BattleResultReboundSceneEntered
+                    || !NetherBattleResultReboundReadiness.IsModalReady(
+                        BattleResultReboundSnapshot.Status,
+                        BattleResultReboundPopup != null
+                    )))
             {
                 HasRegisteredFloorSelection = true;
                 return new(
