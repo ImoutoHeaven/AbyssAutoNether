@@ -64,8 +64,9 @@ internal readonly record struct NetherCheckpointPopupWaitResult(
 /// <summary>
 /// Bounded, owner-aware waits for the four native checkpoint registrations.  Every wait pumps
 /// the original parent in parallel: a parent fault/cancel wins immediately, while a parent
-/// completion without the currently required registration is named early-complete evidence and
-/// cannot become an infinite <c>Started</c> loop.
+/// completion may briefly precede UI registration.  That late-registration window uses the same
+/// finite budget as a pending parent, then becomes named early-complete evidence instead of an
+/// infinite <c>Started</c> loop.
 /// </summary>
 internal sealed class NetherCheckpointPopupWaitCoordinator
 {
@@ -134,9 +135,9 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
         }
 
         // Pump first even when the popup has just appeared.  Fault/cancel is terminal evidence
-        // and must never be outraced by a stale UI object.  A normal Completed parent is allowed
-        // only if the exact current stage registration is present; without it, completion was
-        // too early to prove the native sequence advanced correctly.
+        // and must never be outraced by a stale UI object.  A normal Completed parent is weaker:
+        // the packaged wrapper can complete a few frames before its Forget()-driven UI setup
+        // registers the exact owned popup, so absence is bounded rather than terminal at once.
         NetherNativeActionResult parent = _driver.PollCheckpointParent();
         switch (parent.Kind)
         {
@@ -178,10 +179,15 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
 
         if (parent.Kind == NetherNativeActionResultKind.Completed)
         {
-            return NetherCheckpointPopupWaitResult.Terminal(
-                NetherCheckpointPopupWaitResultKind.ParentCompletedEarly,
-                "checkpoint-parent-completed-before-popup:" + kind
-            );
+            NetherNativeActionResult lateRegistration = _gates[kind].AwaitRegistration(FlowName(kind));
+            return lateRegistration.Kind == NetherNativeActionResultKind.Started
+                ? NetherCheckpointPopupWaitResult.Waiting(
+                    "checkpoint-parent-completed-awaiting-popup:" + kind
+                )
+                : NetherCheckpointPopupWaitResult.Terminal(
+                    NetherCheckpointPopupWaitResultKind.ParentCompletedEarly,
+                    "checkpoint-parent-completed-before-popup-timeout:" + kind
+                );
         }
         if (parent.Kind != NetherNativeActionResultKind.Started)
         {

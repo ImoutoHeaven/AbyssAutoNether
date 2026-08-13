@@ -106,6 +106,7 @@
     <Compile Include="..\AutoNether\Services\NetherBattleIngressCoordinator.cs" Link="NetherBattleIngressCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleIngressCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherResultSceneCoordinator.cs" Link="NetherResultSceneCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherResultSceneCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherContinueSceneCoordinator.cs" Link="NetherContinueSceneCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneCoordinator.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherContinueSceneTransitionEvidence.cs" Link="NetherContinueSceneTransitionEvidence.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneTransitionEvidence.cs')" />
     <Compile Include="..\AutoNether\Services\NetherRuntimeGenerationVisibility.cs" Link="NetherRuntimeGenerationVisibility.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeGenerationVisibility.cs')" />
     <Compile Include="..\AutoNether\Services\NetherContinueSceneRuntimeCoordinator.cs" Link="NetherContinueSceneRuntimeCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneRuntimeCoordinator.cs')" />
   </ItemGroup>

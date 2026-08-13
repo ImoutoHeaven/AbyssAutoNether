@@ -678,6 +678,27 @@ public sealed class NetherLifecycleInteropBindingsTests
         );
     }
 
+    [Fact]
+    public void Packaged_event_popup_exposes_the_exact_target_character_member()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        Type controller = packaged.RequireType(
+            "Project.Nether.NetherEventPopup.NetherEventPopupController"
+        );
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        MemberInfo? target = (MemberInfo?)controller.GetProperty("_mCharacterId", flags)
+            ?? controller.GetField("_mCharacterId", flags);
+
+        Assert.NotNull(target);
+        Type targetType = target switch
+        {
+            PropertyInfo property => property.PropertyType,
+            FieldInfo field => field.FieldType,
+            _ => throw new Xunit.Sdk.XunitException("_mCharacterId is not a field/property"),
+        };
+        Assert.Equal(typeof(long), targetType);
+    }
+
     private static void AssertTaskSeam(
         IEnumerable<MethodInfo> methods,
         string name,

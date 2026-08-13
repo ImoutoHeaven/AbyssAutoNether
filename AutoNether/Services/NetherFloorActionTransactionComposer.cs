@@ -83,6 +83,7 @@ internal static class NetherFloorActionTransactionComposer
             // These are retained for existing telemetry and legacy tests.  The ordered stage
             // sequence above is authoritative for reconciliation.
             OptionNumber = stage.OptionNumber,
+            TargetCharacterId = stage.TargetCharacterId,
             ExpectedEffects = retainedEffects,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
@@ -308,7 +309,9 @@ internal static class NetherFloorActionTransactionComposer
             settlement.ContentAmount,
             settlement.GoldCost,
             settlement.CodeId,
-            settlement.ReplaceCodeId
+            settlement.ReplaceCodeId,
+            DecisionEpoch: 0,
+            TargetCharacterId: settlement.TargetCharacterId
         ));
         return IsWellFormedStage(stages[0]);
     }
@@ -328,6 +331,12 @@ internal static class NetherFloorActionTransactionComposer
         }
         if (popup.OwnerGeneration < 0 || popup.Sequence < 0)
             return false;
+        if (popup.TargetCharacterId < 0
+            || child.TargetCharacterId < 0
+            || (child.TargetCharacterId > 0 && child.TargetCharacterId != popup.TargetCharacterId))
+        {
+            return false;
+        }
 
         stage = new NetherFloorPopupStage(
             popup.Kind,
@@ -342,7 +351,8 @@ internal static class NetherFloorActionTransactionComposer
             child.GoldCost,
             child.CodeId,
             child.ReplaceCodeId,
-            popup.DecisionEpoch
+            popup.DecisionEpoch,
+            popup.TargetCharacterId
         );
         return IsWellFormedStage(stage);
     }
@@ -359,6 +369,7 @@ internal static class NetherFloorActionTransactionComposer
         NetherPlannedAction child = new(stage.ActionKind)
         {
             OptionNumber = stage.OptionNumber,
+            TargetCharacterId = stage.TargetCharacterId,
             ExpectedEffects = stage.ExpectedEffects,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,

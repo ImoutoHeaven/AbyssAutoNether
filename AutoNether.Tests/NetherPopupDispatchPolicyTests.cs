@@ -26,6 +26,7 @@ public class NetherPopupDispatchPolicyTests
             {
                 Kind = NetherRuntimePopupKind.Event,
                 RawFloorType = 4,
+                TargetCharacterId = 101,
                 Options = [new NetherEventOption(1, [new NetherEffect(NetherEffectKind.Item, 1)])],
             },
             Settings()
@@ -34,6 +35,7 @@ public class NetherPopupDispatchPolicyTests
         Assert.Equal(NetherPopupDispatchKind.NativeAction, decision.Kind);
         Assert.Equal(NetherActionKind.SelectEventOption, decision.Action.Kind);
         Assert.Equal(1, decision.Action.OptionNumber);
+        Assert.Equal(101, decision.Action.TargetCharacterId);
         Assert.Single(decision.Action.ExpectedEffects);
         Assert.Equal(NetherEffectKind.Item, decision.Action.ExpectedEffects[0].Kind);
     }

@@ -11,7 +11,11 @@ public class NetherFloorActionTransactionComposerTests
     public void Event_floor_parent_composes_selected_option_effects_and_exact_play_terminal()
     {
         NetherPlannedAction parent = Parent();
-        var popup = new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.Event };
+        var popup = new NetherRuntimePopupContext
+        {
+            Kind = NetherRuntimePopupKind.Event,
+            TargetCharacterId = 101,
+        };
         var child = new NetherPlannedAction(NetherActionKind.SelectEventOption)
         {
             OptionNumber = 2,
@@ -23,6 +27,8 @@ public class NetherFloorActionTransactionComposerTests
         Assert.Equal(11, composed.FloorId);
         Assert.Equal(NetherSessionStatus.Play, composed.ExpectedAfterStatus);
         Assert.Equal(2, composed.OptionNumber);
+        Assert.Equal(101, composed.TargetCharacterId);
+        Assert.Equal(101, Assert.Single(composed.OwnedPopupStages).TargetCharacterId);
         Assert.Single(composed.ExpectedEffects);
     }
 

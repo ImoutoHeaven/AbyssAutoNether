@@ -79,6 +79,155 @@ public class NetherContinueSceneCoordinatorTests
     }
 
     [Fact]
+    public void Exact_scene_transition_completes_handoff_when_recovered_parent_stays_pending()
+    {
+        var driver = new FakeDriver(
+            parent: new[]
+            {
+                NetherNativeActionResult.Started("native-start-status-wrapper-pending:Pending"),
+            },
+            appliedSnapshot: AppliedSnapshot()
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+
+        Assert.True(coordinator.Begin(Contract(), BeforeSnapshot(), ownerGeneration: 10));
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+
+        driver.FloorOwnerTerminated = true;
+        driver.CurrentRuntimeGeneration = 11;
+        driver.IsExpectedNetherTopScene = true;
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+        Assert.True(coordinator.ParentTerminalObserved);
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
+    public void New_runtime_registered_before_nether_model_waits_for_snapshot_without_a_second_get()
+    {
+        var driver = new FakeDriver(
+            parent: new[]
+            {
+                NetherNativeActionResult.Started("native-start-status-wrapper-pending:Pending"),
+            },
+            appliedSnapshot: AppliedSnapshot(),
+            appliedSnapshots: new[]
+            {
+                NetherReadOnlySnapshotResult.Failure("missing-floor-selection-nether-model"),
+                NetherReadOnlySnapshotResult.Success(AppliedSnapshot()),
+            }
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver, maximumMissingTicks: 2);
+
+        Assert.True(coordinator.Begin(Contract(), BeforeSnapshot(), ownerGeneration: 10));
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+
+        driver.FloorOwnerTerminated = true;
+        driver.CurrentRuntimeGeneration = 11;
+        driver.IsExpectedNetherTopScene = true;
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+
+        NetherContinueSceneStep transient = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, transient.Kind);
+        Assert.Contains("awaiting-snapshot", transient.Detail);
+        Assert.Equal(NetherContinueSceneStepKind.Complete, coordinator.Pump().Kind);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(2, driver.AppliedSnapshotReads);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
+    public void Missing_nether_model_snapshot_wait_is_bounded_and_never_repeats_the_get()
+    {
+        var driver = new FakeDriver(
+            parent: new[]
+            {
+                NetherNativeActionResult.Started("native-start-status-wrapper-pending:Pending"),
+            },
+            appliedSnapshot: AppliedSnapshot(),
+            appliedSnapshots: new[]
+            {
+                NetherReadOnlySnapshotResult.Failure("missing-floor-selection-nether-model"),
+                NetherReadOnlySnapshotResult.Failure("missing-floor-selection-nether-model"),
+            }
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver, maximumMissingTicks: 1);
+
+        Assert.True(coordinator.Begin(Contract(), BeforeSnapshot(), ownerGeneration: 10));
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+
+        driver.FloorOwnerTerminated = true;
+        driver.CurrentRuntimeGeneration = 11;
+        driver.IsExpectedNetherTopScene = true;
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Pause, terminal.Kind);
+        Assert.Contains("snapshot-timeout", terminal.Detail);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(2, driver.AppliedSnapshotReads);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
+    public void Non_transient_applied_snapshot_binding_failure_still_pauses_immediately()
+    {
+        var driver = new FakeDriver(
+            parent: new[] { NetherNativeActionResult.Completed("continue-parent-terminal") },
+            appliedSnapshot: AppliedSnapshot(),
+            appliedSnapshots: new[]
+            {
+                NetherReadOnlySnapshotResult.Failure("missing-nether-data-store"),
+            }
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver, maximumMissingTicks: 2);
+
+        NetherContinueSceneStep terminal = DriveToTerminal(coordinator, driver);
+
+        Assert.Equal(NetherContinueSceneStepKind.Pause, terminal.Kind);
+        Assert.Contains("missing-nether-data-store", terminal.Detail);
+        Assert.DoesNotContain("awaiting-snapshot", terminal.Detail);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(1, driver.AppliedSnapshotReads);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
     public void Server_assigned_destination_rejects_an_unchanged_or_invalid_identity()
     {
         NetherSnapshot unchangedIdentity = AppliedSnapshot() with
@@ -343,16 +492,22 @@ public class NetherContinueSceneCoordinatorTests
     {
         private readonly Queue<NetherNativeActionResult> _parent;
         private readonly Queue<NetherNativeActionResult> _polls;
-        private readonly NetherSnapshot _appliedSnapshot;
+        private readonly Queue<NetherReadOnlySnapshotResult> _appliedSnapshots;
 
-        public FakeDriver(IEnumerable<NetherNativeActionResult> parent, NetherSnapshot appliedSnapshot)
+        public FakeDriver(
+            IEnumerable<NetherNativeActionResult> parent,
+            NetherSnapshot appliedSnapshot,
+            IEnumerable<NetherReadOnlySnapshotResult>? appliedSnapshots = null
+        )
         {
             _parent = new Queue<NetherNativeActionResult>(parent);
             _polls = new Queue<NetherNativeActionResult>(new[]
             {
                 NetherNativeActionResult.Completed("native-nether-sync-complete"),
             });
-            _appliedSnapshot = appliedSnapshot;
+            _appliedSnapshots = new Queue<NetherReadOnlySnapshotResult>(
+                appliedSnapshots ?? new[] { NetherReadOnlySnapshotResult.Success(appliedSnapshot) }
+            );
         }
 
         public bool FloorOwnerTerminated { get; set; }
@@ -360,6 +515,7 @@ public class NetherContinueSceneCoordinatorTests
         public bool IsExpectedNetherTopScene { get; set; } = true;
         public int GetOnlyBeginCalls { get; private set; }
         public int GetOnlyPollCalls { get; private set; }
+        public int AppliedSnapshotReads { get; private set; }
         public int StartOrMutationCalls { get; private set; }
 
         public NetherNativeActionResult PollContinueParent() => _parent.Count > 0
@@ -378,7 +534,10 @@ public class NetherContinueSceneCoordinatorTests
             return _polls.Dequeue();
         }
 
-        public NetherReadOnlySnapshotResult TryCaptureAppliedSnapshot() =>
-            NetherReadOnlySnapshotResult.Success(_appliedSnapshot);
+        public NetherReadOnlySnapshotResult TryCaptureAppliedSnapshot()
+        {
+            AppliedSnapshotReads++;
+            return _appliedSnapshots.Dequeue();
+        }
     }
 }

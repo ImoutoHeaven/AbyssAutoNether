@@ -194,6 +194,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherDiagnosticTransitionGate _recoveredCodeDiagnosticGate = new();
     private readonly NetherDiagnosticTransitionGate _battleResultCodeDiagnosticGate = new();
     private readonly NetherDiagnosticTransitionGate _checkpointDiagnosticGate = new();
+    private readonly NetherContinueSceneTransitionEvidence _continueSceneTransition = new();
     private bool _recoveredCheckpointHandoffPrepared;
     private bool _checkpointUsesStartStatusParent;
     private object? _checkpointStartStatusController;
@@ -203,7 +204,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private object? _battleResultViewController;
     private long _battleResultCodeGeneration;
     private bool _battleResultCharactersRequired;
-    private bool _continueFloorOwnerTerminated;
     private NetherPlannedAction? _floorParentAction;
     private long _floorParentGeneration;
     private PopupRegistration? _eventPopup;
@@ -261,7 +261,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         get
         {
             lock (_gate)
-                return _continueFloorOwnerTerminated;
+                return _continueSceneTransition.FloorOwnerTerminated;
         }
     }
 
@@ -2075,12 +2075,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             if (_floorSelectionController == null || _runtimeGeneration < 1)
                 return false;
 
-            // This is a per-action latch.  It is reset before the native callback so the
+            // This is per-action evidence.  It is reset before the native callback so the
             // following exact ISubService.Terminate belongs to this continuation, and stays
             // latched through the later new-controller registration for the coordinator.
-            _continueFloorOwnerTerminated = false;
-            ownerGeneration = _runtimeGeneration;
-            return true;
+            if (!_continueSceneTransition.Begin(_runtimeGeneration))
+                return false;
+
+            ownerGeneration = _continueSceneTransition.OwnerGeneration;
+            return ownerGeneration > 0;
         }
     }
 
@@ -2088,6 +2090,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         lock (_gate)
         {
+            if (_continueSceneTransition.IsSettledBySceneTransition)
+            {
+                return NetherNativeActionResult.Completed(
+                    "checkpoint-native-flow-completed-by-scene-transition"
+                );
+            }
+
             if (_pendingCheckpointAction?.Kind != NetherActionKind.Continue)
                 return NetherNativeActionResult.BindingUnavailable("missing-continue-native-parent");
 
@@ -2814,7 +2823,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _battleResultViewController = null;
             _battleResultCodeGeneration = 0;
             _battleResultCharactersRequired = false;
-            _continueFloorOwnerTerminated = false;
             _floorParentAction = null;
             _floorParentGeneration = 0;
             _floorEventSequenceTaskFlow.Reset();
@@ -2873,7 +2881,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         if (controller == null)
             return;
         bool replaced;
+        bool settledContinueBySceneTransition = false;
         long generation;
+        long continueOwnerGeneration = 0;
+        string controllerType = controller.GetType().FullName ?? controller.GetType().Name;
         lock (_gate)
         {
             // HandleStartEventByStatusAsync can be observed repeatedly on the same live
@@ -2894,14 +2905,41 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
             _floorSelectionController = controller;
             generation = _runtimeGeneration;
+            if (replaced
+                && _pendingCheckpointAction?.Kind == NetherActionKind.Continue
+                && _continueSceneTransition.TrySettle(
+                    generation,
+                    controller.GetType().FullName,
+                    FloorSelectionTypeName
+                ))
+            {
+                // A recovered StartStatus parent can remain Pending even after the game has
+                // destroyed its old owner and registered the exact next-segment controller.
+                // Release that stale native ownership synchronously so the new controller's
+                // StartStatus enter hook can be captured later in this same call stack.
+                settledContinueBySceneTransition = true;
+                continueOwnerGeneration = _continueSceneTransition.OwnerGeneration;
+                CompleteCheckpointNativeFlow();
+            }
         }
         NetherAutoClimbController.LogDiagnostic(
             "runtime-lifecycle",
             new("action", replaced ? "floor-selection-registered" : "floor-selection-reobserved"),
             new("generation", generation.ToString()),
-            new("type", controller.GetType().FullName ?? controller.GetType().Name),
+            new("type", controllerType),
             new("source", source)
         );
+        if (settledContinueBySceneTransition)
+        {
+            NetherAutoClimbController.LogDiagnostic(
+                "checkpoint-native",
+                new("stage", "continue-parent-settled-by-scene-transition"),
+                new("ownerGeneration", continueOwnerGeneration.ToString()),
+                new("runtimeGeneration", generation.ToString()),
+                new("controllerType", controllerType),
+                new("source", source)
+            );
+        }
     }
 
     private void UnregisterFloorSelectionCore(object controller)
@@ -2925,10 +2963,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _floorEventHintConfirmLease.Reset();
                 if (_pendingCheckpointAction?.Kind == NetherActionKind.Continue)
                 {
-                    // Continue owns a parent task which is expected to survive this old scene
-                    // teardown.  Record the exact owner terminal boundary but do not clear its
-                    // checkpoint parent/task/popup evidence here.
-                    _continueFloorOwnerTerminated = true;
+                    // Continue owns a parent task which normally survives this old scene
+                    // teardown.  Preserve its evidence until either the task reaches terminal
+                    // state or a strictly newer exact FloorSelection proves the scene crossed.
+                    _continueSceneTransition.ObserveFloorOwnerTerminated();
                 }
                 ClearFloorParentCore();
                 _popupOwnership.Clear();
@@ -5551,6 +5589,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private void ClearCheckpointNativeFlow()
     {
         _pendingCheckpointAction = null;
+        _continueSceneTransition.Reset();
         _checkpointFlow.Clear();
         _checkpointPopupWait.Reset();
         _checkpointParentTask = null;
@@ -6349,6 +6388,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         int rawFloorType
     )
     {
+        long targetCharacterId = 0;
+        if (kind == NetherRuntimePopupKind.Event
+            && (!TryReadInt(registration.Controller, "_mCharacterId", out targetCharacterId)
+                || targetCharacterId <= 0))
+        {
+            return NetherRuntimePopupResult.Failure("missing-native-event-target-character-id");
+        }
         if (!TryReadMember(registration.Controller, "_mNetherEventPartsArray", out object? rawParts) || rawParts == null)
             return NetherRuntimePopupResult.Failure("missing-native-event-part-array");
 
@@ -6369,6 +6415,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         return NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
         {
             Kind = kind,
+            TargetCharacterId = targetCharacterId,
             RawFloorType = rawFloorType,
             Options = options,
         });

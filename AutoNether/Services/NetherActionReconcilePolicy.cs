@@ -148,7 +148,13 @@ internal static class NetherActionReconcilePolicy
         {
             NetherRuntimePopupKind.Event or NetherRuntimePopupKind.Recovery or NetherRuntimePopupKind.Treasure
                 when action.OwnedPopupActionKind == NetherActionKind.SelectEventOption =>
-                    EvaluateEventEffects(action, before, after, allowSaturatedHealNoOp: true),
+                    EvaluateEventEffects(
+                        action,
+                        before,
+                        after,
+                        allowSaturatedHealNoOp: true,
+                        requireTargetCharacter: action.OwnedPopupKind == NetherRuntimePopupKind.Event
+                    ),
             NetherRuntimePopupKind.Shop when action.OwnedPopupActionKind == NetherActionKind.LeaveShop =>
                 NetherActionOutcome.Applied,
             NetherRuntimePopupKind.Shop when action.OwnedPopupActionKind == NetherActionKind.BuyShopItem =>
@@ -172,6 +178,7 @@ internal static class NetherActionReconcilePolicy
         NetherPlannedAction child = new(stage.ActionKind)
         {
             OptionNumber = stage.OptionNumber,
+            TargetCharacterId = stage.TargetCharacterId,
             ExpectedEffects = stage.ExpectedEffects,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
@@ -183,7 +190,13 @@ internal static class NetherActionReconcilePolicy
         {
             NetherRuntimePopupKind.Event or NetherRuntimePopupKind.Recovery or NetherRuntimePopupKind.Treasure
                 when stage.ActionKind == NetherActionKind.SelectEventOption =>
-                    EvaluateEventEffects(child, before, after, allowSaturatedHealNoOp: true),
+                    EvaluateEventEffects(
+                        child,
+                        before,
+                        after,
+                        allowSaturatedHealNoOp: true,
+                        requireTargetCharacter: stage.PopupKind == NetherRuntimePopupKind.Event
+                    ),
             NetherRuntimePopupKind.Shop when stage.ActionKind == NetherActionKind.LeaveShop =>
                 NetherActionOutcome.Applied,
             NetherRuntimePopupKind.Shop when stage.ActionKind == NetherActionKind.BuyShopItem =>
@@ -215,7 +228,8 @@ internal static class NetherActionReconcilePolicy
         NetherPlannedAction action,
         NetherSnapshot before,
         NetherSnapshot after,
-        bool allowSaturatedHealNoOp = false
+        bool allowSaturatedHealNoOp = false,
+        bool requireTargetCharacter = false
     )
     {
         if (action.OptionNumber <= 0
@@ -256,13 +270,26 @@ internal static class NetherActionReconcilePolicy
                 NetherEffectKind.Damage => -effect.Amount,
                 _ => 0,
             });
+            bool hasHpEffect = hpDelta != 0;
+            if (action.TargetCharacterId < 0
+                || (requireTargetCharacter && hasHpEffect && action.TargetCharacterId <= 0))
+            {
+                return NetherActionOutcome.Ambiguous;
+            }
+
             bool resourcesMatch = after.ErosionPoint == checked(before.ErosionPoint + erosionDelta)
                 && after.NetherGold == checked(before.NetherGold + goldDelta)
                 && after.TreasureKeyCount == checked(before.TreasureKeyCount + keyDelta);
             if (!resourcesMatch)
                 return UnchangedOrAmbiguous(before, after);
 
-            if (hpDelta != 0 && !HasExactHpDelta(before, after, hpDelta, allowSaturatedHealNoOp))
+            if (hasHpEffect && !HasExactHpDelta(
+                    before,
+                    after,
+                    hpDelta,
+                    allowSaturatedHealNoOp,
+                    action.TargetCharacterId
+                ))
                 return UnchangedOrAmbiguous(before, after);
 
             foreach (NetherEffect effect in action.ExpectedEffects)
@@ -578,7 +605,8 @@ internal static class NetherActionReconcilePolicy
         NetherSnapshot before,
         NetherSnapshot after,
         int expectedDelta,
-        bool allowSaturatedHealNoOp
+        bool allowSaturatedHealNoOp,
+        long targetCharacterId
     )
     {
         if (before.Characters == null || after.Characters == null
@@ -590,8 +618,11 @@ internal static class NetherActionReconcilePolicy
         try
         {
             var afterByCharacterId = new Dictionary<long, NetherCharacterState>();
+            var beforeCharacterIds = new HashSet<long>();
             bool hasActiveCharacter = false;
             bool allActiveHpUnchanged = true;
+            bool foundTargetCharacter = false;
+            bool targetHpChanged = false;
             foreach (NetherCharacterState character in after.Characters)
             {
                 if (!afterByCharacterId.TryAdd(character.CharacterId, character))
@@ -600,7 +631,8 @@ internal static class NetherActionReconcilePolicy
 
             foreach (NetherCharacterState character in before.Characters)
             {
-                if (!afterByCharacterId.TryGetValue(character.CharacterId, out NetherCharacterState observed)
+                if (!beforeCharacterIds.Add(character.CharacterId)
+                    || !afterByCharacterId.TryGetValue(character.CharacterId, out NetherCharacterState observed)
                     || observed.IsActive != character.IsActive)
                 {
                     return false;
@@ -611,13 +643,43 @@ internal static class NetherActionReconcilePolicy
                     hasActiveCharacter = true;
                     allActiveHpUnchanged &= observed.HpPermille == character.HpPermille;
                 }
-                int expectedHp = character.IsActive
+
+                if (targetCharacterId > 0)
+                {
+                    if (character.CharacterId != targetCharacterId)
+                    {
+                        if (observed.HpPermille != character.HpPermille)
+                            return false;
+                        continue;
+                    }
+
+                    if (!character.IsActive)
+                        return false;
+                    foundTargetCharacter = true;
+                    int targetedExpectedHp = checked(character.HpPermille + expectedDelta);
+                    if (expectedDelta > 0)
+                        targetedExpectedHp = Math.Min(1000, targetedExpectedHp);
+                    if (observed.HpPermille != targetedExpectedHp)
+                        return false;
+                    targetHpChanged = observed.HpPermille != character.HpPermille;
+                    continue;
+                }
+
+                int partyExpectedHp = character.IsActive
                     ? checked(character.HpPermille + expectedDelta)
                     : character.HpPermille;
                 if (character.IsActive && expectedDelta > 0)
-                    expectedHp = Math.Min(1000, expectedHp);
-                if (observed.HpPermille != expectedHp)
+                    partyExpectedHp = Math.Min(1000, partyExpectedHp);
+                if (observed.HpPermille != partyExpectedHp)
                     return false;
+            }
+
+            if (targetCharacterId > 0)
+            {
+                return foundTargetCharacter
+                    && (targetHpChanged
+                        ? !string.Equals(before.CharacterHpHash, after.CharacterHpHash, StringComparison.Ordinal)
+                        : allowSaturatedHealNoOp && expectedDelta > 0);
             }
 
             return !string.Equals(before.CharacterHpHash, after.CharacterHpHash, StringComparison.Ordinal)

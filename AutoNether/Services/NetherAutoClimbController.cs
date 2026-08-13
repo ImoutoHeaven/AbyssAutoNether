@@ -793,6 +793,7 @@ internal static class NetherAutoClimbController
                 new NetherDetailedAuditField("popup", popup.Kind.ToString()),
                 new NetherDetailedAuditField("action", decision.Action.Kind.ToString()),
                 new NetherDetailedAuditField("option", decision.Action.OptionNumber.ToString()),
+                new NetherDetailedAuditField("targetCharacterId", decision.Action.TargetCharacterId.ToString()),
                 new NetherDetailedAuditField("content", decision.Action.ContentId.ToString()),
                 new NetherDetailedAuditField("codeId", decision.Action.CodeId.ToString()),
                 new NetherDetailedAuditField("replaceCodeId", decision.Action.ReplaceCodeId.ToString()),

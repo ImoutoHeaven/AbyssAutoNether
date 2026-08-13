@@ -75,19 +75,41 @@ public class NetherCheckpointPopupWaitCoordinatorTests
 
     [Theory]
     [MemberData(nameof(PopupKinds))]
-    public void Early_parent_completion_without_the_expected_stage_is_not_reported_as_started(
+    public void Completed_parent_allows_a_bounded_late_popup_registration(
         int rawKind
     )
     {
         NetherCheckpointPopupKind kind = (NetherCheckpointPopupKind)rawKind;
         var driver = new FakeParentDriver(NetherNativeActionResult.Completed("parent-terminal"));
-        var waits = new NetherCheckpointPopupWaitCoordinator(driver);
+        var waits = new NetherCheckpointPopupWaitCoordinator(driver, maximumMissingPolls: 1);
 
         Assert.True(waits.Begin(NetherActionKind.Continue, ownerGeneration: 21, minimumSequence: 100));
+        Assert.Equal(NetherCheckpointPopupWaitResultKind.Waiting, waits.WaitFor(kind, null).Kind);
+
+        NetherCheckpointPopupWaitResult ready = waits.WaitFor(kind, Fresh(kind, 101));
+
+        Assert.Equal(NetherCheckpointPopupWaitResultKind.Ready, ready.Kind);
+        Assert.Equal(101, ready.Observation!.Value.Sequence);
+        Assert.Equal(2, driver.PollCalls);
+    }
+
+    [Theory]
+    [MemberData(nameof(PopupKinds))]
+    public void Completed_parent_without_the_expected_stage_expires_after_the_bounded_grace(
+        int rawKind
+    )
+    {
+        NetherCheckpointPopupKind kind = (NetherCheckpointPopupKind)rawKind;
+        var driver = new FakeParentDriver(NetherNativeActionResult.Completed("parent-terminal"));
+        var waits = new NetherCheckpointPopupWaitCoordinator(driver, maximumMissingPolls: 1);
+
+        Assert.True(waits.Begin(NetherActionKind.Continue, ownerGeneration: 21, minimumSequence: 100));
+        Assert.Equal(NetherCheckpointPopupWaitResultKind.Waiting, waits.WaitFor(kind, null).Kind);
 
         NetherCheckpointPopupWaitResult early = waits.WaitFor(kind, null);
 
         Assert.Equal(NetherCheckpointPopupWaitResultKind.ParentCompletedEarly, early.Kind);
+        Assert.Contains("timeout", early.Detail);
     }
 
     [Fact]

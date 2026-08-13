@@ -6,8 +6,10 @@ namespace AutoNether.Services;
 
 /// <summary>
 /// Narrow production seam for the destructive boundary after a one-ticket Sleep continuation.
-/// The native Continue parent must finish, its FloorSelection owner must disappear, and a
-/// strictly newer NetherTop runtime must register before one GET-only refresh is allowed.
+/// The native Continue parent must either finish or be superseded by its exact scene transition.
+/// Its FloorSelection owner must disappear, and a strictly newer NetherTop runtime must register
+/// before one GET-only refresh is allowed.  Registration can precede the new controller's model
+/// injection, so that exact post-GET snapshot gap is also awaited for a bounded period.
 /// Nothing in this component starts, resumes, or repeats a Nether action.
 /// </summary>
 internal interface INetherContinueSceneDriver : INetherReadOnlyReconcileDriver
@@ -91,13 +93,19 @@ internal sealed class NetherContinueSceneCoordinator
         AwaitingTeardown,
         AwaitingRebind,
         Reconciling,
+        AwaitingAppliedSnapshot,
         Terminal,
     }
+
+    private const string MissingNetherModelSnapshot = "missing-floor-selection-nether-model";
+    private const string MissingNetherModelRefresh =
+        "read-only-refresh-snapshot:" + MissingNetherModelSnapshot;
 
     private readonly INetherContinueSceneDriver _driver;
     private readonly NetherReadOnlyReconcileCoordinator _reconcile;
     private readonly NetherNativeWaitGate _teardownWait;
     private readonly NetherNativeWaitGate _rebindWait;
+    private readonly NetherNativeWaitGate _snapshotWait;
     private Stage _stage;
     private NetherContinueSceneContract _contract;
     private NetherSnapshot? _before;
@@ -114,13 +122,14 @@ internal sealed class NetherContinueSceneCoordinator
         _reconcile = new NetherReadOnlyReconcileCoordinator(driver);
         _teardownWait = new NetherNativeWaitGate(maximumMissingTicks);
         _rebindWait = new NetherNativeWaitGate(maximumMissingTicks);
+        _snapshotWait = new NetherNativeWaitGate(maximumMissingTicks);
     }
 
     public bool IsActive => _stage is not (Stage.Idle or Stage.Terminal);
 
     /// <summary>
-    /// The native Continue parent has reached a terminal state and the coordinator is now
-    /// waiting only for its expected scene transition/rebind.  This is the precise point at
+    /// The native Continue parent has reached a terminal state, or its exact teardown/rebind has
+    /// proved that native execution already crossed that boundary.  This is the precise point at
     /// which the controller may enter its explicit handoff phase.
     /// </summary>
     public bool ParentTerminalObserved => _parentTerminalObserved;
@@ -145,6 +154,7 @@ internal sealed class NetherContinueSceneCoordinator
         _terminal = null;
         _teardownWait.Clear();
         _rebindWait.Clear();
+        _snapshotWait.Clear();
         _reconcile.Reset();
         _stage = Stage.AwaitingParent;
         return true;
@@ -163,6 +173,7 @@ internal sealed class NetherContinueSceneCoordinator
             Stage.AwaitingTeardown => PumpTeardown(),
             Stage.AwaitingRebind => PumpRebind(),
             Stage.Reconciling => PumpReconcile(),
+            Stage.AwaitingAppliedSnapshot => PumpAppliedSnapshot(),
             _ => TerminalPause("continue-scene-invalid-stage:" + _stage),
         };
     }
@@ -176,11 +187,21 @@ internal sealed class NetherContinueSceneCoordinator
         _terminal = null;
         _teardownWait.Clear();
         _rebindWait.Clear();
+        _snapshotWait.Clear();
         _reconcile.Reset();
     }
 
     private NetherContinueSceneStep PumpParent()
     {
+        if (TryObserveExactSceneTransition(out long generation))
+        {
+            _parentTerminalObserved = true;
+            _stage = Stage.AwaitingTeardown;
+            return NetherContinueSceneStep.WaitForTeardown(
+                "continue-parent-settled-by-scene-transition:generation=" + generation
+            );
+        }
+
         NetherNativeActionResult parent = _driver.PollContinueParent();
         if (parent.Kind == NetherNativeActionResultKind.Started)
             return NetherContinueSceneStep.WaitForTeardown("continue-parent-pending:" + parent.Detail);
@@ -200,6 +221,14 @@ internal sealed class NetherContinueSceneCoordinator
         return parent.Kind == NetherNativeActionResultKind.BindingUnavailable
             ? TerminalPause("continue-parent-binding:" + parent.Detail)
             : TerminalPause("continue-parent-fault:" + parent.Detail);
+    }
+
+    private bool TryObserveExactSceneTransition(out long generation)
+    {
+        generation = _driver.CurrentRuntimeGeneration;
+        return _driver.FloorOwnerTerminated
+            && generation > _ownerGeneration
+            && _driver.IsExpectedNetherTopScene;
     }
 
     private NetherContinueSceneStep PumpTeardown()
@@ -247,11 +276,53 @@ internal sealed class NetherContinueSceneCoordinator
         if (refresh.Kind == NetherReadOnlyReconcileStepKind.Pending)
             return NetherContinueSceneStep.Reconcile("continue-read-only-refresh-pending:" + refresh.Detail);
         if (refresh.Kind == NetherReadOnlyReconcileStepKind.BindingUnavailable)
+        {
+            if (string.Equals(refresh.Detail, MissingNetherModelRefresh, StringComparison.Ordinal))
+            {
+                _stage = Stage.AwaitingAppliedSnapshot;
+                return AwaitAppliedSnapshot();
+            }
             return TerminalPause("continue-read-only-refresh-binding:" + refresh.Detail);
+        }
         if (refresh.Kind != NetherReadOnlyReconcileStepKind.Applied || refresh.Snapshot == null)
             return TerminalPause("continue-read-only-refresh-fault:" + refresh.Detail);
 
         return ValidateSettlement(refresh.Snapshot);
+    }
+
+    private NetherContinueSceneStep PumpAppliedSnapshot()
+    {
+        NetherReadOnlySnapshotResult captured = _driver.TryCaptureAppliedSnapshot();
+        if (captured.IsSuccess)
+        {
+            _snapshotWait.ObserveRegistration();
+            return ValidateSettlement(captured.Snapshot!);
+        }
+        if (!string.Equals(captured.Detail, MissingNetherModelSnapshot, StringComparison.Ordinal))
+        {
+            return TerminalPause(
+                "continue-read-only-refresh-binding:read-only-refresh-snapshot:" + captured.Detail
+            );
+        }
+
+        return AwaitAppliedSnapshot();
+    }
+
+    private NetherContinueSceneStep AwaitAppliedSnapshot()
+    {
+        NetherNativeActionResult wait = _snapshotWait.AwaitRegistration(
+            "continue-applied-snapshot"
+        );
+        return wait.Kind == NetherNativeActionResultKind.Started
+            ? NetherContinueSceneStep.Reconcile(
+                "continue-read-only-refresh-awaiting-snapshot:" + MissingNetherModelSnapshot
+            )
+            : TerminalPause(
+                "continue-read-only-refresh-snapshot-timeout:"
+                    + wait.Detail
+                    + ":"
+                    + MissingNetherModelSnapshot
+            );
     }
 
     private NetherContinueSceneStep ValidateSettlement(NetherSnapshot after)
@@ -284,6 +355,7 @@ internal sealed class NetherContinueSceneCoordinator
     {
         _stage = Stage.Terminal;
         _before = null;
+        _snapshotWait.Clear();
         _reconcile.Reset();
         _terminal = NetherContinueSceneStep.Complete(snapshot, detail);
         return _terminal.Value;
@@ -293,6 +365,7 @@ internal sealed class NetherContinueSceneCoordinator
     {
         _stage = Stage.Terminal;
         _before = null;
+        _snapshotWait.Clear();
         _reconcile.Reset();
         _terminal = NetherContinueSceneStep.Pause(detail);
         return _terminal.Value;

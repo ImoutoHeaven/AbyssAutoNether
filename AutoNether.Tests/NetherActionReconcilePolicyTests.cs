@@ -271,7 +271,75 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
-    public void Composed_event_damage_requires_the_exact_delta_for_each_active_party_member()
+    public void Composed_event_heal_uses_its_exact_target_for_a_saturated_no_op()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 1000),
+                new NetherCharacterState(102, 700),
+            },
+            CharacterHpHash = "101:1000:1;102:700:1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            Characters = before.Characters,
+            CharacterHpHash = before.CharacterHpHash,
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Event,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 1,
+            TargetCharacterId = 101,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.Heal, 100) },
+        };
+
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(
+            action with { TargetCharacterId = 999 },
+            before,
+            after
+        ));
+    }
+
+    [Fact]
+    public void Composed_event_hp_effect_without_native_target_evidence_fails_closed()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 1000),
+                new NetherCharacterState(102, 1000),
+            },
+            CharacterHpHash = "101:1000:1;102:1000:1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 900),
+                new NetherCharacterState(102, 900),
+            },
+            CharacterHpHash = "101:900:1;102:900:1",
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Event,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 1,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.Damage, 100) },
+        };
+
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, after));
+    }
+
+    [Fact]
+    public void Composed_event_damage_requires_the_exact_target_and_unchanged_other_party_members()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -288,20 +356,30 @@ public class NetherActionReconcilePolicyTests
             Characters = new[]
             {
                 new NetherCharacterState(101, 900),
+                new NetherCharacterState(102, 1000),
+                new NetherCharacterState(103, 0, IsActive: false),
+            },
+            CharacterHpHash = "101:900:1;102:1000:1;103:0:0",
+        };
+        NetherSnapshot wrongTarget = exact with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 1000),
                 new NetherCharacterState(102, 900),
                 new NetherCharacterState(103, 0, IsActive: false),
             },
-            CharacterHpHash = "101:900:1;102:900:1;103:0:0",
+            CharacterHpHash = "101:1000:1;102:900:1;103:0:0",
         };
-        NetherSnapshot wrongMemberDelta = exact with
+        NetherSnapshot partyWide = exact with
         {
             Characters = new[]
             {
                 new NetherCharacterState(101, 900),
-                new NetherCharacterState(102, 800),
+                new NetherCharacterState(102, 900),
                 new NetherCharacterState(103, 0, IsActive: false),
             },
-            CharacterHpHash = "101:900:1;102:800:1;103:0:0",
+            CharacterHpHash = "101:900:1;102:900:1;103:0:0",
         };
         NetherEffect[] effects = { new(NetherEffectKind.Damage, 100) };
         NetherPlannedAction action = ComposedFloor(
@@ -325,13 +403,133 @@ public class NetherActionReconcilePolicyTests
                     ContentAmount: 0,
                     GoldCost: 0,
                     CodeId: 0,
-                    ReplaceCodeId: 0
+                    ReplaceCodeId: 0,
+                    TargetCharacterId: 101
                 ),
             },
         };
 
         Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
-        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongMemberDelta));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongTarget));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, partyWide));
+    }
+
+    [Fact]
+    public void Live_floor_event_damage_and_erosion_heal_accept_one_exact_character_update()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            ErosionPoint = 25,
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 1000),
+                new NetherCharacterState(102, 1000),
+            },
+            CharacterHpHash = "101:1000:1;102:1000:1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            ErosionPoint = 15,
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 900),
+                new NetherCharacterState(102, 1000),
+            },
+            CharacterHpHash = "101:900:1;102:1000:1",
+        };
+        NetherEffect[] effects =
+        {
+            new(NetherEffectKind.Damage, 100),
+            new(NetherEffectKind.ErosionHeal, 10),
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Event,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 3,
+            ExpectedEffects = effects,
+            OwnedPopupStages = new[]
+            {
+                new NetherFloorPopupStage(
+                    NetherRuntimePopupKind.Event,
+                    NetherActionKind.SelectEventOption,
+                    OwnerGeneration: 2,
+                    Sequence: 2,
+                    ExpectedAfterStatus: NetherSessionStatus.Play,
+                    OptionNumber: 3,
+                    ExpectedEffects: effects,
+                    ContentId: 0,
+                    ContentAmount: 0,
+                    GoldCost: 0,
+                    CodeId: 0,
+                    ReplaceCodeId: 0,
+                    TargetCharacterId: 101
+                ),
+            },
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(action, before, after)
+        );
+    }
+
+    [Fact]
+    public void Single_target_event_damage_is_applied_when_one_active_character_changes_exactly()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 1000),
+                new NetherCharacterState(102, 1000),
+            },
+            CharacterHpHash = "101:1000:1;102:1000:1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 900),
+                new NetherCharacterState(102, 1000),
+            },
+            CharacterHpHash = "101:900:1;102:1000:1",
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Event,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 3,
+            TargetCharacterId = 101,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.Damage, 100) },
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(action, before, after)
+        );
+    }
+
+    [Fact]
+    public void Erosion_heal_without_an_hp_effect_reconciles_independently()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with { ErosionPoint = 25 };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with { ErosionPoint = 15 };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Event,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 3,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.ErosionHeal, 10) },
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(action, before, after)
+        );
     }
 
     [Fact]

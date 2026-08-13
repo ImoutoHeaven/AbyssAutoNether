@@ -42,6 +42,11 @@ internal sealed record NetherRuntimePopupContext
     /// counter.  All other popup kinds remain at epoch zero.
     /// </summary>
     public long DecisionEpoch { get; init; }
+    /// <summary>
+    /// Exact playable character passed to the native Event popup. Recovery and Treasure do not
+    /// carry this argument and therefore retain zero.
+    /// </summary>
+    public long TargetCharacterId { get; init; }
     public int RawFloorType { get; init; }
     public IReadOnlyList<NetherEventOption> Options { get; init; } = Array.Empty<NetherEventOption>();
     public IReadOnlyList<NetherShopContent> ShopContents { get; init; } = Array.Empty<NetherShopContent>();
@@ -101,10 +106,10 @@ internal static class NetherPopupDispatchPolicy
             NetherRuntimePopupKind.CodeOffer => new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.Code },
             NetherRuntimePopupKind.CodeTransform => FromCodeTransform(snapshot),
             NetherRuntimePopupKind.Event when popup.RawFloorType == (int)NetherFloorNodeType.Event =>
-                FromEventDecision(EventPolicy.DecideEvent(snapshot, popup.Options, settings)),
+                FromEventDecision(EventPolicy.DecideEvent(snapshot, popup.Options, settings), popup.TargetCharacterId),
             NetherRuntimePopupKind.Event => Pause(NetherPauseReason.UnknownFloor, "event-popup-raw-type-mismatch:" + popup.RawFloorType),
-            NetherRuntimePopupKind.Recovery => FromEventDecision(EventPolicy.DecideRecovery(snapshot, popup.Options, settings)),
-            NetherRuntimePopupKind.Treasure => FromEventDecision(EventPolicy.DecideTreasure(snapshot, popup.Options, settings)),
+            NetherRuntimePopupKind.Recovery => FromEventDecision(EventPolicy.DecideRecovery(snapshot, popup.Options, settings), 0),
+            NetherRuntimePopupKind.Treasure => FromEventDecision(EventPolicy.DecideTreasure(snapshot, popup.Options, settings), 0),
             NetherRuntimePopupKind.Shop => FromShopDecision(EventPolicy.DecideShop(snapshot, popup.ShopContents, settings)),
             NetherRuntimePopupKind.Continue or NetherRuntimePopupKind.ReturnItems =>
                 new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.AwaitNativeFlow },
@@ -131,7 +136,10 @@ internal static class NetherPopupDispatchPolicy
             : Pause(decision.PauseReason, decision.Detail);
     }
 
-    private static NetherPopupDispatchDecision FromEventDecision(NetherEventDecision decision) => decision.Kind switch
+    private static NetherPopupDispatchDecision FromEventDecision(
+        NetherEventDecision decision,
+        long targetCharacterId
+    ) => decision.Kind switch
     {
         NetherEventDecisionKind.Select => new NetherPopupDispatchDecision
         {
@@ -140,6 +148,7 @@ internal static class NetherPopupDispatchPolicy
             {
                 OptionNumber = decision.OptionNumber,
                 CodeId = decision.ReplacementCodeId,
+                TargetCharacterId = targetCharacterId,
                 ExpectedEffects = decision.ExpectedEffects,
             },
             HasEffectProjection = true,
