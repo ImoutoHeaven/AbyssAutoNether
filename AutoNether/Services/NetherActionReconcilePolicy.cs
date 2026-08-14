@@ -616,7 +616,8 @@ internal static class NetherActionReconcilePolicy
             var afterByCharacterId = new Dictionary<long, NetherCharacterState>();
             var beforeCharacterIds = new HashSet<long>();
             bool hasActiveCharacter = false;
-            bool allActiveHpUnchanged = true;
+            bool observedAppliedEffect = false;
+            bool allActiveCharactersSaturated = true;
             foreach (NetherCharacterState character in after.Characters)
             {
                 if (!afterByCharacterId.TryAdd(character.CharacterId, character))
@@ -635,28 +636,39 @@ internal static class NetherActionReconcilePolicy
                 if (character.IsActive)
                 {
                     hasActiveCharacter = true;
-                    allActiveHpUnchanged &= observed.HpPermille == character.HpPermille;
                 }
 
-                // NetherUpdateEventRequestEntity submits only floor/option/code data; it has
-                // no character-id field. The Event popup's _mCharacterId is presentation data,
-                // while the response replaces t_nether_characters as one party-wide update.
-                // Reconcile the protocol-owned party result instead of treating that visual
-                // character as a single-target server contract.
-                int partyExpectedHp = character.IsActive
-                    ? checked(character.HpPermille + expectedDelta)
-                    : character.HpPermille;
-                if (character.IsActive && expectedDelta > 0)
-                    partyExpectedHp = Math.Min(1000, partyExpectedHp);
-                if (observed.HpPermille != partyExpectedHp)
+                if (!character.IsActive)
+                {
+                    if (observed.HpPermille != character.HpPermille)
+                        return false;
+                    continue;
+                }
+
+                int expectedHp = checked(character.HpPermille + expectedDelta);
+                expectedHp = Math.Max(0, Math.Min(1000, expectedHp));
+                bool saturated = expectedHp == character.HpPermille;
+                allActiveCharactersSaturated &= saturated;
+
+                // Event selection sends floor/option/code only; it never sends the popup's
+                // presentation character ID. The server owns the affected character set and
+                // returns t_nether_characters[], which the native client applies by returned ID.
+                // Accept any non-empty server-selected subset, but every changed member must
+                // carry the exact clamped effect and every non-selected member must be unchanged.
+                if (observed.HpPermille == expectedHp)
+                {
+                    observedAppliedEffect |= !saturated;
+                    continue;
+                }
+                if (observed.HpPermille != character.HpPermille)
                     return false;
             }
 
-            return !string.Equals(before.CharacterHpHash, after.CharacterHpHash, StringComparison.Ordinal)
+            return observedAppliedEffect
                 || (allowSaturatedHealNoOp
                     && expectedDelta > 0
                     && hasActiveCharacter
-                    && allActiveHpUnchanged);
+                    && allActiveCharactersSaturated);
         }
         catch (OverflowException)
         {

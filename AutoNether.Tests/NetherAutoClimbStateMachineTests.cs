@@ -136,6 +136,69 @@ public class NetherAutoClimbStateMachineTests
     }
 
     [Fact]
+    public void Finish_parent_terminal_preserves_pending_evidence_until_result_terminal()
+    {
+        var machine = new NetherAutoClimbStateMachine();
+        NetherSnapshotFingerprint sleep = Fingerprint(NetherSessionStatus.Sleep, 100);
+
+        machine.Toggle(isInNether: true);
+        machine.ObserveStable(sleep);
+        Assert.True(machine.TryBegin(
+            new NetherPlannedAction(NetherActionKind.FinishAtCheckpoint),
+            sleep
+        ));
+
+        Assert.True(machine.BeginFinishResultHandoff());
+        Assert.Equal(NetherAutoClimbPhase.AwaitingSceneChange, machine.Phase);
+        Assert.Equal(NetherActionKind.FinishAtCheckpoint, machine.PendingAction!.Value.Kind);
+
+        Assert.True(machine.Complete());
+        Assert.Equal(NetherAutoClimbPhase.Completed, machine.Phase);
+        Assert.Null(machine.PendingAction);
+    }
+
+    [Fact]
+    public void Prior_finish_evidence_retires_at_the_exact_pristine_new_run_snapshot()
+    {
+        NetherAutoClimbStateMachine machine = DisabledMachineWithPendingFinish(out NetherSnapshot finished);
+        NetherSnapshot freshRun = PristineNewRunAfter(finished);
+
+        Assert.True(machine.TryRetireFinishEvidenceForNewRun(freshRun));
+
+        Assert.False(machine.IsEnabled);
+        Assert.Equal(NetherAutoClimbPhase.Disabled, machine.Phase);
+        Assert.Null(machine.PendingAction);
+        Assert.Null(machine.PreActionSnapshot);
+        Assert.Equal("prior-finish-retired-at-authoritative-new-run", machine.PauseDetail);
+    }
+
+    [Fact]
+    public void Prior_finish_evidence_survives_every_incomplete_new_run_snapshot_contract()
+    {
+        NetherAutoClimbStateMachine machine = DisabledMachineWithPendingFinish(out NetherSnapshot finished);
+        NetherSnapshot freshRun = PristineNewRunAfter(finished);
+        NetherSnapshot[] incomplete =
+        {
+            freshRun with { Status = NetherSessionStatus.Sleep },
+            freshRun with { FloorLevel = 1 },
+            freshRun with { CurrentFloorId = 0 },
+            freshRun with { CurrentNodeId = 0 },
+            freshRun with { Floors = System.Array.Empty<NetherFloorNode>() },
+            freshRun with { ErosionPoint = 1 },
+            freshRun with { TicketCount = finished.TicketCount },
+            freshRun with { MapHash = finished.MapHash },
+        };
+
+        foreach (NetherSnapshot snapshot in incomplete)
+            Assert.False(machine.TryRetireFinishEvidenceForNewRun(snapshot));
+
+        Assert.False(machine.IsEnabled);
+        Assert.Equal(NetherAutoClimbPhase.Disabled, machine.Phase);
+        Assert.Equal(NetherActionKind.FinishAtCheckpoint, machine.PendingAction!.Value.Kind);
+        Assert.Same(finished, machine.PreActionSnapshot);
+    }
+
+    [Fact]
     public void Lose_pauses_for_user_control_and_never_waits_forever_for_a_result_request()
     {
         var machine = new NetherAutoClimbStateMachine();
@@ -443,6 +506,71 @@ public class NetherAutoClimbStateMachineTests
         machine.ObserveStable(Fingerprint(NetherSessionStatus.Play, 1));
         return machine;
     }
+
+    private static NetherAutoClimbStateMachine DisabledMachineWithPendingFinish(
+        out NetherSnapshot finished
+    )
+    {
+        finished = new NetherSnapshot
+        {
+            Status = NetherSessionStatus.Sleep,
+            NetherId = 1,
+            MapId = 1,
+            CurrentFloorId = 474,
+            CurrentNodeId = 474,
+            FloorLevel = 100,
+            FloorIndex = 10,
+            ErosionPoint = 30,
+            TicketCount = 2,
+            Floors = new[]
+            {
+                new NetherFloorNode(474, 100, 10, NetherFloorNodeType.Boss)
+                {
+                    NodeId = 474,
+                    IsUnlocked = true,
+                },
+            },
+            CharacterHpHash = "finished-hp",
+            CodeHash = "finished-codes",
+            MapHash = "finished-run-map",
+        };
+        var machine = new NetherAutoClimbStateMachine();
+        machine.Toggle(isInNether: true);
+        machine.ObserveStable(finished.Fingerprint);
+        Assert.True(machine.TryBegin(
+            new NetherPlannedAction(NetherActionKind.FinishAtCheckpoint),
+            finished
+        ));
+        Assert.True(machine.BeginFinishResultHandoff());
+        machine.Pause(NetherPauseReason.BindingUnavailable, "native-result-task-timeout");
+        machine.Toggle(isInNether: true);
+        Assert.Equal(NetherAutoClimbPhase.Disabled, machine.Phase);
+        return machine;
+    }
+
+    private static NetherSnapshot PristineNewRunAfter(NetherSnapshot finished) => new()
+    {
+        Status = NetherSessionStatus.Play,
+        NetherId = finished.NetherId,
+        MapId = finished.MapId,
+        CurrentFloorId = 46,
+        CurrentNodeId = 4294967299,
+        FloorLevel = 0,
+        FloorIndex = 2,
+        ErosionPoint = 0,
+        TicketCount = finished.TicketCount - 1,
+        Floors = new[]
+        {
+            new NetherFloorNode(46, 1, 2, NetherFloorNodeType.Recovery)
+            {
+                NodeId = 4294967299,
+                IsUnlocked = true,
+            },
+        },
+        CharacterHpHash = "new-run-hp",
+        CodeHash = "nether-codes:none",
+        MapHash = "new-run-floor-zero-map",
+    };
 
     private static NetherSnapshotFingerprint Fingerprint(NetherSessionStatus status, int floorLevel) => new(
         status,

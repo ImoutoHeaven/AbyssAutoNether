@@ -485,6 +485,69 @@ internal sealed class NetherAutoClimbStateMachine
         return true;
     }
 
+    /// <summary>
+    /// Finish has an exact checkpoint parent whose terminal state transfers ownership to the
+    /// separate Result scene.  FloorSelection is expected to disappear at this boundary, so the
+    /// original Finish evidence must survive until the Result task itself reaches terminal.
+    /// </summary>
+    public bool BeginFinishResultHandoff()
+    {
+        if (_pendingAction?.Kind != NetherActionKind.FinishAtCheckpoint
+            || Phase is not (
+                NetherAutoClimbPhase.ExecutingNativeAction
+                or NetherAutoClimbPhase.AwaitingSceneChange
+            ))
+        {
+            return false;
+        }
+
+        Phase = NetherAutoClimbPhase.AwaitingSceneChange;
+        return true;
+    }
+
+    /// <summary>
+    /// Retires a prior run's Finish evidence only at the server's pristine new-run boundary.
+    /// Runtime/controller generation, current-owner identity, matching OnEntered, and the
+    /// authoritative capture itself are proved by the caller's FloorScene readiness result;
+    /// this method proves the remaining cross-run snapshot contract before discarding anything.
+    /// </summary>
+    public bool TryRetireFinishEvidenceForNewRun(NetherSnapshot snapshot)
+    {
+        if (snapshot == null)
+            throw new System.ArgumentNullException(nameof(snapshot));
+        if (IsEnabled
+            || Phase != NetherAutoClimbPhase.Disabled
+            || _pendingAction?.Kind != NetherActionKind.FinishAtCheckpoint
+            || _preActionSnapshot is not NetherSnapshot finished
+            || finished.Status != NetherSessionStatus.Sleep
+            || finished.FloorLevel <= 0
+            || finished.CurrentFloorId <= 0
+            || finished.TicketCount <= 0
+            || string.IsNullOrEmpty(finished.MapHash)
+            || snapshot.Status != NetherSessionStatus.Play
+            || snapshot.FloorLevel != 0
+            || snapshot.CurrentFloorId <= 0
+            || snapshot.CurrentNodeId <= 0
+            || snapshot.Floors == null
+            || snapshot.Floors.Count == 0
+            || snapshot.ErosionPoint != 0
+            || snapshot.TicketCount != finished.TicketCount - 1
+            || string.IsNullOrEmpty(snapshot.MapHash)
+            || string.Equals(snapshot.MapHash, finished.MapHash, System.StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _pendingAction = null;
+        _preActionFingerprint = null;
+        _preActionSnapshot = null;
+        _knownNotAppliedAction = null;
+        _knownNotAppliedFingerprint = null;
+        PauseReason = NetherPauseReason.UserDisabled;
+        PauseDetail = "prior-finish-retired-at-authoritative-new-run";
+        return true;
+    }
+
     public void TerminatePendingAndPause(NetherPauseReason reason, string detail)
     {
         _pendingAction = null;

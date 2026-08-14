@@ -154,7 +154,7 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
-    public void Packaged_event_update_protocol_has_no_character_target_and_returns_party_statuses()
+    public void Packaged_event_update_protocol_has_no_character_target_and_returns_character_status_updates()
     {
         using var packaged = PackagedProjectAssembly.Load();
         Type request = packaged.RequireType("Project.Api.NetherUpdateEventRequestEntity");

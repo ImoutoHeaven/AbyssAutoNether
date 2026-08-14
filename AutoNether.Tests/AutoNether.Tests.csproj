@@ -102,6 +102,7 @@
     <Compile Include="..\AutoNether\Services\NetherBattleResultCodeCoordinator.cs" Link="NetherBattleResultCodeCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleResultCodeCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherRecoveredCodeOfferCoordinator.cs" Link="NetherRecoveredCodeOfferCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherRecoveredCodeOfferCoordinator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherStartStatusParentCapture.cs" Link="NetherStartStatusParentCapture.cs" Condition="Exists('..\AutoNether\Services\NetherStartStatusParentCapture.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherCheckpointStartStatusParentCapture.cs" Link="NetherCheckpointStartStatusParentCapture.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointStartStatusParentCapture.cs')" />
     <Compile Include="..\AutoNether\Services\NetherUniTaskFaultDiagnostic.cs" Link="NetherUniTaskFaultDiagnostic.cs" Condition="Exists('..\AutoNether\Services\NetherUniTaskFaultDiagnostic.cs')" />
     <Compile Include="..\AutoNether\Services\NetherTransitionSnapshotCache.cs" Link="NetherTransitionSnapshotCache.cs" Condition="Exists('..\AutoNether\Services\NetherTransitionSnapshotCache.cs')" />
     <Compile Include="..\AutoNether\Services\NetherAppliedSnapshotCapturePolicy.cs" Link="NetherAppliedSnapshotCapturePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherAppliedSnapshotCapturePolicy.cs')" />
