@@ -17,11 +17,15 @@ public class NetherCodeLifecyclePatchRegistrationTests
         string source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "AutoNether", "Patches", "PatchManager.cs"));
 
         const string selection = "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeSelectionLifecyclePatch));";
+        const string listInitialization =
+            "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeListInitializationLifecyclePatch));";
         const string keepCancel = "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeKeepCancelLifecyclePatch));";
         const string transform = "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeTransformLifecyclePatch));";
         Assert.Empty(Regex.Matches(source, Regex.Escape(selection)).Cast<Match>());
+        Assert.Single(Regex.Matches(source, Regex.Escape(listInitialization)).Cast<Match>());
         Assert.Single(Regex.Matches(source, Regex.Escape(keepCancel)).Cast<Match>());
         Assert.Single(Regex.Matches(source, Regex.Escape(transform)).Cast<Match>());
+        Assert.True(source.IndexOf(listInitialization, StringComparison.Ordinal) < source.IndexOf(keepCancel, StringComparison.Ordinal));
         Assert.True(source.IndexOf(keepCancel, StringComparison.Ordinal) < source.IndexOf(transform, StringComparison.Ordinal));
     }
 
@@ -47,11 +51,16 @@ public class NetherCodeLifecyclePatchRegistrationTests
         string bridge = File.ReadAllText(Path.Combine(root, "AutoNether", "Services", "NetherRuntimeBridge.cs"));
         string patch = File.ReadAllText(Path.Combine(root, "AutoNether", "Patches", "NetherAutoClimbPatch.cs"));
 
+        string listInitializationTarget = ExtractMethod(
+            bridge,
+            "internal static MethodBase? GetCodeListInitializationTaskPatchTarget()"
+        );
         string cancelTarget = ExtractMethod(bridge, "internal static MethodBase? GetCodeKeepCancelTaskPatchTarget()");
         string transformTarget = ExtractMethod(bridge, "internal static MethodBase? GetCodeTransformTaskPatchTarget()");
         Assert.DoesNotContain("GetCodeSelectionTaskPatchTarget", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("NetherAutoClimbCodeSelectionLifecyclePatch", patch, StringComparison.Ordinal);
         Assert.Contains("NetherCodeConfirmTaskInvoker.TryInvoke", bridge, StringComparison.Ordinal);
+        Assert.Contains("NetherLifecycleInteropBindings.CodeListInitializationTask", listInitializationTarget);
         Assert.Contains("NetherCodePopupInteropResolver.TryResolveStaticMethod", cancelTarget);
         Assert.Contains("NetherCodePopupNativeBinding.CancelTaskBinding", cancelTarget);
         Assert.DoesNotContain("System.Threading.CancellationToken", cancelTarget);
@@ -60,12 +69,40 @@ public class NetherCodeLifecyclePatchRegistrationTests
         Assert.DoesNotContain("System.Threading.CancellationToken", transformTarget);
 
         Assert.Contains(
+            "TargetMethod() => NetherRuntimeBridge.GetCodeListInitializationTaskPatchTarget()",
+            patch
+        );
+        Assert.Contains(
             "TargetMethod() => NetherRuntimeBridge.GetCodeKeepCancelTaskPatchTarget()",
             patch
         );
         Assert.Contains(
             "TargetMethod() => NetherRuntimeBridge.GetCodeTransformTaskPatchTarget()",
             patch
+        );
+    }
+
+    [Fact]
+    public void Replacement_waits_for_initialized_owned_list_before_reading_models_or_advancing()
+    {
+        string bridge = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Services",
+            "NetherRuntimeBridge.cs"
+        ));
+
+        const string readiness =
+            "NetherNativeActionResult initialization = PollCodeListInitializationTask(registration);";
+        const string modelLookup = "TryFindCodeListSelection(registration.Controller, removeCodeId";
+        int readinessIndex = bridge.IndexOf(readiness, StringComparison.Ordinal);
+        int modelLookupIndex = bridge.IndexOf(modelLookup, StringComparison.Ordinal);
+        Assert.True(readinessIndex >= 0, "missing code-list initialization gate");
+        Assert.True(modelLookupIndex > readinessIndex, "model lookup ran before native initialization evidence");
+        Assert.Contains(
+            "|| _codeSelectionFlow.Stage != NetherCodeSelectionNativeStage.AwaitingCompletion",
+            bridge,
+            StringComparison.Ordinal
         );
     }
 

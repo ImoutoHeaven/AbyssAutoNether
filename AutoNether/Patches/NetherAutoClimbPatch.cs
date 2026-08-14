@@ -336,6 +336,35 @@ internal static class NetherAutoClimbFloorEventSequenceLifecyclePatch
 }
 
 /// <summary>
+/// Captures the exact asynchronous initialization of a code-list popup. SetupPopupEvent can
+/// register the replacement UI before its model dictionary is populated, so the returned task
+/// is the native readiness boundary for replacement selection.
+/// </summary>
+[HarmonyPatch]
+internal static class NetherAutoClimbCodeListInitializationLifecyclePatch
+{
+    private static MethodBase? TargetMethod() => NetherRuntimeBridge.GetCodeListInitializationTaskPatchTarget();
+
+    [HarmonyPostfix]
+    private static void Postfix(object __instance, object[] __args, ref UniTask __result)
+    {
+        try
+        {
+            if (__args != null && __args.Length == 1 && __args[0] != null)
+                NetherRuntimeBridge.ObserveCodeListInitializationTask(
+                    __instance,
+                    __args[0],
+                    __result
+                );
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("[F12][AutoNether] native code-list initialization observation failed: " + ex);
+        }
+    }
+}
+
+/// <summary>
 /// Observes the exact static generated cancel sequence used by code-offer b__12_0.  The
 /// callback itself is void/Forget, so the bridge correlates this UniTask to the live owned
 /// popup before allowing the original SelectFloor parent to reach reconciliation.

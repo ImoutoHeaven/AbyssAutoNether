@@ -36,10 +36,11 @@ internal interface INetherContinueSceneDriver : INetherReadOnlyReconcileDriver,
 
 /// <summary>
 /// Immutable postcondition required after a one-ticket continuation. Positive map/floor IDs are
-/// an exact packaged-master prediction; a zero/zero pair means that the Continue endpoint will
-/// assign the next segment and reconciliation must prove a new positive destination instead.
-/// ExpectedSegmentFloorLevel is the completed checkpoint floor: Continue changes the map owner,
-/// but choosing the first floor in that map is a later, independent mutation.
+/// an exact packaged-master prediction; a zero/zero pair means that the Continue endpoint assigns
+/// the destination. Server-assigned identifiers may be reused across paid segment boundaries, so
+/// the strictly newer, fully-entered authoritative scene is the identity proof in that case.
+/// ExpectedSegmentFloorLevel is the completed checkpoint floor: choosing the first floor in the
+/// new segment is a later, independent mutation.
 /// </summary>
 internal readonly record struct NetherContinueSceneContract(
     long ExpectedMapId,
@@ -373,9 +374,7 @@ internal sealed class NetherContinueSceneCoordinator
             if (after.CurrentFloorId != _contract.ExpectedFloorId)
                 return TerminalPause("continue-settlement-wrong-floor");
         }
-        else if (after.MapId <= 0
-            || after.CurrentFloorId <= 0
-            || (after.MapId == before.MapId && after.CurrentFloorId == before.CurrentFloorId))
+        else if (after.MapId <= 0 || after.CurrentFloorId <= 0)
         {
             return TerminalPause("continue-settlement-wrong-destination");
         }
@@ -393,9 +392,7 @@ internal sealed class NetherContinueSceneCoordinator
             ? after.MapId == _contract.ExpectedMapId
                 && after.CurrentFloorId == _contract.ExpectedFloorId
             : after.MapId > 0
-                && after.CurrentFloorId > 0
-                && (after.MapId != before.MapId
-                    || after.CurrentFloorId != before.CurrentFloorId);
+                && after.CurrentFloorId > 0;
         return after.TicketCount == before.TicketCount - _contract.TicketCost
             && destinationMatches
             && after.FloorLevel == _contract.ExpectedSegmentFloorLevel
@@ -423,10 +420,11 @@ internal sealed class NetherContinueSceneCoordinator
             return mapCanConverge && floorCanConverge;
         }
 
-        return after.MapId > 0
-            && after.CurrentFloorId > 0
-            && (after.MapId == before.MapId
-                || after.CurrentFloorId == before.CurrentFloorId);
+        // TryCaptureReadyFloorSceneSnapshot already proved a strictly newer generation, the
+        // current controller, its matching SubScene.OnEntered, and an authoritative snapshot.
+        // The server is therefore free to reuse map/floor identifiers while ticket/status fields
+        // propagate; positive identifiers are the only destination constraint available here.
+        return after.MapId > 0 && after.CurrentFloorId > 0;
     }
 
     private NetherContinueSceneStep TerminalComplete(NetherSnapshot snapshot, string detail)

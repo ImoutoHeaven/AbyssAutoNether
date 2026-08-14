@@ -171,6 +171,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherNativeWaitGate _battleResultSnapshotWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeSelectionTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementPopupWait = new(maximumMissingPolls: 600);
+    private readonly NetherNativeWaitGate _codeListInitializationTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeKeepCancelTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeTransformTaskWait = new(maximumMissingPolls: 600);
     private const string NetherApiServiceTypeName = "Project.Ingame.Exploration.NetherAPIService";
@@ -189,6 +190,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherContentAcquiredConfirmLease _contentAcquiredConfirmLease = new();
     private readonly NetherContentAcquiredConfirmLease _floorEventHintConfirmLease = new();
     private readonly NetherCodeReceivedConfirmLease _codeReceivedConfirmLease = new();
+    private readonly NetherCodeListInitializationTaskEvidence _codeListInitializationEvidence = new();
     private readonly NetherNativeWaitGate _battleStartTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherStartStatusParentCapture _startStatusParentCapture = new();
     private readonly NetherDiagnosticTransitionGate _recoveredCodeDiagnosticGate = new();
@@ -387,6 +389,16 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         Instance.ObserveCodeKeepCancelTaskCore(controller, resultTask);
 
     /// <summary>
+    /// Captures the returned native initializer task for the exact code-list controller/popup.
+    /// Registration and task observation may arrive in either order.
+    /// </summary>
+    public static void ObserveCodeListInitializationTask(
+        object controller,
+        object popup,
+        object resultTask
+    ) => Instance.ObserveCodeListInitializationTaskCore(controller, popup, resultTask);
+
+    /// <summary>
     /// Correlates the generated target_type=7 conversion task with the exact Change-list
     /// controller and selected pre-conversion code.  Unrelated manual conversions are ignored.
     /// </summary>
@@ -553,6 +565,39 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("detail", error)
         );
         return resolved ? method : null;
+    }
+
+    internal static MethodBase? GetCodeListInitializationTaskPatchTarget()
+    {
+        NetherInteropPatchBinding binding = NetherLifecycleInteropBindings.CodeListInitializationTask;
+        Type? type = ResolveLoadedType(binding.TypeName);
+        if (type == null)
+        {
+            NetherAutoClimbController.LogDiagnostic(
+                "binding",
+                new("family", "code-list-initialization-task"),
+                new("outcome", "missing-type"),
+                new("type", binding.TypeName),
+                new("method", binding.Method.Name)
+            );
+            return null;
+        }
+
+        MethodInfo? method = TryResolveExactMethod(
+            type,
+            binding.Method,
+            binding.Flags,
+            out string error
+        );
+        NetherAutoClimbController.LogDiagnostic(
+            "binding",
+            new("family", "code-list-initialization-task"),
+            new("outcome", method != null ? "resolved" : "missing-method"),
+            new("type", binding.TypeName),
+            new("method", binding.Method.Name),
+            new("detail", method != null ? "exact-signature" : error)
+        );
+        return method;
     }
 
     internal static MethodBase? GetCodeTransformTaskPatchTarget()
@@ -3183,6 +3228,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         bool contentConfirmBound = false;
         bool hintConfirmBound = false;
         bool codeReceivedConfirmBound = false;
+        bool codeListInitializationBound = false;
         lock (_gate)
         {
             ownerAction = NetherActionKind.None;
@@ -3346,6 +3392,17 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     break;
                 case CodeListPopupControllerTypeName:
                     _codeListPopup = registration;
+                    _codeListInitializationTaskWait.Clear();
+                    codeListInitializationBound =
+                        _codeListInitializationEvidence.ObserveRegistration(
+                            controller,
+                            popup,
+                            ownerAction,
+                            ownerGeneration,
+                            sequence
+                        );
+                    if (codeListInitializationBound)
+                        _codeListInitializationTaskWait.ObserveRegistration();
                     if (TryReadCodeListPopupType(controller, out int codeListType) && codeListType == 1)
                     {
                         _codeTransformConfirmPopup = null;
@@ -3419,6 +3476,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("contentConfirmBound", contentConfirmBound.ToString()),
             new("hintConfirmBound", hintConfirmBound.ToString()),
             new("codeReceivedConfirmBound", codeReceivedConfirmBound.ToString()),
+            new("codeListInitializationBound", codeListInitializationBound.ToString()),
             new("hasClose", (close != null).ToString())
         );
     }
@@ -3433,6 +3491,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _contentAcquiredConfirmLease.InvalidatePopup(popup);
             _floorEventHintConfirmLease.InvalidatePopup(popup);
             _codeReceivedConfirmLease.InvalidatePopup(popup);
+            if (_codeListInitializationEvidence.InvalidatePopup(popup))
+                _codeListInitializationTaskWait.Clear();
             InvalidatePopup(ref _eventPopup, popup);
             InvalidatePopup(ref _recoverPopup, popup);
             InvalidatePopup(ref _treasurePopup, popup);
@@ -4343,6 +4403,36 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
     }
 
+    private void ObserveCodeListInitializationTaskCore(
+        object controller,
+        object popup,
+        object resultTask
+    )
+    {
+        if (controller == null || popup == null || resultTask == null)
+            return;
+
+        bool ownerBound;
+        lock (_gate)
+        {
+            ownerBound = _codeListInitializationEvidence.ObserveTask(
+                controller,
+                popup,
+                resultTask
+            );
+            if (ownerBound)
+                _codeListInitializationTaskWait.ObserveRegistration();
+        }
+        NetherAutoClimbController.LogDiagnostic(
+            "runtime-lifecycle",
+            new("action", "code-list-initialization-task-observed"),
+            new("ownerBound", ownerBound.ToString()),
+            new("controllerType", controller.GetType().FullName ?? controller.GetType().Name),
+            new("popupType", popup.GetType().FullName ?? popup.GetType().Name),
+            new("taskType", resultTask.GetType().FullName ?? resultTask.GetType().Name)
+        );
+    }
+
     private void ObserveCodeTransformTaskCore(object controller, object beforeCodeId, object resultTask)
     {
         string outcome = "ignored";
@@ -4395,6 +4485,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _codeSelectionTask = null;
         _codeSelectionTaskWait.Clear();
         _codeReplacementPopupWait.Clear();
+        _codeListInitializationTaskWait.Clear();
+        _codeListInitializationEvidence.Reset();
         _codeSelectionFlow.Clear();
         _codeReceivedConfirmLease.Reset();
     }
@@ -4657,6 +4749,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _codeSelectionTask = null;
             _codeSelectionTaskWait.Clear();
             _codeReplacementPopupWait.Clear();
+            _codeListInitializationTaskWait.Clear();
+            _codeListInitializationEvidence.Reset();
         }
 
         // Start the exact full native continuation and retain its returned UniTask directly.
@@ -4750,8 +4844,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
 
             NetherNativeActionResult replacement = SelectCodeReplacement(registration.Value);
-            if (replacement.Kind != NetherNativeActionResultKind.Started)
+            if (replacement.Kind != NetherNativeActionResultKind.Started
+                || _codeSelectionFlow.Stage != NetherCodeSelectionNativeStage.AwaitingCompletion)
+            {
                 return replacement;
+            }
         }
 
         if (_codeSelectionFlow.Stage != NetherCodeSelectionNativeStage.AwaitingCompletion)
@@ -4856,6 +4953,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
         if (!_codeSelectionFlow.CanSubmitReplacement(registration.Sequence))
             return _codeReplacementPopupWait.AwaitRegistration("code-replace-popup");
+
+        NetherNativeActionResult initialization = PollCodeListInitializationTask(registration);
+        if (initialization.Kind != NetherNativeActionResultKind.Completed)
+            return initialization;
+
         if (!TryReadMember(registration.Controller, "_replaceMId", out object? rawReplacementId)
             || rawReplacementId == null
             || !TryConvertInt64(rawReplacementId, out long expectedReplacementId)
@@ -4906,6 +5008,42 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return NetherNativeActionResult.BindingUnavailable("invalid-native-code-replacement-sequence");
         _codeReplacementPopupWait.ObserveRegistration();
         return NetherNativeActionResult.Started("native-code-replacement-selected");
+    }
+
+    private NetherNativeActionResult PollCodeListInitializationTask(
+        PopupRegistration registration
+    )
+    {
+        if (!_codeListInitializationEvidence.TryGetTask(
+                registration.Controller,
+                registration.Popup,
+                registration.OwnerAction,
+                registration.OwnerGeneration,
+                registration.Sequence,
+                out object? task
+            )
+            || task == null)
+        {
+            return _codeListInitializationTaskWait.AwaitRegistration(
+                "code-list-initialization"
+            );
+        }
+
+        NetherNativeActionResult result = PollResultTask(task);
+        if (result.Kind == NetherNativeActionResultKind.Started)
+        {
+            return NetherNativeActionResult.Started(
+                "awaiting-native-code-list-initialization"
+            );
+        }
+        if (result.Kind == NetherNativeActionResultKind.Completed)
+        {
+            _codeListInitializationTaskWait.ObserveRegistration();
+            return NetherNativeActionResult.Completed(
+                "native-code-list-initialization-succeeded"
+            );
+        }
+        return result;
     }
 
     NetherOwnedPopupCodeReloadStart INetherOwnedPopupNativeStagePort.CaptureCodeReloadStart(

@@ -50,8 +50,9 @@ internal sealed record NetherRuntimePopupContext
     /// </summary>
     public long DecisionEpoch { get; init; }
     /// <summary>
-    /// Exact playable character passed to the native Event popup. Recovery and Treasure do not
-    /// carry this argument and therefore retain zero.
+    /// Playable character used to present the native Event popup. It is not submitted by
+    /// NetherUpdateEventRequestEntity and therefore must not be used as the HP effect scope.
+    /// Recovery and Treasure do not carry this presentation argument and retain zero.
     /// </summary>
     public long TargetCharacterId { get; init; }
     public int RawFloorType { get; init; }
@@ -185,7 +186,7 @@ internal static class NetherPopupDispatchPolicy
 
     private static NetherPopupDispatchDecision FromEventDecision(
         NetherEventDecision decision,
-        long targetCharacterId
+        long presentationCharacterId
     ) => decision.Kind switch
     {
         NetherEventDecisionKind.Select => new NetherPopupDispatchDecision
@@ -195,7 +196,7 @@ internal static class NetherPopupDispatchPolicy
             {
                 OptionNumber = decision.OptionNumber,
                 CodeId = decision.ReplacementCodeId,
-                TargetCharacterId = targetCharacterId,
+                TargetCharacterId = presentationCharacterId,
                 ExpectedEffects = decision.ExpectedEffects,
                 HasExpectedErosionDelta = true,
                 ExpectedErosionDelta = decision.ExpectedErosionDelta,

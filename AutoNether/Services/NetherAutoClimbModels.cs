@@ -592,7 +592,10 @@ internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
     /// <summary>Exact server-owned status required after the selected floor action.</summary>
     public NetherSessionStatus ExpectedAfterStatus { get; init; } = NetherSessionStatus.Unknown;
     public int OptionNumber { get; init; }
-    /// <summary>Exact native Event popup target; zero for non-targeted popup kinds.</summary>
+    /// <summary>
+    /// Native Event popup presentation character. The update API has no character-id input, so
+    /// this is correlation/telemetry evidence and never the server-owned HP effect scope.
+    /// </summary>
     public long TargetCharacterId { get; init; }
     /// <summary>Only fully mapped effects may be used to prove an event postcondition.</summary>
     public IReadOnlyList<NetherEffect> ExpectedEffects { get; init; } = Array.Empty<NetherEffect>();

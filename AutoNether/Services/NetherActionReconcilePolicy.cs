@@ -152,8 +152,7 @@ internal static class NetherActionReconcilePolicy
                         action,
                         before,
                         after,
-                        allowSaturatedHealNoOp: true,
-                        requireTargetCharacter: action.OwnedPopupKind == NetherRuntimePopupKind.Event
+                        allowSaturatedHealNoOp: true
                     ),
             NetherRuntimePopupKind.Shop when action.OwnedPopupActionKind == NetherActionKind.LeaveShop =>
                 NetherActionOutcome.Applied,
@@ -196,8 +195,7 @@ internal static class NetherActionReconcilePolicy
                         child,
                         before,
                         after,
-                        allowSaturatedHealNoOp: true,
-                        requireTargetCharacter: stage.PopupKind == NetherRuntimePopupKind.Event
+                        allowSaturatedHealNoOp: true
                     ),
             NetherRuntimePopupKind.Shop when stage.ActionKind == NetherActionKind.LeaveShop =>
                 NetherActionOutcome.Applied,
@@ -230,8 +228,7 @@ internal static class NetherActionReconcilePolicy
         NetherPlannedAction action,
         NetherSnapshot before,
         NetherSnapshot after,
-        bool allowSaturatedHealNoOp = false,
-        bool requireTargetCharacter = false
+        bool allowSaturatedHealNoOp = false
     )
     {
         if (action.OptionNumber <= 0
@@ -275,11 +272,8 @@ internal static class NetherActionReconcilePolicy
                 _ => 0,
             });
             bool hasHpEffect = hpDelta != 0;
-            if (action.TargetCharacterId < 0
-                || (requireTargetCharacter && hasHpEffect && action.TargetCharacterId <= 0))
-            {
+            if (action.TargetCharacterId < 0)
                 return NetherActionOutcome.Ambiguous;
-            }
 
             bool resourcesMatch = after.ErosionPoint == checked(before.ErosionPoint + erosionDelta)
                 && after.NetherGold == checked(before.NetherGold + goldDelta)
@@ -291,8 +285,7 @@ internal static class NetherActionReconcilePolicy
                     before,
                     after,
                     hpDelta,
-                    allowSaturatedHealNoOp,
-                    action.TargetCharacterId
+                    allowSaturatedHealNoOp
                 ))
                 return UnchangedOrAmbiguous(before, after);
 
@@ -609,8 +602,7 @@ internal static class NetherActionReconcilePolicy
         NetherSnapshot before,
         NetherSnapshot after,
         int expectedDelta,
-        bool allowSaturatedHealNoOp,
-        long targetCharacterId
+        bool allowSaturatedHealNoOp
     )
     {
         if (before.Characters == null || after.Characters == null
@@ -625,8 +617,6 @@ internal static class NetherActionReconcilePolicy
             var beforeCharacterIds = new HashSet<long>();
             bool hasActiveCharacter = false;
             bool allActiveHpUnchanged = true;
-            bool foundTargetCharacter = false;
-            bool targetHpChanged = false;
             foreach (NetherCharacterState character in after.Characters)
             {
                 if (!afterByCharacterId.TryAdd(character.CharacterId, character))
@@ -648,27 +638,11 @@ internal static class NetherActionReconcilePolicy
                     allActiveHpUnchanged &= observed.HpPermille == character.HpPermille;
                 }
 
-                if (targetCharacterId > 0)
-                {
-                    if (character.CharacterId != targetCharacterId)
-                    {
-                        if (observed.HpPermille != character.HpPermille)
-                            return false;
-                        continue;
-                    }
-
-                    if (!character.IsActive)
-                        return false;
-                    foundTargetCharacter = true;
-                    int targetedExpectedHp = checked(character.HpPermille + expectedDelta);
-                    if (expectedDelta > 0)
-                        targetedExpectedHp = Math.Min(1000, targetedExpectedHp);
-                    if (observed.HpPermille != targetedExpectedHp)
-                        return false;
-                    targetHpChanged = observed.HpPermille != character.HpPermille;
-                    continue;
-                }
-
+                // NetherUpdateEventRequestEntity submits only floor/option/code data; it has
+                // no character-id field. The Event popup's _mCharacterId is presentation data,
+                // while the response replaces t_nether_characters as one party-wide update.
+                // Reconcile the protocol-owned party result instead of treating that visual
+                // character as a single-target server contract.
                 int partyExpectedHp = character.IsActive
                     ? checked(character.HpPermille + expectedDelta)
                     : character.HpPermille;
@@ -676,14 +650,6 @@ internal static class NetherActionReconcilePolicy
                     partyExpectedHp = Math.Min(1000, partyExpectedHp);
                 if (observed.HpPermille != partyExpectedHp)
                     return false;
-            }
-
-            if (targetCharacterId > 0)
-            {
-                return foundTargetCharacter
-                    && (targetHpChanged
-                        ? !string.Equals(before.CharacterHpHash, after.CharacterHpHash, StringComparison.Ordinal)
-                        : allowSaturatedHealNoOp && expectedDelta > 0);
             }
 
             return !string.Equals(before.CharacterHpHash, after.CharacterHpHash, StringComparison.Ordinal)

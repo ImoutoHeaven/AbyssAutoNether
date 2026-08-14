@@ -41,6 +41,13 @@ internal static class NetherLifecycleInteropBindings
         "System.Void"
     );
 
+    public static NetherInteropPatchBinding CodeListInitializationTask { get; } = Instance(
+        "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupController",
+        "InitializePopupAsync",
+        new[] { "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopup" },
+        UniTaskTypeName
+    );
+
     // The native OnEntered UniTaskVoid constructs this state machine directly and calls
     // MoveNext, bypassing the public HandleStartEventByStatusAsync interop wrapper.
     public static NetherInteropPatchBinding StartStatusStateMachineMoveNext { get; } = Instance(

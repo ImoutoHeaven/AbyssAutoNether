@@ -154,6 +154,38 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
+    public void Packaged_event_update_protocol_has_no_character_target_and_returns_party_statuses()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        Type request = packaged.RequireType("Project.Api.NetherUpdateEventRequestEntity");
+        Type response = packaged.RequireType("Project.Api.NetherUpdateEventResponseEntity");
+
+        string[] requestFields = request
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                "ApiName",
+                "Method",
+                "floor_index",
+                "floor_level",
+                "m_nether_code_id",
+                "m_nether_id",
+                "m_nether_map_id",
+                "select_number",
+            },
+            requestFields
+        );
+        Assert.Contains(
+            response.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly),
+            property => property.Name == "t_nether_characters"
+        );
+    }
+
+    [Fact]
     public void Packaged_floor_selection_exposes_exact_start_status_parent_task()
     {
         using var packaged = PackagedProjectAssembly.Load();
@@ -392,6 +424,31 @@ public sealed class NetherLifecycleInteropBindingsTests
             method.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()
         );
 
+    }
+
+    [Fact]
+    public void Packaged_code_list_popup_exposes_exact_asynchronous_initialization_task()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        NetherInteropPatchBinding binding = NetherLifecycleInteropBindings.CodeListInitializationTask;
+        Type controller = packaged.RequireType(binding.TypeName);
+        string actual = string.Join("|", controller.GetMethods(binding.Flags)
+            .Where(method => method.Name == binding.Method.Name)
+            .Select(method => method.ReturnType.FullName
+                + "("
+                + string.Join(",", method.GetParameters().Select(parameter => parameter.ParameterType.FullName))
+                + ")"));
+
+        Assert.True(
+            NetherLifecycleInteropBindings.TryResolve(
+                new[] { packaged.Assembly },
+                binding,
+                out string error,
+                out MethodInfo? method
+            ),
+            error + ";actual=" + actual
+        );
+        Assert.NotNull(method);
     }
 
     [Fact]

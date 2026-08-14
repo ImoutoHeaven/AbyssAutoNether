@@ -203,7 +203,7 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
-    public void Production_controller_waits_for_and_adopts_direct_checkpoint_when_local_next_master_is_absent()
+    public void Production_controller_adopts_server_assigned_checkpoint_with_reused_identifiers()
     {
         var bridge = new ScriptedRuntimeBridge();
         NetherSnapshot checkpoint = bridge.SleepCheckpoint with
@@ -222,13 +222,16 @@ public class NetherAutoClimbControllerEndToEndTests
         };
         NetherSnapshot serverAssignedSegment = bridge.NewSegment with
         {
-            MapId = 2,
-            CurrentFloorId = 200,
+            // Live paid continuations can keep both identifiers on the completed checkpoint.
+            // The new runtime generation and authoritative entered scene prove the handoff;
+            // Play plus the exact ticket decrement prove the server mutation.
+            MapId = checkpoint.MapId,
+            CurrentFloorId = checkpoint.CurrentFloorId,
             FloorLevel = 20,
             FloorIndex = 1,
             TicketCount = 83,
             ContinuationTarget = null,
-            MapHash = "server-assigned-segment",
+            MapHash = checkpoint.MapHash,
         };
         bridge.CurrentSnapshot = checkpoint;
         bridge.RecoveredCheckpointObservation = NetherRecoveredCheckpointObservation.Waiting(
@@ -278,6 +281,8 @@ public class NetherAutoClimbControllerEndToEndTests
 
             Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
             Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.Equal(checkpoint.MapId, bridge.CurrentSnapshot.MapId);
+            Assert.Equal(checkpoint.CurrentFloorId, bridge.CurrentSnapshot.CurrentFloorId);
             Assert.Equal(1, bridge.ContinueReadOnlyBeginCount);
             Assert.Equal(1, bridge.GetOnlyBeginCount);
             Assert.Equal(1, bridge.GetOnlyPollCount);
@@ -4100,7 +4105,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherNativeActionResult BeginGetOnlyRefresh()
         {
             GetOnlyBeginCount++;
-            if (CurrentSnapshot.Status == NetherSessionStatus.Play && CurrentSnapshot.MapId == 2)
+            if (ContinueNativeInvokeCount > ContinueReadOnlyBeginCount)
                 ContinueReadOnlyBeginCount++;
             return NetherNativeActionResult.Started("native-get-only");
         }

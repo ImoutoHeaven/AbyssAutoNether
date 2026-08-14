@@ -79,6 +79,35 @@ public class NetherContinueSceneCoordinatorTests
     }
 
     [Fact]
+    public void Server_assigned_destination_accepts_reused_identifiers_after_complete_new_scene_evidence()
+    {
+        NetherSnapshot reusedDestination = AppliedSnapshot() with
+        {
+            MapId = BeforeSnapshot().MapId,
+            CurrentFloorId = BeforeSnapshot().CurrentFloorId,
+            MapHash = BeforeSnapshot().MapHash,
+        };
+        var driver = ReadyForReconcileDriver(reusedDestination);
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+        var contract = new NetherContinueSceneContract(
+            ExpectedMapId: 0,
+            ExpectedFloorId: 0,
+            ExpectedSegmentFloorLevel: 10,
+            TicketCost: 1,
+            ExpectedStatus: NetherSessionStatus.Play
+        );
+
+        NetherContinueSceneStep terminal = DriveToTerminal(coordinator, driver, contract);
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
+        Assert.Equal(11, driver.CurrentRuntimeGeneration);
+        Assert.True(driver.HasEnteredCurrentGeneration);
+        Assert.True(driver.HasAuthoritativeSnapshot);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+    }
+
+    [Fact]
     public void Exact_scene_transition_completes_handoff_when_recovered_parent_stays_pending()
     {
         var driver = new FakeDriver(
@@ -303,7 +332,7 @@ public class NetherContinueSceneCoordinatorTests
     }
 
     [Fact]
-    public void Server_assigned_destination_rejects_an_unchanged_or_invalid_identity()
+    public void Server_assigned_destination_rejects_nonpositive_identifiers()
     {
         NetherSnapshot unchangedIdentity = AppliedSnapshot() with
         {
