@@ -217,6 +217,22 @@ internal sealed class NetherContinueSceneCoordinator
         if (parent.Kind == NetherNativeActionResultKind.UnknownOutcome
             && parent.Detail.IndexOf("canceled", StringComparison.OrdinalIgnoreCase) >= 0)
         {
+            // Current native HandleGameClearedIfNeededAsync changes to the next NetherTop scene
+            // and then awaits WaitWhile with the old SubViewController's
+            // GetCancellationTokenOnDestroy token. The exact owner teardown therefore cancels
+            // its generated HandleStartEventByStatusAsync parent after the transition was
+            // submitted. Teardown is not settlement: move only to the existing rebind gate,
+            // which still requires a newer controller, matching SubScene.OnEntered, an
+            // authoritative snapshot, and the exact one-ticket postcondition before reconcile.
+            if (_driver.FloorOwnerTerminated)
+            {
+                _parentTerminalObserved = true;
+                _teardownWait.ObserveRegistration();
+                _stage = Stage.AwaitingRebind;
+                return NetherContinueSceneStep.WaitForRebind(
+                    "continue-parent-canceled-after-owner-transition:" + parent.Detail
+                );
+            }
             return TerminalPause("continue-parent-canceled:" + parent.Detail);
         }
 

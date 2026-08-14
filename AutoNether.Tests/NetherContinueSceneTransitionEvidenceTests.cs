@@ -76,6 +76,41 @@ public class NetherContinueSceneTransitionEvidenceTests
         Assert.True(evidence.IsSettledBySceneTransition);
     }
 
+    [Fact]
+    public void Destroy_token_parent_cancellation_preserves_lease_but_cannot_settle_scene()
+    {
+        var evidence = new NetherContinueSceneTransitionEvidence();
+        NetherNativeActionResult canceled = NetherNativeActionResult.UnknownOutcome(
+            "native-start-status-terminal-canceled"
+        );
+        Assert.True(evidence.Begin(ownerGeneration: 10));
+
+        Assert.False(evidence.TryObserveCanceledNativeParentAfterOwnerTransition(canceled));
+        Assert.True(evidence.NativeParentPending);
+
+        evidence.ObserveFloorOwnerTerminated();
+
+        Assert.False(evidence.TryObserveCanceledNativeParentAfterOwnerTransition(
+            NetherNativeActionResult.UnknownOutcome("native-start-status-terminal-faulted")
+        ));
+        Assert.True(evidence.TryObserveCanceledNativeParentAfterOwnerTransition(canceled));
+        Assert.False(evidence.NativeParentPending);
+        Assert.True(evidence.FloorOwnerTerminated);
+        Assert.False(evidence.IsSettledBySceneTransition);
+        Assert.False(evidence.TrySettle(
+            currentGeneration: 11,
+            controllerType: FloorSelectionType,
+            expectedControllerType: FloorSelectionType,
+            registrationSource: "start-status-state-machine-enter"
+        ));
+        Assert.True(evidence.TrySettle(
+            currentGeneration: 11,
+            controllerType: FloorSelectionType,
+            expectedControllerType: FloorSelectionType,
+            registrationSource: SceneRegistrationSource
+        ));
+    }
+
     [Theory]
     [InlineData(false, 11, FloorSelectionType)]
     [InlineData(true, 10, FloorSelectionType)]

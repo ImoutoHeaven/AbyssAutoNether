@@ -485,6 +485,60 @@ public class NetherContinueSceneCoordinatorTests
         Assert.Equal(1, driver.GetOnlyPollCalls);
     }
 
+    [Fact]
+    public void Parent_canceled_by_exact_owner_teardown_waits_for_complete_new_scene_evidence()
+    {
+        var driver = new FakeDriver(
+            parent: new[]
+            {
+                NetherNativeActionResult.Started("native-start-status-parent-pending"),
+                NetherNativeActionResult.UnknownOutcome("native-start-status-terminal-canceled"),
+            },
+            appliedSnapshot: AppliedSnapshot()
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+
+        Assert.True(coordinator.Begin(Contract(), BeforeSnapshot(), ownerGeneration: 10));
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+
+        // Current-client native order: Continue changes scene and then awaits WaitWhile with
+        // this exact controller's GetCancellationTokenOnDestroy token. Its generated parent is
+        // therefore Canceled when the old owner is destroyed even though handoff has begun.
+        driver.FloorOwnerTerminated = true;
+        NetherContinueSceneStep canceledAfterTeardown = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, canceledAfterTeardown.Kind);
+        Assert.Contains("canceled-after-owner-transition", canceledAfterTeardown.Detail);
+        Assert.True(coordinator.ParentTerminalObserved);
+        Assert.Equal(0, driver.GetOnlyBeginCalls);
+
+        // Owner teardown alone is not success. A strictly newer controller, its matching
+        // SubScene.OnEntered, and an authoritative snapshot are all required before one GET.
+        driver.CurrentRuntimeGeneration = 11;
+        driver.HasEnteredCurrentGeneration = false;
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
+        Assert.Equal(0, driver.GetOnlyBeginCalls);
+
+        driver.HasEnteredCurrentGeneration = true;
+        driver.HasAuthoritativeSnapshot = false;
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
+        Assert.Equal(0, driver.GetOnlyBeginCalls);
+
+        driver.HasAuthoritativeSnapshot = true;
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
     [Theory]
     [InlineData("native-result-faulted", "parent-fault")]
     [InlineData("native-result-canceled", "parent-canceled")]

@@ -43,6 +43,29 @@ internal sealed class NetherContinueSceneTransitionEvidence
             FloorOwnerTerminated = true;
     }
 
+    /// <summary>
+    /// The current native Continue path changes scene and then awaits work with the old
+    /// FloorSelection owner's destroy token.  Cancellation after that exact owner terminated is
+    /// therefore parent-terminal evidence, but it is not scene-settlement evidence.  Keeping this
+    /// lease armed lets the normal new-generation lifecycle gate prove the transition later.
+    /// </summary>
+    public bool TryObserveCanceledNativeParentAfterOwnerTransition(
+        NetherNativeActionResult result
+    )
+    {
+        if (OwnerGeneration < 1
+            || !NativeParentPending
+            || !FloorOwnerTerminated
+            || result.Kind != NetherNativeActionResultKind.UnknownOutcome
+            || result.Detail.IndexOf("canceled", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return false;
+        }
+
+        NativeParentPending = false;
+        return true;
+    }
+
     public bool TrySettle(
         long currentGeneration,
         string? controllerType,
