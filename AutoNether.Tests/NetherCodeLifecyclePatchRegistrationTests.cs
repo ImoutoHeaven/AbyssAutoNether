@@ -6,13 +6,14 @@ namespace AutoNether.Tests;
 
 /// <summary>
 /// Keeps only the lifecycle observers that cannot be captured from their initiating call.
-/// Selection owns the exact returned UniTask directly; registering a Harmony observer for that
-/// same task creates a reflection -&gt; native callback -&gt; DMD -&gt; native re-entry chain.
+/// Selection and keep/cancel own their exact returned UniTasks directly; registering a Harmony
+/// observer for either task creates a reflection/native callback boundary that is not guaranteed
+/// to re-enter the managed interop wrapper.
 /// </summary>
 public class NetherCodeLifecyclePatchRegistrationTests
 {
     [Fact]
-    public void Patch_manager_does_not_detour_directly_owned_selection_task()
+    public void Patch_manager_does_not_detour_directly_owned_code_offer_tasks()
     {
         string source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "AutoNether", "Patches", "PatchManager.cs"));
 
@@ -23,10 +24,9 @@ public class NetherCodeLifecyclePatchRegistrationTests
         const string transform = "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeTransformLifecyclePatch));";
         Assert.Empty(Regex.Matches(source, Regex.Escape(selection)).Cast<Match>());
         Assert.Single(Regex.Matches(source, Regex.Escape(listInitialization)).Cast<Match>());
-        Assert.Single(Regex.Matches(source, Regex.Escape(keepCancel)).Cast<Match>());
+        Assert.Empty(Regex.Matches(source, Regex.Escape(keepCancel)).Cast<Match>());
         Assert.Single(Regex.Matches(source, Regex.Escape(transform)).Cast<Match>());
-        Assert.True(source.IndexOf(listInitialization, StringComparison.Ordinal) < source.IndexOf(keepCancel, StringComparison.Ordinal));
-        Assert.True(source.IndexOf(keepCancel, StringComparison.Ordinal) < source.IndexOf(transform, StringComparison.Ordinal));
+        Assert.True(source.IndexOf(listInitialization, StringComparison.Ordinal) < source.IndexOf(transform, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -55,15 +55,14 @@ public class NetherCodeLifecyclePatchRegistrationTests
             bridge,
             "internal static MethodBase? GetCodeListInitializationTaskPatchTarget()"
         );
-        string cancelTarget = ExtractMethod(bridge, "internal static MethodBase? GetCodeKeepCancelTaskPatchTarget()");
         string transformTarget = ExtractMethod(bridge, "internal static MethodBase? GetCodeTransformTaskPatchTarget()");
         Assert.DoesNotContain("GetCodeSelectionTaskPatchTarget", bridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetCodeKeepCancelTaskPatchTarget", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("NetherAutoClimbCodeSelectionLifecyclePatch", patch, StringComparison.Ordinal);
+        Assert.DoesNotContain("NetherAutoClimbCodeKeepCancelLifecyclePatch", patch, StringComparison.Ordinal);
         Assert.Contains("NetherCodeConfirmTaskInvoker.TryInvoke", bridge, StringComparison.Ordinal);
+        Assert.Contains("NetherCodeCancelTaskInvoker.TryInvoke", bridge, StringComparison.Ordinal);
         Assert.Contains("NetherLifecycleInteropBindings.CodeListInitializationTask", listInitializationTarget);
-        Assert.Contains("NetherCodePopupInteropResolver.TryResolveStaticMethod", cancelTarget);
-        Assert.Contains("NetherCodePopupNativeBinding.CancelTaskBinding", cancelTarget);
-        Assert.DoesNotContain("System.Threading.CancellationToken", cancelTarget);
         Assert.Contains("NetherCodePopupInteropResolver.TryResolveStaticMethod", transformTarget);
         Assert.Contains("NetherCodeTransformNativeBinding.TransformTaskBinding", transformTarget);
         Assert.DoesNotContain("System.Threading.CancellationToken", transformTarget);
@@ -73,13 +72,37 @@ public class NetherCodeLifecyclePatchRegistrationTests
             patch
         );
         Assert.Contains(
-            "TargetMethod() => NetherRuntimeBridge.GetCodeKeepCancelTaskPatchTarget()",
-            patch
-        );
-        Assert.Contains(
             "TargetMethod() => NetherRuntimeBridge.GetCodeTransformTaskPatchTarget()",
             patch
         );
+    }
+
+    [Fact]
+    public void Keep_cancel_starts_and_retains_the_exact_task_without_callback_observer()
+    {
+        string bridge = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Services",
+            "NetherRuntimeBridge.cs"
+        ));
+        int start = bridge.IndexOf(
+            "NetherNativeActionResult INetherOwnedPopupNativeStagePort.InvokeCodeKeepCancel(",
+            StringComparison.Ordinal
+        );
+        int end = bridge.IndexOf(
+            "NetherNativeActionResult INetherOwnedPopupNativeStagePort.PollCodeKeepCancelTask(",
+            start,
+            StringComparison.Ordinal
+        );
+        Assert.True(start >= 0 && end > start, "unable to bound keep/cancel invocation");
+        string method = bridge.Substring(start, end - start);
+
+        Assert.Contains("NetherCodeCancelTaskInvoker.TryInvoke(", method, StringComparison.Ordinal);
+        Assert.Contains("ObserveOwnedPopupKeepCancelTask(owner)", method, StringComparison.Ordinal);
+        Assert.Contains("_codeKeepCancelTask = cancelTask", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("CancelCallbackBinding", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryInvokeVersionedGeneratedCallback", method, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -99,11 +122,87 @@ public class NetherCodeLifecyclePatchRegistrationTests
         int modelLookupIndex = bridge.IndexOf(modelLookup, StringComparison.Ordinal);
         Assert.True(readinessIndex >= 0, "missing code-list initialization gate");
         Assert.True(modelLookupIndex > readinessIndex, "model lookup ran before native initialization evidence");
+        Assert.Contains("\"NetherCodeCategoryType\"", bridge, StringComparison.Ordinal);
         Assert.Contains(
-            "|| _codeSelectionFlow.Stage != NetherCodeSelectionNativeStage.AwaitingCompletion",
+            "NetherCodeListSelectionMapping.TryResolveTabIndex(",
             bridge,
             StringComparison.Ordinal
         );
+        Assert.Contains(
+            "!= NetherCodeSelectionNativeStage.AwaitingReplacementConfirmation",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "private NetherNativeActionResult ConfirmCodeReplacement()",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopupController",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "Project.Nether.AbyssCodeReplaceCompletePopup.AbyssCodeReplaceCompletePopupController",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "TryReadMember(confirmation.Value.Controller, \"_onCompleted\"",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "TryInvokeBooleanDelegate(",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "_codeSelectionFlow.DismissReplacementComplete(",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "TryInvokeNoArgumentDelegate(",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.DoesNotContain("RegisterCodeChangeConfirmationCore", bridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("_codeChangeConfirmLease", bridge, StringComparison.Ordinal);
+
+        int selectStart = bridge.IndexOf(
+            "private NetherNativeActionResult SelectCodeReplacement(",
+            StringComparison.Ordinal
+        );
+        int selectEnd = bridge.IndexOf(
+            "private NetherNativeActionResult PollCodeListInitializationTask(",
+            selectStart,
+            StringComparison.Ordinal
+        );
+        Assert.True(selectStart >= 0 && selectEnd > selectStart, "unable to bound replacement selection");
+        string selectMethod = bridge.Substring(selectStart, selectEnd - selectStart);
+        int confirmPreparationIndex = selectMethod.IndexOf(
+            "_codeReplacementConfirmPopupWait.Clear();",
+            StringComparison.Ordinal
+        );
+        int replaceClickIndex = selectMethod.IndexOf(
+            "new NetherNativeMethodDescriptor(\"OnClickReplace\"",
+            StringComparison.Ordinal
+        );
+        Assert.True(confirmPreparationIndex >= 0, "missing replacement confirmation preparation");
+        Assert.True(
+            replaceClickIndex > confirmPreparationIndex,
+            "replacement confirmation evidence must be reset before the native click"
+        );
+
+        // Recovery-floor target_type=7 remains a distinct Change flow.
+        Assert.Contains(
+            "CodeTransformConfirmPopupControllerTypeName",
+            bridge,
+            StringComparison.Ordinal
+        );
+        Assert.Contains("InvokeCodeChangeConfirmation(", bridge, StringComparison.Ordinal);
     }
 
     private static string ExtractMethod(string source, string signature)

@@ -349,10 +349,10 @@ public sealed class NetherLifecycleInteropBindingsTests
             resolvedNames.Add(method!.Name);
         }
 
-        Assert.Equal(26, bindings.Length);
+        Assert.Equal(28, bindings.Length);
         Assert.Empty(failures);
         Assert.Contains("Project_ISubService_Terminate", resolvedNames);
-        Assert.Equal(15, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
+        Assert.Equal(17, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
         Assert.Equal(
             new[] { "OnEntered", "OnInitializeAsync", "OnRefreshAsync" },
             bindings
@@ -450,6 +450,44 @@ public sealed class NetherLifecycleInteropBindingsTests
         );
         Assert.NotNull(method);
     }
+
+    [Fact]
+    public void Packaged_code_list_exposes_category_to_tab_and_bucket_model_coordinates()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        Type controller = packaged.RequireType(
+            "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupController"
+        );
+        Type thumbnail = packaged.RequireType("Project.Nether.AbyssCodeThumbnailModel");
+        const BindingFlags flags = BindingFlags.Instance
+            | BindingFlags.Public
+            | BindingFlags.NonPublic;
+
+        PropertyInfo tabIndexes = Assert.Single(
+            controller.GetProperties(flags),
+            property => property.Name == "TabIndexes"
+        );
+        Assert.Equal(
+            new[] { "System.Int32", "System.Int32" },
+            tabIndexes.PropertyType.GetGenericArguments()
+                .Select(argument => argument.FullName)
+                .ToArray()
+        );
+        PropertyInfo modelDictionary = Assert.Single(
+            controller.GetProperties(flags),
+            property => property.Name == "_modelDictionary"
+        );
+        Assert.Equal(
+            "System.Int32",
+            modelDictionary.PropertyType.GetGenericArguments()[0].FullName
+        );
+        PropertyInfo category = Assert.Single(
+            thumbnail.GetProperties(flags),
+            property => property.Name == "NetherCodeCategoryType"
+        );
+        Assert.Equal("Project.NetherCodeCategoryType", category.PropertyType.FullName);
+    }
+
 
     [Fact]
     public void Packaged_floor_event_hint_box_exposes_the_exact_native_dismiss_contract()
@@ -715,6 +753,58 @@ public sealed class NetherLifecycleInteropBindingsTests
             _ => throw new Xunit.Sdk.XunitException("_onCompleted is not a field/property"),
         };
         Assert.True(completedType.IsGenericType);
+        Assert.Equal("Il2CppSystem.Action`1", completedType.GetGenericTypeDefinition().FullName);
+        Assert.Equal(typeof(bool), Assert.Single(completedType.GetGenericArguments()));
+    }
+
+    [Fact]
+    public void Packaged_code_replacement_popups_expose_the_native_confirm_and_complete_lifecycles()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        const string confirmController =
+            "Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopupController";
+        const string completeController =
+            "Project.Nether.AbyssCodeReplaceCompletePopup.AbyssCodeReplaceCompletePopupController";
+
+        NetherInteropPatchBinding[] bindings = NetherLifecycleInteropBindings.All
+            .Where(candidate => candidate.TypeName is confirmController or completeController)
+            .ToArray();
+        Assert.Equal(2, bindings.Length);
+
+        foreach (NetherInteropPatchBinding binding in bindings)
+        {
+            Assert.Equal("SetupPopupEvent", binding.Method.Name);
+            Assert.True(
+                NetherLifecycleInteropBindings.TryResolve(
+                    new[] { packaged.Assembly },
+                    binding,
+                    out string error,
+                    out MethodInfo? method
+                ),
+                error
+            );
+            Assert.Equal("Il2CppSystem.Action", method!.GetParameters()[1].ParameterType.FullName);
+        }
+
+        Type confirm = packaged.RequireType(confirmController);
+        Assert.Contains(
+            confirm.GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            member => member.Name == "_beforeMNetherCodeId"
+        );
+        Assert.Contains(
+            confirm.GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            member => member.Name == "_afterMNetherCodeId"
+        );
+        MemberInfo completed = Assert.Single(
+            confirm.GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
+            member => member.Name == "_onCompleted"
+        );
+        Type completedType = completed switch
+        {
+            PropertyInfo property => property.PropertyType,
+            FieldInfo field => field.FieldType,
+            _ => throw new Xunit.Sdk.XunitException("_onCompleted is not a field/property"),
+        };
         Assert.Equal("Il2CppSystem.Action`1", completedType.GetGenericTypeDefinition().FullName);
         Assert.Equal(typeof(bool), Assert.Single(completedType.GetGenericArguments()));
     }

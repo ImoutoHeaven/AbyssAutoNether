@@ -222,8 +222,9 @@ internal sealed class NetherOwnedPopupNativeStageRuntime
     }
 
     /// <summary>
-    /// Called by the exact Harmony postfix for HandleCancelSequenceAsync.  Registration must
-    /// still match the owner that invoked b__12_0; unrelated player cancels cannot satisfy it.
+    /// Called synchronously after the native adapter starts the exact
+    /// HandleCancelSequenceAsync task. Registration must still match the owner that initiated
+    /// the Keep action; unrelated player cancels cannot satisfy it.
     /// </summary>
     public bool ObserveKeepCancelTask(NetherCodeKeepCancelOwner owner) =>
         _codeKeepCancel.Stage == NetherCodeKeepCancelStage.AwaitingTaskRegistration

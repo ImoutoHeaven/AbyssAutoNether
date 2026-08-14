@@ -26,10 +26,10 @@ internal enum NetherCodeKeepCancelStage
 }
 
 /// <summary>
-/// Bounded observer for the generated Keep/cancel sequence.  It never invokes the native
-/// callback: the bridge calls the exact b__12_0 once, Harmony registers the generated
-/// HandleCancelSequenceAsync UniTask only when its owner still matches, and this coordinator
-/// waits that task before the original SelectFloor parent can be polled.
+/// Bounded owner for the generated Keep/cancel sequence.  The bridge directly starts the exact
+/// HandleCancelSequenceAsync UniTask once, synchronously registers its boxed return value only
+/// while this owner still matches, and this coordinator waits that task before the original
+/// SelectFloor parent can be polled.
 /// </summary>
 internal sealed class NetherCodeKeepCancelCoordinator
 {
@@ -75,9 +75,9 @@ internal sealed class NetherCodeKeepCancelCoordinator
     }
 
     /// <summary>
-    /// Accept only the Harmony-observed generated cancel task for the exact popup action that
-    /// invoked b__12_0.  A player callback, old epoch, or out-of-order popup cannot satisfy a
-    /// later Keep action.
+    /// Accept only the directly retained generated cancel task for the exact popup action that
+    /// started it.  A player callback, old epoch, or out-of-order popup cannot satisfy a later
+    /// Keep action.
     /// </summary>
     public bool ObserveTask(NetherCodeKeepCancelOwner owner)
     {

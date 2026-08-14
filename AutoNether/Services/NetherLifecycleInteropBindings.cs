@@ -142,6 +142,14 @@ internal static class NetherLifecycleInteropBindings
             "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopup"
         ),
         Popup(
+            "Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopupController",
+            "Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopup"
+        ),
+        Popup(
+            "Project.Nether.AbyssCodeReplaceCompletePopup.AbyssCodeReplaceCompletePopupController",
+            "Project.Nether.AbyssCodeReplaceCompletePopup.AbyssCodeReplaceCompletePopup"
+        ),
+        Popup(
             "Project.Nether.AbyssCodeChangePopup.AbyssCodeChangePopupController",
             "Project.Nether.AbyssCodeChangePopup.AbyssCodeChangePopup"
         ),
@@ -321,5 +329,19 @@ internal static class NetherLifecycleInteropBindings
         TypeName(method.ReturnType)
     ) { IsStatic = method.IsStatic };
 
-    private static string TypeName(Type type) => type.FullName ?? type.Name;
+    private static string TypeName(Type type)
+    {
+        if (!type.IsGenericType)
+            return type.FullName ?? type.Name;
+
+        Type definition = type.GetGenericTypeDefinition();
+        string name = definition.FullName ?? definition.Name;
+        int arityMarker = name.IndexOf('`');
+        if (arityMarker >= 0)
+            name = name.Substring(0, arityMarker);
+        return name
+            + "<"
+            + string.Join(",", type.GetGenericArguments().Select(TypeName))
+            + ">";
+    }
 }

@@ -83,9 +83,9 @@ internal static class NetherCodePopupNativeBinding
 
     /// <summary>
     /// The cancel callback itself returns void because the packaged closure calls Forget.
-    /// Harmony therefore observes this exact static generated UniTask factory, whose ISIL
-    /// awaits RequestNetherFixCodeAsync(0, 0), rather than treating popup disappearance as a
-    /// completed Keep action.
+    /// AutoNether invokes this exact static generated UniTask factory directly and retains its
+    /// return value; its ISIL awaits RequestNetherFixCodeAsync(0, 0), so popup disappearance is
+    /// never treated as a completed Keep action.
     /// </summary>
     public static NetherNativeMethodDescriptor CancelSequenceDescriptor(string controllerTypeName) => new(
         CancelTask,

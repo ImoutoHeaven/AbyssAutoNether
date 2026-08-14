@@ -147,6 +147,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private const string CodeReceivedPopupControllerTypeName =
         "Project.Nether.AbyssCodeReceivedPopup.AbyssCodeReceivedPopupController";
     private const string CodeListPopupControllerTypeName = "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupController";
+    private const string CodeReplacementConfirmPopupControllerTypeName =
+        "Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopupController";
+    private const string CodeReplacementCompletePopupControllerTypeName =
+        "Project.Nether.AbyssCodeReplaceCompletePopup.AbyssCodeReplaceCompletePopupController";
     private const string CodeTransformConfirmPopupControllerTypeName =
         "Project.Nether.AbyssCodeChangePopup.AbyssCodeChangePopupController";
     private const string CodeTransformCompletePopupControllerTypeName =
@@ -171,6 +175,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherNativeWaitGate _battleResultSnapshotWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeSelectionTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementPopupWait = new(maximumMissingPolls: 600);
+    private readonly NetherNativeWaitGate _codeReplacementConfirmPopupWait = new(maximumMissingPolls: 600);
+    private readonly NetherNativeWaitGate _codeReplacementConfirmViewWait = new(maximumMissingPolls: 600);
+    private readonly NetherNativeWaitGate _codeReplacementCompletePopupWait = new(maximumMissingPolls: 600);
+    private readonly NetherNativeWaitGate _codeReplacementCompleteViewWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeListInitializationTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeKeepCancelTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeTransformTaskWait = new(maximumMissingPolls: 600);
@@ -219,6 +227,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private long _shopConfirmParentSequence;
     private PopupRegistration? _codeSelectPopup;
     private PopupRegistration? _codeListPopup;
+    private PopupRegistration? _codeReplacementConfirmPopup;
+    private PopupRegistration? _codeReplacementCompletePopup;
     private PopupRegistration? _codeTransformConfirmPopup;
     private PopupRegistration? _codeTransformCompletePopup;
     private PopupRegistration? _returnPopup;
@@ -381,14 +391,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         Instance.ObserveStartStatusTaskCore(controller, resultTask);
 
     /// <summary>
-    /// Observes only the exact static generated UniTask spawned by the native code-offer
-    /// cancel closure.  The controller argument is used to correlate that task to the live
-    /// owner/generation/sequence/epoch that invoked b__12_0.
-    /// </summary>
-    public static void ObserveCodeKeepCancelTask(object controller, object resultTask) =>
-        Instance.ObserveCodeKeepCancelTaskCore(controller, resultTask);
-
-    /// <summary>
     /// Captures the returned native initializer task for the exact code-list controller/popup.
     /// Registration and task observation may arrive in either order.
     /// </summary>
@@ -535,36 +537,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("detail", method != null ? "exact-signature" : error)
         );
         return method;
-    }
-
-    internal static MethodBase? GetCodeKeepCancelTaskPatchTarget()
-    {
-        Type? type = ResolveLoadedType(NetherUtilityTypeName);
-        if (type == null)
-        {
-            NetherAutoClimbController.LogDiagnostic(
-                "binding",
-                new("family", "code-keep-task"),
-                new("outcome", "missing-type"),
-                new("type", NetherUtilityTypeName)
-            );
-            return null;
-        }
-        bool resolved = NetherCodePopupInteropResolver.TryResolveStaticMethod(
-            type,
-            NetherCodePopupNativeBinding.CancelTaskBinding(CodeSelectPopupControllerTypeName),
-            out string error,
-            out MethodInfo? method
-        );
-        NetherAutoClimbController.LogDiagnostic(
-            "binding",
-            new("family", "code-keep-task"),
-            new("outcome", resolved ? "resolved" : "missing-method"),
-            new("type", NetherUtilityTypeName),
-            new("method", method?.Name ?? "cancel-generated-task"),
-            new("detail", error)
-        );
-        return resolved ? method : null;
     }
 
     internal static MethodBase? GetCodeListInitializationTaskPatchTarget()
@@ -2216,8 +2188,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         // A reroll must retain the registered SelectFloor owner and same-popup epoch.  Direct
         // recovered Wait paths cannot prove that, so they pause rather than call RerollAsync.
         NetherActionKind.ReloadCode => NetherNativeActionResult.BindingUnavailable("reload-code-requires-owned-floor-parent"),
-        // The generated cancel task is correlated to an owned SelectFloor parent.  Direct
-        // recovered Wait state has no such task/owner evidence and must not invoke b__12_0.
+        // The exact cancel task is correlated to an owned SelectFloor parent.  Direct recovered
+        // Wait state has no such task/owner evidence and must not start that native mutation.
         NetherActionKind.KeepCode => NetherNativeActionResult.BindingUnavailable("keep-code-requires-owned-floor-parent"),
         NetherActionKind.Continue => Continue(action),
         NetherActionKind.FinishAtCheckpoint => FinishAtCheckpoint(),
@@ -3207,6 +3179,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return;
 
         string typeName = controller.GetType().FullName ?? string.Empty;
+        bool isCodeReplacementSupportPopup = typeName is CodeReplacementConfirmPopupControllerTypeName
+            or CodeReplacementCompletePopupControllerTypeName;
         bool isTransformSupportPopup = typeName is CodeTransformConfirmPopupControllerTypeName
             or CodeTransformCompletePopupControllerTypeName;
         bool isShopConfirmPopup = typeName == ShopConfirmPopupControllerTypeName;
@@ -3229,6 +3203,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         bool hintConfirmBound = false;
         bool codeReceivedConfirmBound = false;
         bool codeListInitializationBound = false;
+        bool codeReplacementConfirmBound = false;
         lock (_gate)
         {
             ownerAction = NetherActionKind.None;
@@ -3251,6 +3226,42 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 if (childSequence > 0)
                     sequence = childSequence;
                 _popupSequence = Math.Max(_popupSequence, sequence);
+            }
+            else if (isCodeReplacementSupportPopup)
+            {
+                // Native decompilation shows that a full-capacity offer uses the dedicated
+                // AbyssCodeReplace confirm/complete controllers.  Both are children of the
+                // exact Replace list; AbyssCodeChange belongs to the independent target_type=7
+                // conversion flow and must never be borrowed for this owner.
+                bool expectedStage = typeName == CodeReplacementConfirmPopupControllerTypeName
+                    ? _codeSelectionFlow.Stage is (
+                        NetherCodeSelectionNativeStage.AwaitingReplacementPopup
+                        or NetherCodeSelectionNativeStage.AwaitingReplacementConfirmation
+                    )
+                    : _codeSelectionFlow.Stage is (
+                        NetherCodeSelectionNativeStage.AwaitingReplacementConfirmation
+                        or NetherCodeSelectionNativeStage.AwaitingCompletion
+                    );
+                if (expectedStage
+                    && _codeListPopup is PopupRegistration replacementList
+                    && replacementList.IsLive
+                    && TryReadCodeListPopupType(replacementList.Controller, out int replacementPopupType)
+                    && replacementPopupType == 2
+                    && IsCodeOwnerCurrent(
+                        replacementList.OwnerAction,
+                        replacementList.OwnerGeneration
+                    ))
+                {
+                    ownerAction = replacementList.OwnerAction;
+                    ownerGeneration = replacementList.OwnerGeneration;
+                    long childSequence = _popupOwnership.ReserveChildSequence(
+                        ownerAction,
+                        ownerGeneration
+                    );
+                    if (childSequence > 0)
+                        sequence = childSequence;
+                    _popupSequence = Math.Max(_popupSequence, sequence);
+                }
             }
             else if (_floorParentAction != null && _floorParentGeneration > 0)
             {
@@ -3392,6 +3403,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     break;
                 case CodeListPopupControllerTypeName:
                     _codeListPopup = registration;
+                    _codeReplacementConfirmPopup = null;
+                    _codeReplacementCompletePopup = null;
+                    _codeReplacementConfirmPopupWait.Clear();
+                    _codeReplacementConfirmViewWait.Clear();
+                    _codeReplacementCompletePopupWait.Clear();
+                    _codeReplacementCompleteViewWait.Clear();
                     _codeListInitializationTaskWait.Clear();
                     codeListInitializationBound =
                         _codeListInitializationEvidence.ObserveRegistration(
@@ -3409,6 +3426,41 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         _codeTransformCompletePopup = null;
                         _codeTransformTask = null;
                         _codeTransformTaskWait.Clear();
+                    }
+                    else if (codeListType == 2)
+                    {
+                        _codeReplacementConfirmPopupWait.Clear();
+                    }
+                    break;
+                case CodeReplacementConfirmPopupControllerTypeName:
+                    _codeReplacementConfirmPopup = registration;
+                    codeReplacementConfirmBound =
+                        _codeListPopup is PopupRegistration currentReplacementList
+                        && currentReplacementList.IsLive
+                        && currentReplacementList.OwnerAction == ownerAction
+                        && currentReplacementList.OwnerGeneration == ownerGeneration
+                        && sequence > currentReplacementList.Sequence
+                        && _codeSelectionFlow.Stage is (
+                            NetherCodeSelectionNativeStage.AwaitingReplacementPopup
+                            or NetherCodeSelectionNativeStage.AwaitingReplacementConfirmation
+                        );
+                    if (codeReplacementConfirmBound)
+                        _codeReplacementConfirmPopupWait.ObserveRegistration();
+                    break;
+                case CodeReplacementCompletePopupControllerTypeName:
+                    _codeReplacementCompletePopup = registration;
+                    if (ownerAction != NetherActionKind.None
+                        && _codeListPopup is PopupRegistration completeReplacementList
+                        && completeReplacementList.IsLive
+                        && completeReplacementList.OwnerAction == ownerAction
+                        && completeReplacementList.OwnerGeneration == ownerGeneration
+                        && sequence > completeReplacementList.Sequence
+                        && _codeSelectionFlow.Stage is (
+                            NetherCodeSelectionNativeStage.AwaitingReplacementConfirmation
+                            or NetherCodeSelectionNativeStage.AwaitingCompletion
+                        ))
+                    {
+                        _codeReplacementCompletePopupWait.ObserveRegistration();
                     }
                     break;
                 case CodeTransformConfirmPopupControllerTypeName:
@@ -3477,6 +3529,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("hintConfirmBound", hintConfirmBound.ToString()),
             new("codeReceivedConfirmBound", codeReceivedConfirmBound.ToString()),
             new("codeListInitializationBound", codeListInitializationBound.ToString()),
+            new("codeReplacementConfirmBound", codeReplacementConfirmBound.ToString()),
             new("hasClose", (close != null).ToString())
         );
     }
@@ -3505,6 +3558,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             InvalidatePopup(ref _shopConfirmPopup, popup);
             InvalidatePopup(ref _codeSelectPopup, popup);
             InvalidatePopup(ref _codeListPopup, popup);
+            InvalidatePopup(ref _codeReplacementConfirmPopup, popup);
+            InvalidatePopup(ref _codeReplacementCompletePopup, popup);
             InvalidatePopup(ref _codeTransformConfirmPopup, popup);
             InvalidatePopup(ref _codeTransformCompletePopup, popup);
             InvalidatePopup(ref _returnPopup, popup);
@@ -3622,6 +3677,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _popupOwnership.InvalidateOwner(NetherActionKind.BattleSettlement, generation);
         ClearBattleResultPopup(ref _codeSelectPopup, generation);
         ClearBattleResultPopup(ref _codeListPopup, generation);
+        ClearBattleResultPopup(ref _codeTransformConfirmPopup, generation);
         _battleResultViewController = null;
         _battleResultCodeGeneration = 0;
         ResetOwnedPopupStages();
@@ -3637,6 +3693,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _popupOwnership.InvalidateOwner(NetherActionKind.RecoveredCodeOffer, generation);
         ClearRecoveredCodePopup(ref _codeSelectPopup, generation);
         ClearRecoveredCodePopup(ref _codeListPopup, generation);
+        ClearRecoveredCodePopup(ref _codeTransformConfirmPopup, generation);
         if (!_checkpointUsesStartStatusParent)
             _startStatusParentCapture.Clear();
         _startStatusCodeGeneration = 0;
@@ -4373,36 +4430,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         return true;
     }
 
-    private void ObserveCodeKeepCancelTaskCore(object controller, object resultTask)
-    {
-        if (controller == null || resultTask == null)
-            return;
-        lock (_gate)
-        {
-            if (OwnedPopupKeepOwner is not NetherCodeKeepCancelOwner owner
-                || _codeSelectPopup is not PopupRegistration registration
-                || !registration.IsLive
-                || !ReferenceEquals(registration.Controller, controller)
-                || registration.OwnerAction != owner.OwnerAction
-                || registration.OwnerGeneration != owner.Generation
-                || registration.Sequence != owner.Sequence
-                || GetOwnedPopupDecisionEpoch(new NetherOwnedPopupStageOwner(
-                    registration.OwnerAction,
-                    registration.OwnerGeneration,
-                    registration.Sequence,
-                    0
-                )) != owner.DecisionEpoch)
-            {
-                return;
-            }
-
-            if (!ObserveOwnedPopupKeepCancelTask(owner))
-                return;
-            _codeKeepCancelTask = resultTask;
-            _codeKeepCancelTaskWait.ObserveRegistration();
-        }
-    }
-
     private void ObserveCodeListInitializationTaskCore(
         object controller,
         object popup,
@@ -4485,6 +4512,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _codeSelectionTask = null;
         _codeSelectionTaskWait.Clear();
         _codeReplacementPopupWait.Clear();
+        _codeReplacementConfirmPopupWait.Clear();
+        _codeReplacementConfirmViewWait.Clear();
+        _codeReplacementCompletePopupWait.Clear();
+        _codeReplacementCompleteViewWait.Clear();
+        _codeReplacementConfirmPopup = null;
+        _codeReplacementCompletePopup = null;
         _codeListInitializationTaskWait.Clear();
         _codeListInitializationEvidence.Reset();
         _codeSelectionFlow.Clear();
@@ -4749,6 +4782,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _codeSelectionTask = null;
             _codeSelectionTaskWait.Clear();
             _codeReplacementPopupWait.Clear();
+            _codeReplacementConfirmPopupWait.Clear();
+            _codeReplacementConfirmViewWait.Clear();
+            _codeReplacementCompletePopupWait.Clear();
+            _codeReplacementCompleteViewWait.Clear();
+            _codeReplacementConfirmPopup = null;
+            _codeReplacementCompletePopup = null;
             _codeListInitializationTaskWait.Clear();
             _codeListInitializationEvidence.Reset();
         }
@@ -4845,16 +4884,32 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
             NetherNativeActionResult replacement = SelectCodeReplacement(registration.Value);
             if (replacement.Kind != NetherNativeActionResultKind.Started
-                || _codeSelectionFlow.Stage != NetherCodeSelectionNativeStage.AwaitingCompletion)
+                || _codeSelectionFlow.Stage
+                    != NetherCodeSelectionNativeStage.AwaitingReplacementConfirmation)
             {
                 return replacement;
             }
+        }
+
+        if (_codeSelectionFlow.Stage
+            == NetherCodeSelectionNativeStage.AwaitingReplacementConfirmation)
+        {
+            NetherNativeActionResult confirmation = ConfirmCodeReplacement();
+            if (confirmation.Kind != NetherNativeActionResultKind.Completed)
+                return confirmation;
         }
 
         if (_codeSelectionFlow.Stage != NetherCodeSelectionNativeStage.AwaitingCompletion)
             return NetherNativeActionResult.BindingUnavailable("invalid-native-code-selection-stage");
         if (_codeSelectionTask == null)
             return _codeSelectionTaskWait.AwaitRegistration("code-confirmation");
+
+        if (_codeSelectionFlow.ReplacementCodeId > 0)
+        {
+            NetherNativeActionResult replacementComplete = DismissCodeReplacementCompleteIfNeeded();
+            if (replacementComplete.Kind != NetherNativeActionResultKind.Completed)
+                return replacementComplete;
+        }
 
         NetherNativeActionResult receivedConfirm = ConfirmCodeReceivedPopupIfNeeded();
         if (receivedConfirm.Kind != NetherNativeActionResultKind.Completed)
@@ -4871,7 +4926,256 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _codeSelectionTask = null;
         _codeSelectionTaskWait.Clear();
         _codeReplacementPopupWait.Clear();
+        _codeReplacementConfirmPopupWait.Clear();
+        _codeReplacementConfirmViewWait.Clear();
+        _codeReplacementCompletePopupWait.Clear();
+        _codeReplacementCompleteViewWait.Clear();
         return NetherNativeActionResult.Completed("native-code-confirmation-succeeded");
+    }
+
+    private NetherNativeActionResult ConfirmCodeReplacement()
+    {
+        if (_codeListPopup is not PopupRegistration replacementList
+            || !replacementList.IsLive
+            || !IsCodeOwnerCurrent(
+                replacementList.OwnerAction,
+                replacementList.OwnerGeneration
+            ))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-list-owner"
+            );
+        }
+
+        PopupRegistration? confirmation = _codeReplacementConfirmPopup;
+        if (confirmation == null)
+        {
+            if (_codeSelectionTask != null)
+            {
+                NetherNativeActionResult taskResult = PollResultTask(_codeSelectionTask);
+                if (taskResult.Kind != NetherNativeActionResultKind.Started)
+                {
+                    return taskResult.Kind == NetherNativeActionResultKind.Completed
+                        ? NetherNativeActionResult.BindingUnavailable(
+                            "native-code-confirmation-completed-before-replacement-confirm-controller"
+                        )
+                        : taskResult;
+                }
+            }
+            return _codeReplacementConfirmPopupWait.AwaitRegistration(
+                "code-replacement-confirm"
+            );
+        }
+
+        if (!confirmation.Value.IsLive
+            || confirmation.Value.OwnerAction != replacementList.OwnerAction
+            || confirmation.Value.OwnerGeneration != replacementList.OwnerGeneration
+            || !_codeSelectionFlow.CanConfirmReplacement(confirmation.Value.Sequence))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-confirm-owner-or-sequence"
+            );
+        }
+
+        if (!TryReadInt(confirmation.Value.Controller, "_beforeMNetherCodeId", out long beforeCodeId)
+            || !TryReadInt(confirmation.Value.Controller, "_afterMNetherCodeId", out long afterCodeId)
+            || !TryReadMember(confirmation.Value.Controller, "_onCompleted", out object? onCompleted))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-confirm-contract"
+            );
+        }
+        if (beforeCodeId <= 0 || afterCodeId <= 0 || onCompleted == null)
+        {
+            return AwaitCodeReplacementControllerView(
+                _codeReplacementConfirmViewWait,
+                "code-replacement-confirm-view"
+            );
+        }
+        if (beforeCodeId != _codeSelectionFlow.ReplacementCodeId
+            || afterCodeId != _codeSelectionFlow.SelectedCodeId)
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "native-code-replacement-confirm-code-mismatch"
+            );
+        }
+
+        _codeReplacementConfirmViewWait.ObserveRegistration();
+        // The native callback may synchronously resume far enough to register the completion
+        // popup.  Clear stale evidence before invoking it, never after it returns.
+        _codeReplacementCompletePopup = null;
+        _codeReplacementCompletePopupWait.Clear();
+        _codeReplacementCompleteViewWait.Clear();
+        NetherNativeActionResult invoked = TryInvokeBooleanDelegate(
+            onCompleted,
+            value: true,
+            "native-code-replacement-confirm"
+        );
+        if (invoked.Kind != NetherNativeActionResultKind.Started)
+            return invoked;
+        if (!_codeSelectionFlow.ConfirmReplacement(confirmation.Value.Sequence))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-confirm-sequence"
+            );
+        }
+
+        _codeReplacementConfirmPopupWait.ObserveRegistration();
+        if (_codeReplacementConfirmPopup is PopupRegistration current
+            && current.Sequence == confirmation.Value.Sequence)
+        {
+            _codeReplacementConfirmPopup = null;
+        }
+        NetherAutoClimbController.LogDiagnostic(
+            "runtime-lifecycle",
+            new("action", "code-replacement-confirm-invoked"),
+            new("source", "abyss-code-replace-popup"),
+            new("owner", replacementList.OwnerAction.ToString()),
+            new("ownerGeneration", replacementList.OwnerGeneration.ToString()),
+            new("listSequence", replacementList.Sequence.ToString()),
+            new("confirmSequence", confirmation.Value.Sequence.ToString()),
+            new("selectedCodeId", _codeSelectionFlow.SelectedCodeId.ToString(CultureInfo.InvariantCulture)),
+            new("replacedCodeId", _codeSelectionFlow.ReplacementCodeId.ToString(CultureInfo.InvariantCulture))
+        );
+        return NetherNativeActionResult.Completed("native-code-replacement-confirmed");
+    }
+
+    private NetherNativeActionResult DismissCodeReplacementCompleteIfNeeded()
+    {
+        if (_codeSelectionFlow.ReplacementCompleteDismissed)
+        {
+            return NetherNativeActionResult.Completed(
+                "native-code-replacement-complete-already-dismissed"
+            );
+        }
+
+        if (_codeListPopup is not PopupRegistration replacementList
+            || !replacementList.IsLive
+            || !TryReadCodeListPopupType(replacementList.Controller, out int popupType)
+            || popupType != 2
+            || !IsCodeOwnerCurrent(
+                replacementList.OwnerAction,
+                replacementList.OwnerGeneration
+            ))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-list-owner"
+            );
+        }
+
+        PopupRegistration? complete = _codeReplacementCompletePopup;
+        if (complete == null)
+        {
+            if (_codeSelectionTask != null)
+            {
+                NetherNativeActionResult taskResult = PollResultTask(_codeSelectionTask);
+                if (taskResult.Kind != NetherNativeActionResultKind.Started)
+                {
+                    return taskResult.Kind == NetherNativeActionResultKind.Completed
+                        ? NetherNativeActionResult.BindingUnavailable(
+                            "native-code-confirmation-completed-before-replacement-complete-controller"
+                        )
+                        : taskResult;
+                }
+            }
+            return _codeReplacementCompletePopupWait.AwaitRegistration(
+                "code-replacement-complete"
+            );
+        }
+
+        if (!complete.Value.IsLive
+            || complete.Value.OwnerAction != replacementList.OwnerAction
+            || complete.Value.OwnerGeneration != replacementList.OwnerGeneration
+            || !_codeSelectionFlow.CanDismissReplacementComplete(complete.Value.Sequence))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-complete-owner-or-sequence"
+            );
+        }
+
+        if (!TryReadInt(complete.Value.Controller, "_beforeMNetherCodeId", out long beforeCodeId)
+            || !TryReadInt(complete.Value.Controller, "_afterMNetherCodeId", out long afterCodeId))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-complete-contract"
+            );
+        }
+        if (beforeCodeId <= 0 || afterCodeId <= 0)
+        {
+            return AwaitCodeReplacementControllerView(
+                _codeReplacementCompleteViewWait,
+                "code-replacement-complete-view"
+            );
+        }
+        if (beforeCodeId != _codeSelectionFlow.ReplacementCodeId
+            || afterCodeId != _codeSelectionFlow.SelectedCodeId)
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "native-code-replacement-complete-code-mismatch"
+            );
+        }
+        if (complete.Value.Close == null)
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "missing-native-code-replacement-complete-close"
+            );
+        }
+
+        _codeReplacementCompleteViewWait.ObserveRegistration();
+        NetherNativeActionResult invoked = TryInvokeNoArgumentDelegate(
+            complete.Value.Close,
+            "native-code-replacement-complete-close"
+        );
+        if (invoked.Kind != NetherNativeActionResultKind.Started)
+            return invoked;
+        if (!_codeSelectionFlow.DismissReplacementComplete(complete.Value.Sequence))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-native-code-replacement-complete-sequence"
+            );
+        }
+
+        _codeReplacementCompletePopupWait.ObserveRegistration();
+        if (_codeReplacementCompletePopup is PopupRegistration current
+            && current.Sequence == complete.Value.Sequence)
+        {
+            _codeReplacementCompletePopup = null;
+        }
+        NetherAutoClimbController.LogDiagnostic(
+            "runtime-lifecycle",
+            new("action", "code-replacement-complete-dismissed"),
+            new("source", "abyss-code-replace-complete-popup"),
+            new("owner", replacementList.OwnerAction.ToString()),
+            new("ownerGeneration", replacementList.OwnerGeneration.ToString()),
+            new("listSequence", replacementList.Sequence.ToString()),
+            new("confirmSequence", _codeSelectionFlow.ReplacementConfirmationSequence.ToString()),
+            new("completeSequence", complete.Value.Sequence.ToString()),
+            new("selectedCodeId", afterCodeId.ToString(CultureInfo.InvariantCulture)),
+            new("replacedCodeId", beforeCodeId.ToString(CultureInfo.InvariantCulture))
+        );
+        return NetherNativeActionResult.Completed(
+            "native-code-replacement-complete-dismissed"
+        );
+    }
+
+    private NetherNativeActionResult AwaitCodeReplacementControllerView(
+        NetherNativeWaitGate wait,
+        string stage
+    )
+    {
+        if (_codeSelectionTask != null)
+        {
+            NetherNativeActionResult taskResult = PollResultTask(_codeSelectionTask);
+            if (taskResult.Kind != NetherNativeActionResultKind.Started)
+            {
+                return taskResult.Kind == NetherNativeActionResultKind.Completed
+                    ? NetherNativeActionResult.BindingUnavailable(
+                        "native-code-confirmation-completed-before-" + stage
+                    )
+                    : taskResult;
+            }
+        }
+        return wait.AwaitRegistration(stage);
     }
 
     private NetherNativeActionResult ConfirmCodeReceivedPopupIfNeeded()
@@ -4996,6 +5300,15 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         );
         if (thumbnail.Kind != NetherNativeActionResultKind.Started)
             return thumbnail;
+        lock (_gate)
+        {
+            _codeReplacementConfirmPopup = null;
+            _codeReplacementCompletePopup = null;
+            _codeReplacementConfirmPopupWait.Clear();
+            _codeReplacementConfirmViewWait.Clear();
+            _codeReplacementCompletePopupWait.Clear();
+            _codeReplacementCompleteViewWait.Clear();
+        }
         NetherNativeActionResult replace = TryInvokeExact(
             registration.Controller,
             new NetherNativeMethodDescriptor("OnClickReplace", Array.Empty<string>(), "System.Void"),
@@ -5127,24 +5440,65 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _codeKeepCancelTaskWait.Clear();
         }
 
-        // Packaged ISIL: AbyssCodeSelectPopupController.<>c.<SetupPopupEvent>b__12_0
-        // invokes controller._onCancel.  That closure calls the static generated cancel
-        // sequence below with Forget(), which Harmony observes rather than inventing a task.
-        NetherNativeActionResult cancel = TryInvokeVersionedGeneratedCallback(
-            registration.Value.Controller,
-            NetherCodePopupNativeBinding.CancelCallbackBinding(CodeSelectPopupControllerTypeName),
-            new object?[] { null, registration.Value.Controller },
-            "keep-code-offer"
+        // Packaged ISIL proves b__12_0 merely invokes _onCancel; that native closure starts
+        // HandleCancelSequenceAsync(...).Forget() without crossing the managed interop wrapper.
+        // Start that exact complete task directly and retain its boxed return value, while the
+        // already-begun owner/generation/sequence/epoch coordinator remains the only parent gate.
+        Type? utilityType = ResolveLoadedType(NetherUtilityTypeName);
+        if (utilityType == null)
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "binding-unavailable:code-cancel:missing-nether-utility"
+            );
+        }
+        NetherAutoClimbController.LogDiagnostic(
+            "native-code-cancel",
+            new("outcome", "direct-task-invoke-start"),
+            new("controllerType", registration.Value.Controller.GetType().FullName ?? "unknown"),
+            new("method", NetherCodePopupNativeBinding.CancelTask)
         );
-        if (cancel.Kind == NetherNativeActionResultKind.Started)
-            return cancel;
+        if (!NetherCodeCancelTaskInvoker.TryInvoke(
+                registration.Value.Controller,
+                utilityType,
+                NetherCodePopupNativeBinding.CancelTaskBinding(CodeSelectPopupControllerTypeName),
+                out object? cancelTask,
+                out string cancelError
+            ))
+        {
+            lock (_gate)
+            {
+                _codeKeepCancelTask = null;
+                _codeKeepCancelTaskWait.Clear();
+            }
+            NetherAutoClimbController.LogDiagnostic(
+                "native-code-cancel",
+                new("outcome", "direct-task-invoke-failed"),
+                new("detail", cancelError)
+            );
+            return cancelError.StartsWith("native-code-cancel-task-exception:", StringComparison.Ordinal)
+                ? NetherNativeActionResult.UnknownOutcome(cancelError)
+                : NetherNativeActionResult.BindingUnavailable(cancelError);
+        }
 
         lock (_gate)
         {
-            _codeKeepCancelTask = null;
-            _codeKeepCancelTaskWait.Clear();
+            if (!ObserveOwnedPopupKeepCancelTask(owner))
+            {
+                _codeKeepCancelTask = null;
+                _codeKeepCancelTaskWait.Clear();
+                return NetherNativeActionResult.UnknownOutcome(
+                    "native-code-cancel-task-owner-registration-failed"
+                );
+            }
+            _codeKeepCancelTask = cancelTask;
+            _codeKeepCancelTaskWait.ObserveRegistration();
         }
-        return cancel;
+        NetherAutoClimbController.LogDiagnostic(
+            "native-code-cancel",
+            new("outcome", "direct-task-started"),
+            new("taskType", cancelTask!.GetType().FullName ?? cancelTask.GetType().Name)
+        );
+        return NetherNativeActionResult.Started("native-code-cancel-task-started");
     }
 
     NetherNativeActionResult INetherOwnedPopupNativeStagePort.PollCodeKeepCancelTask(
@@ -5249,11 +5603,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             registration = _codeTransformConfirmPopup;
         if (registration == null)
             return AwaitCodeTransformSupportPopup("confirm", owner);
-        if (!IsMatchingCodeTransformSupport(registration.Value, owner)
-            || !TryReadInt(registration.Value.Controller, "_mNetherCodeId", out long popupCodeId)
-            || popupCodeId != owner.ReplaceCodeId
-            || !TryReadMember(registration.Value.Controller, "_onCompleted", out object? onCompleted)
-            || onCompleted == null)
+        if (!IsMatchingCodeTransformSupport(registration.Value, owner))
         {
             return LogCodeTransformNative(
                 "confirm",
@@ -5262,10 +5612,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             );
         }
 
-        NetherNativeActionResult invoked = TryInvokeVersionedGeneratedCallback(
+        NetherNativeActionResult invoked = InvokeCodeChangeConfirmation(
             registration.Value.Controller,
-            NetherCodeTransformNativeBinding.ConfirmCallbackBinding,
-            new object?[] { null, onCompleted },
+            owner.ReplaceCodeId,
             "confirm-code-transform"
         );
         if (invoked.Kind != NetherNativeActionResultKind.Started)
@@ -5282,6 +5631,31 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             "confirm",
             NetherNativeActionResult.Completed("native-code-transform-confirmed"),
             owner
+        );
+    }
+
+    private static NetherNativeActionResult InvokeCodeChangeConfirmation(
+        object controller,
+        long expectedCodeId,
+        string action
+    )
+    {
+        if (expectedCodeId <= 0
+            || !TryReadInt(controller, "_mNetherCodeId", out long popupCodeId)
+            || popupCodeId != expectedCodeId
+            || !TryReadMember(controller, "_onCompleted", out object? onCompleted)
+            || onCompleted == null)
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "invalid-code-change-confirm-popup"
+            );
+        }
+
+        return TryInvokeVersionedGeneratedCallback(
+            controller,
+            NetherCodeTransformNativeBinding.ConfirmCallbackBinding,
+            new object?[] { null, onCompleted },
+            action
         );
     }
 
@@ -6094,6 +6468,46 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         catch (Exception ex)
         {
             return NetherNativeActionResult.UnknownOutcome(action + "-exception:" + ex.GetType().Name + ":" + ex.Message);
+        }
+    }
+
+    private static NetherNativeActionResult TryInvokeBooleanDelegate(
+        object callback,
+        bool value,
+        string action
+    )
+    {
+        NetherNativeMethodDescriptor descriptor = new(
+            "Invoke",
+            new[] { "System.Boolean" },
+            "System.Void"
+        );
+        if (!TryResolveExactMethod(
+                callback.GetType(),
+                descriptor,
+                InstanceFlags,
+                out string error,
+                out MethodInfo? invoke
+            ))
+        {
+            return NetherNativeActionResult.BindingUnavailable(error);
+        }
+        try
+        {
+            invoke!.Invoke(callback, new object[] { value });
+            return NetherNativeActionResult.Started(action);
+        }
+        catch (TargetInvocationException ex)
+        {
+            return NetherNativeActionResult.UnknownOutcome(
+                FormatInvocationException(action, ex)
+            );
+        }
+        catch (Exception ex)
+        {
+            return NetherNativeActionResult.UnknownOutcome(
+                action + "-exception:" + ex.GetType().Name + ":" + ex.Message
+            );
         }
     }
 
@@ -7234,11 +7648,25 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return false;
         }
 
-        foreach (object entry in Enumerate(modelDictionary))
+        var tabMappings = new List<NetherCodeListTabMappingEntry>();
+        foreach (object entry in Enumerate(tabIndexes))
         {
             if (!TryReadMember(entry, "Key", out object? rawCategory) || rawCategory == null
+                || !TryReadMember(entry, "Value", out object? rawTabIndex) || rawTabIndex == null
+                || !TryConvertInt32(rawCategory, out int category)
+                || !TryConvertInt32(rawTabIndex, out int mappedTabIndex))
+            {
+                error = "invalid-code-list-tab-index-map";
+                return false;
+            }
+            tabMappings.Add(new NetherCodeListTabMappingEntry(category, mappedTabIndex));
+        }
+
+        foreach (object entry in Enumerate(modelDictionary))
+        {
+            if (!TryReadMember(entry, "Key", out object? rawBucketKey) || rawBucketKey == null
                 || !TryReadMember(entry, "Value", out object? models) || models == null
-                || !TryConvertInt32(rawCategory, out int category))
+                || !TryConvertInt32(rawBucketKey, out int modelBucketKey))
             {
                 error = "invalid-code-list-model-dictionary";
                 return false;
@@ -7254,9 +7682,25 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 }
                 if (candidateId == codeId)
                 {
-                    if (!TryGetDictionaryValue(tabIndexes, category, out object? rawTab) || rawTab == null || !TryConvertInt32(rawTab, out tabIndex))
+                    if (!TryReadMember(
+                            model,
+                            "NetherCodeCategoryType",
+                            out object? rawModelCategory
+                        )
+                        || rawModelCategory == null
+                        || !TryConvertInt32(rawModelCategory, out int modelCategory))
                     {
-                        error = "missing-code-list-tab-index:" + category;
+                        error = "missing-code-thumbnail-category:" + codeId;
+                        return false;
+                    }
+                    if (!NetherCodeListSelectionMapping.TryResolveTabIndex(
+                            modelBucketKey,
+                            modelCategory,
+                            tabMappings,
+                            out tabIndex,
+                            out error
+                        ))
+                    {
                         return false;
                     }
                     modelIndex = itemIndex;
@@ -7288,21 +7732,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 return true;
         }
         codeId = 0;
-        return false;
-    }
-
-    private static bool TryGetDictionaryValue(object dictionary, int key, out object? value)
-    {
-        value = null;
-        foreach (object entry in Enumerate(dictionary))
-        {
-            if (TryReadMember(entry, "Key", out object? rawKey) && rawKey != null
-                && TryConvertInt32(rawKey, out int currentKey) && currentKey == key
-                && TryReadMember(entry, "Value", out value))
-            {
-                return true;
-            }
-        }
         return false;
     }
 
