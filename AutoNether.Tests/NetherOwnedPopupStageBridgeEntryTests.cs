@@ -265,7 +265,7 @@ public class NetherOwnedPopupStageBridgeEntryTests
     private static NetherRuntimeCodeCandidatesResult Candidates(long id) => new(
         new[]
         {
-            new NetherCodeCandidate(id, NetherCodeEffectKind.Risk, 1)
+            new NetherCodeCandidate(id, NetherCodeFamily.Risk, 1)
             {
                 Category = NetherCodeCategory.ErosionEnhancement,
             },

@@ -42,6 +42,7 @@ internal static class NetherAutoClimbController
     private static readonly NetherNativeWaitGate BattleAccessorWait = new(maximumMissingPolls: 3600);
     private static readonly NetherNativeWaitGate ExistingCheckpointWait = new(maximumMissingPolls: 600);
     private static readonly NetherNativeWaitGate FloorSceneReadinessWait = new(maximumMissingPolls: 600);
+    private static readonly NetherPopupReadinessGate ActivePopupReadiness = new(maximumPendingPolls: 600);
     // F12 can arrive a few frames before FloorSelection/Result registers its exact native
     // owner.  Preserve that user intent only for a bounded registration window; no route,
     // popup, or server mutation is allowed until one of those authoritative owners exists.
@@ -132,6 +133,7 @@ internal static class NetherAutoClimbController
         BattleAccessorWait.Clear();
         ExistingCheckpointWait.Clear();
         FloorSceneReadinessWait.Clear();
+        ActivePopupReadiness.Clear();
         _lastTransition = string.Empty;
         RecoveredCodeDiagnosticGate.Reset();
         FloorSceneReadinessDiagnosticGate.Reset();
@@ -198,6 +200,7 @@ internal static class NetherAutoClimbController
         if (State.IsEnabled)
         {
             _deferredEnableRemainingUpdates = 0;
+            ActivePopupReadiness.Clear();
             State.Toggle(isInNether: true);
             ObserveBattleSettingsLeaseBoundary(
                 BattleSettingsLifecycle.OnF12Off(),
@@ -575,6 +578,7 @@ internal static class NetherAutoClimbController
         BattleAccessorWait.Clear();
         ExistingCheckpointWait.Clear();
         FloorSceneReadinessWait.Clear();
+        ActivePopupReadiness.Clear();
         ProjectionCalibration.Clear();
         _lastTransition = string.Empty;
         RecoveredCodeDiagnosticGate.Reset();
@@ -623,6 +627,11 @@ internal static class NetherAutoClimbController
     {
         if (!_initialized)
             return;
+
+        // Popup initialization evidence is scoped to the exact FloorSelection controller.
+        // Even an expected battle handoff destroys that controller, so no pending budget may
+        // survive into a replacement runtime generation.
+        ActivePopupReadiness.Clear();
         BattleAccessorWait.ObserveRegistration();
         LogDiagnostic(
             "runtime-lifecycle",
@@ -675,6 +684,11 @@ internal static class NetherAutoClimbController
     {
         if (!_initialized)
             return;
+
+        // A readiness budget belongs to one exact FloorSelection scene owner.  Teardown is a
+        // hard lifetime boundary even when a separate battle/Continue coordinator deliberately
+        // retains its own task evidence across the scene change.
+        ActivePopupReadiness.Clear();
 
         bool expectedBattleSceneTransition = State.Phase == NetherAutoClimbPhase.AwaitingBattleSceneHandoff
             || State.PendingAction is NetherPlannedAction pending
@@ -982,7 +996,10 @@ internal static class NetherAutoClimbController
         NetherCodeDecision decision = CodePolicy.Decide(
             new NetherCodePortfolio
             {
-                CurrentCodes = snapshot.Codes,
+                CurrentCodes = NetherCodePartyCoverageProjection.Apply(
+                    snapshot.Codes,
+                    candidates.CurrentPartyCoverage
+                ),
                 Capacity = snapshot.CodeCapacity,
                 ReloadCount = snapshot.CodeReloadCount,
                 IsMasterComplete = candidates.IsMasterComplete,
@@ -1789,6 +1806,7 @@ internal static class NetherAutoClimbController
 
         if (_bridge.HasRecoveredCodeOffer)
         {
+            ActivePopupReadiness.Clear();
             ObserveRecoveredCodeOffer(settings);
             return;
         }
@@ -1877,12 +1895,17 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("decision", checkpoint.Kind.ToString()),
             new NetherDetailedAuditField("detail", checkpoint.Detail)
         );
+        bool pauseBeforeNewRoute = checkpoint.Kind == NetherCheckpointDecisionKind.PauseAtNonCheckpointTarget;
         switch (checkpoint.Kind)
         {
             case NetherCheckpointDecisionKind.Pause:
-            case NetherCheckpointDecisionKind.PauseAtNonCheckpointTarget:
                 FailClosed(checkpoint.PauseReason, checkpoint.Detail);
                 return;
+            case NetherCheckpointDecisionKind.PauseAtNonCheckpointTarget:
+                // Reaching a configured non-checkpoint target prevents only the next route.
+                // A battle or foreground native transaction already in progress still owns the
+                // scene and must settle before automation can stop safely.
+                break;
             case NetherCheckpointDecisionKind.AwaitResult:
                 State.ObserveStable(snapshot.Fingerprint);
                 return;
@@ -1902,19 +1925,26 @@ internal static class NetherAutoClimbController
         // guessing a close action before its controller has registered would be unsafe.
         if (snapshot.Status == NetherSessionStatus.Wait)
         {
-            NetherRuntimePopupResult popup = _bridge.TryGetActivePopup();
+            if (!TryObserveStableForegroundPopup("wait", out NetherRuntimePopupResult popup))
+                return;
             if (popup.IsSuccess)
             {
                 PlanNativePopup(snapshot, settings, popup.Popup!);
                 return;
             }
-            FailClosed(NetherPauseReason.UnsupportedPopup, "wait-popup:" + popup.Detail);
+            FailClosed(
+                popup.IsDefinitelyAbsent
+                    ? NetherPauseReason.UnsupportedPopup
+                    : NetherPauseReason.BindingUnavailable,
+                "wait-popup:" + popup.Detail
+            );
             return;
         }
 
         if (snapshot.Status == NetherSessionStatus.Play)
         {
-            NetherRuntimePopupResult foreground = _bridge.TryGetActivePopup();
+            if (!TryObserveStableForegroundPopup("play", out NetherRuntimePopupResult foreground))
+                return;
             if (foreground.IsSuccess)
             {
                 NetherRuntimePopupContext popup = foreground.Popup!;
@@ -1936,11 +1966,84 @@ internal static class NetherAutoClimbController
                 );
                 return;
             }
+            if (!foreground.IsDefinitelyAbsent)
+            {
+                FailClosed(
+                    NetherPauseReason.BindingUnavailable,
+                    "play-popup-mapping:" + foreground.Detail
+                );
+                return;
+            }
+            if (pauseBeforeNewRoute)
+            {
+                FailClosed(checkpoint.PauseReason, checkpoint.Detail);
+                return;
+            }
             PlanRoute(snapshot, settings, checkpoint.EffectiveMaxDepth);
             return;
         }
 
+        if (pauseBeforeNewRoute)
+        {
+            FailClosed(checkpoint.PauseReason, checkpoint.Detail);
+            return;
+        }
+
         FailClosed(NetherPauseReason.UnknownStatus, "unhandled-stable-status:" + snapshot.Status);
+    }
+
+    private static bool TryObserveStableForegroundPopup(
+        string boundary,
+        out NetherRuntimePopupResult popup
+    )
+    {
+        popup = _bridge.TryGetActivePopup();
+        if (!popup.IsPending)
+        {
+            ActivePopupReadiness.ObserveReady();
+            return true;
+        }
+
+        // AbyssCodeSelectPopupController registers after InitializeView has synchronously set
+        // _mIds but before InitializeViewAsync has populated _model.  That exact controller is
+        // already foreground authority, so neither a
+        // Wait fail-closed nor a Play route may run behind it.  Preserve the stable boundary and
+        // wait only for the bounded native initialization gap; no snapshot or mutation is
+        // manufactured here.
+        NetherRuntimePopupContext? pendingPopup = popup.Popup;
+        NetherNativeActionResult wait = pendingPopup == null
+            ? NetherNativeActionResult.BindingUnavailable(
+                "native-active-code-popup-readiness-context-unavailable"
+            )
+            : ActivePopupReadiness.Await(
+                NetherPopupReadinessIdentity.From(pendingPopup),
+                "active-code-popup-readiness"
+            );
+        Audit(
+            NetherDetailedAuditKind.Task,
+            "active-popup-readiness:" + boundary + ":" + wait.Kind + ":" + popup.Detail,
+            new NetherDetailedAuditField("boundary", boundary),
+            new NetherDetailedAuditField("result", wait.Kind.ToString()),
+            new NetherDetailedAuditField("detail", popup.Detail),
+            new NetherDetailedAuditField("nativeDetail", wait.Detail),
+            new NetherDetailedAuditField("runtimeGeneration", pendingPopup?.RuntimeGeneration.ToString() ?? "missing"),
+            new NetherDetailedAuditField("owner", pendingPopup?.OwnerAction.ToString() ?? "missing"),
+            new NetherDetailedAuditField("ownerGeneration", pendingPopup?.OwnerGeneration.ToString() ?? "missing"),
+            new NetherDetailedAuditField("sequence", pendingPopup?.Sequence.ToString() ?? "missing")
+        );
+        if (wait.Kind != NetherNativeActionResultKind.Started)
+        {
+            FailClosed(
+                NetherPauseReason.BindingUnavailable,
+                "active-code-popup-readiness-timeout:"
+                    + boundary
+                    + ":"
+                    + wait.Detail
+                    + ":"
+                    + popup.Detail
+            );
+        }
+        return false;
     }
 
     private static void PlanNativePopup(
@@ -2189,7 +2292,10 @@ internal static class NetherAutoClimbController
         NetherCodeDecision decision = CodePolicy.Decide(
             new NetherCodePortfolio
             {
-                CurrentCodes = snapshot.Codes,
+                CurrentCodes = NetherCodePartyCoverageProjection.Apply(
+                    snapshot.Codes,
+                    candidates.CurrentPartyCoverage
+                ),
                 Capacity = snapshot.CodeCapacity,
                 ReloadCount = snapshot.CodeReloadCount,
                 IsMasterComplete = candidates.IsMasterComplete,
@@ -2554,6 +2660,7 @@ internal static class NetherAutoClimbController
     private static void FailClosed(NetherPauseReason reason, string detail)
     {
         _awaitingReconcileFloorSceneSnapshot = false;
+        ActivePopupReadiness.Clear();
         if (State.Phase != NetherAutoClimbPhase.Paused)
             State.Pause(reason, detail);
         ProjectionCalibration.Clear();
@@ -2583,6 +2690,7 @@ internal static class NetherAutoClimbController
         BattleIngressFlow.Reset();
         BattleSettlementFlow.TerminateForSceneLoss();
         BattleAccessorWait.Clear();
+        ActivePopupReadiness.Clear();
         State.TerminatePendingAndPause(reason, detail);
         ProjectionCalibration.Clear();
         ObserveBattleSettingsLeaseBoundary(
@@ -2661,6 +2769,7 @@ internal static class NetherAutoClimbController
             ? NetherPauseReason.BindingUnavailable
             : NetherPauseReason.BattleSettingsLeaseFault;
         string detail = "battle-settings-lease:" + boundary + ":" + result.Detail;
+        ActivePopupReadiness.Clear();
         if (State.Phase != NetherAutoClimbPhase.Paused)
             State.Pause(reason, detail);
         ProjectionCalibration.Clear();
@@ -2812,7 +2921,6 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("lane", decision.LockedLane.ToString()),
             new NetherDetailedAuditField("reloadCount", snapshot.CodeReloadCount.ToString()),
             new NetherDetailedAuditField("capacity", snapshot.CodeCapacity.ToString()),
-            new NetherDetailedAuditField("protected", string.Join("|", decision.ProtectedCodeIds.Take(8))),
             new NetherDetailedAuditField("removable", string.Join("|", decision.RemovableCodeIds.Take(8))),
             new NetherDetailedAuditField("detail", decision.Detail)
         );
@@ -2824,14 +2932,19 @@ internal static class NetherAutoClimbController
                 "code-current:" + boundary + ":" + current.CodeId + ":" + snapshot.Fingerprint,
                 new NetherDetailedAuditField("codeId", current.CodeId.ToString()),
                 new NetherDetailedAuditField("known", current.IsKnown.ToString()),
-                new NetherDetailedAuditField("category", current.Category.ToString()),
-                new NetherDetailedAuditField("effect", current.EffectKind.ToString()),
+                new NetherDetailedAuditField(
+                    "category",
+                    NetherCodeCategorySemantics.GetDisplayName(current.Category)
+                ),
+                new NetherDetailedAuditField("family", current.Family.ToString()),
                 new NetherDetailedAuditField("rarity", current.Rarity.ToString()),
-                new NetherDetailedAuditField("level", current.Level.ToString()),
+                new NetherDetailedAuditField("power", current.Power.ToString()),
+                new NetherDetailedAuditField("effectType", current.MasterEffectType.ToString()),
+                new NetherDetailedAuditField("abilityAssetId", current.AbilityAssetId.ToString()),
+                new NetherDetailedAuditField("abilityLevel", current.AbilityLevel.ToString()),
+                new NetherDetailedAuditField("possessionAmount", current.PossessionAmount.ToString()),
                 new NetherDetailedAuditField("coverageKnown", current.PartyCoverageKnown.ToString()),
-                new NetherDetailedAuditField("coverage", current.PartyCoverage.ToString()),
-                new NetherDetailedAuditField("researchKnown", current.IsResearchOnlyKnown.ToString()),
-                new NetherDetailedAuditField("research", current.IsResearchOnly.ToString())
+                new NetherDetailedAuditField("coverage", current.PartyCoverage.ToString())
             );
         }
 
@@ -2842,14 +2955,18 @@ internal static class NetherAutoClimbController
                 "code-candidate:" + boundary + ":" + candidate.CodeId + ":" + snapshot.Fingerprint,
                 new NetherDetailedAuditField("codeId", candidate.CodeId.ToString()),
                 new NetherDetailedAuditField("known", candidate.IsKnown.ToString()),
-                new NetherDetailedAuditField("category", candidate.Category.ToString()),
-                new NetherDetailedAuditField("effect", candidate.EffectKind.ToString()),
+                new NetherDetailedAuditField(
+                    "category",
+                    NetherCodeCategorySemantics.GetDisplayName(candidate.Category)
+                ),
+                new NetherDetailedAuditField("family", candidate.Family.ToString()),
                 new NetherDetailedAuditField("rarity", candidate.Rarity.ToString()),
-                new NetherDetailedAuditField("level", candidate.Level.ToString()),
+                new NetherDetailedAuditField("power", candidate.Power.ToString()),
+                new NetherDetailedAuditField("effectType", candidate.MasterEffectType.ToString()),
+                new NetherDetailedAuditField("abilityAssetId", candidate.AbilityAssetId.ToString()),
+                new NetherDetailedAuditField("abilityLevel", candidate.AbilityLevel.ToString()),
                 new NetherDetailedAuditField("coverageKnown", candidate.PartyCoverageKnown.ToString()),
-                new NetherDetailedAuditField("coverage", candidate.PartyCoverage.ToString()),
-                new NetherDetailedAuditField("researchKnown", candidate.IsResearchOnlyKnown.ToString()),
-                new NetherDetailedAuditField("research", candidate.IsResearchOnly.ToString())
+                new NetherDetailedAuditField("coverage", candidate.PartyCoverage.ToString())
             );
         }
     }
@@ -3263,6 +3380,7 @@ internal static class NetherAutoClimbController
             NetherAutoClimbController._lastTransition = _lastTransition;
             NetherAutoClimbController._awaitingReconcileFloorSceneSnapshot =
                 _awaitingReconcileFloorSceneSnapshot;
+            ActivePopupReadiness.Clear();
         }
     }
 }

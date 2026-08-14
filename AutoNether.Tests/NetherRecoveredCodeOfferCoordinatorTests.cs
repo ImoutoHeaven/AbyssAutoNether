@@ -29,8 +29,11 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
                         30024,
                         (int)NetherCodeCategory.ErosionResistance,
                         effectType: 1,
-                        level: 1,
-                        rarity: 1
+                        effectParameter1: 100006,
+                        effectParameter2: 1,
+                        effectParameter3: 0,
+                        rarity: 1,
+                        power: 0
                     ),
                 },
                 IsMasterComplete: true,
@@ -323,6 +326,7 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
     private static NetherRuntimePopupContext Popup() => new()
     {
         Kind = NetherRuntimePopupKind.CodeOffer,
+        RuntimeGeneration = 3,
         OwnerAction = NetherActionKind.RecoveredCodeOffer,
         OwnerGeneration = 17,
         Sequence = 23,
@@ -352,7 +356,7 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
     {
         Codes = new[]
         {
-            new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1)
+            new NetherCodeState(30024, NetherCodeFamily.Safe, 1)
             {
                 Category = NetherCodeCategory.ErosionResistance,
                 Rarity = 1,
@@ -394,8 +398,11 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
                     30024,
                     (int)NetherCodeCategory.ErosionResistance,
                     effectType: 1,
-                    level: 1,
-                    rarity: 1
+                    effectParameter1: 100006,
+                    effectParameter2: 1,
+                    effectParameter3: 0,
+                    rarity: 1,
+                    power: 0
                 ),
             },
             IsMasterComplete: true,

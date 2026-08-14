@@ -46,13 +46,67 @@ public class NetherActionReconcilePolicyTests
     [Fact]
     public void Exact_code_add_and_replace_is_applied_but_a_wrong_code_is_not()
     {
-        NetherSnapshot before = Snapshot(codes: new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) });
-        NetherSnapshot exact = Snapshot(codes: new[] { new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1) }, codeHash: "40024:1:1");
-        NetherSnapshot wrong = Snapshot(codes: new[] { new NetherCodeState(50024, NetherCodeEffectKind.Rush, 1) }, codeHash: "50024:1:1");
+        NetherSnapshot before = Snapshot(codes: new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) });
+        NetherSnapshot exact = Snapshot(codes: new[] { new NetherCodeState(40024, NetherCodeFamily.Risk, 1) }, codeHash: "40024:1:1");
+        NetherSnapshot wrong = Snapshot(codes: new[] { new NetherCodeState(50024, NetherCodeFamily.Rush, 1) }, codeHash: "50024:1:1");
         NetherPlannedAction action = new(NetherActionKind.SelectCode) { CodeId = 40024, ReplaceCodeId = 30024 };
 
         Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrong));
+    }
+
+    [Fact]
+    public void Duplicate_code_select_is_ambiguous_without_the_authoritative_fix_response()
+    {
+        NetherCodeState selected = new NetherCodeState(30024, NetherCodeFamily.Safe, 1)
+        {
+            Category = NetherCodeCategory.Safe,
+            PossessionAmount = 2,
+            Power = 100,
+        };
+        NetherCodeState survivor = new NetherCodeState(40024, NetherCodeFamily.Risk, 1)
+        {
+            Category = NetherCodeCategory.Risk,
+            PossessionAmount = 1,
+            Power = 200,
+        };
+        NetherSnapshot before = Snapshot(codeHash: "before") with { Codes = [selected, survivor] };
+        NetherSnapshot exact = before with
+        {
+            Codes = [selected with { PossessionAmount = 3 }, survivor],
+            CodeHash = "after",
+        };
+        NetherPlannedAction action = new(NetherActionKind.SelectCode) { CodeId = selected.CodeId };
+
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(action, before, exact)
+        );
+    }
+
+    [Fact]
+    public void New_code_select_preserves_every_unrelated_authoritative_code_field()
+    {
+        NetherCodeState survivor = new NetherCodeState(30024, NetherCodeFamily.Safe, 1)
+        {
+            Category = NetherCodeCategory.Safe,
+            PossessionAmount = 1,
+            Power = 100,
+        };
+        NetherSnapshot before = Snapshot(codeHash: "before") with { Codes = [survivor] };
+        NetherSnapshot exact = before with
+        {
+            Codes = [survivor, new NetherCodeState(40024, NetherCodeFamily.Risk, 1)],
+            CodeHash = "after",
+        };
+        NetherSnapshot unrelatedMutation = exact with
+        {
+            Codes = [survivor with { Power = 101 }, new NetherCodeState(40024, NetherCodeFamily.Risk, 1)],
+        };
+        NetherPlannedAction action = new(NetherActionKind.SelectCode) { CodeId = 40024 };
+
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, unrelatedMutation));
     }
 
     [Fact]
@@ -64,7 +118,7 @@ public class NetherActionReconcilePolicyTests
         };
         NetherSnapshot wrongReloadDelta = Snapshot(codeReload: 1, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
 
         Assert.Equal(
@@ -334,7 +388,7 @@ public class NetherActionReconcilePolicyTests
             Characters = new[] { new NetherCharacterState(1, 920) },
             CharacterHpHash = "1:920:1",
             AcquiredItems = new[] { new NetherRewardItem(7001, 1) },
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherSnapshot wrongItem = exact with { AcquiredItems = new[] { new NetherRewardItem(7002, 1) } };
         NetherPlannedAction action = ComposedFloor(
@@ -826,7 +880,7 @@ public class NetherActionReconcilePolicyTests
         };
         NetherSnapshot exact = Snapshot(floorId: 11, floorLevel: 11, gold: 25, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherPlannedAction action = ComposedFloor(
             NetherRuntimePopupKind.CodeOffer,
@@ -882,7 +936,7 @@ public class NetherActionReconcilePolicyTests
             before,
             exact with
             {
-                Codes = new[] { new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1) },
+                Codes = new[] { new NetherCodeState(40024, NetherCodeFamily.Risk, 1) },
                 CodeHash = "codes:40024",
             }
         ));
@@ -897,7 +951,7 @@ public class NetherActionReconcilePolicyTests
         };
         NetherSnapshot exact = Snapshot(floorId: 11, floorLevel: 11, codeReload: 1, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherPlannedAction action = ComposedFloor(
             NetherRuntimePopupKind.CodeOffer,
@@ -926,11 +980,11 @@ public class NetherActionReconcilePolicyTests
     {
         NetherSnapshot before = Snapshot(codeReload: 2, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherSnapshot alteredPortfolio = before with
         {
-            Codes = new[] { new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1) },
+            Codes = new[] { new NetherCodeState(40024, NetherCodeFamily.Risk, 1) },
             CodeHash = "codes:40024",
         };
 
@@ -957,11 +1011,11 @@ public class NetherActionReconcilePolicyTests
     {
         NetherSnapshot before = Snapshot(floorId: 10, codeReload: 2, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherSnapshot exact = Snapshot(floorId: 11, floorLevel: 11, codeReload: 1, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherPlannedAction action = ComposedFloor(
             NetherRuntimePopupKind.CodeOffer,
@@ -986,7 +1040,7 @@ public class NetherActionReconcilePolicyTests
             before,
             exact with
             {
-                Codes = new[] { new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1) },
+                Codes = new[] { new NetherCodeState(40024, NetherCodeFamily.Risk, 1) },
                 CodeHash = "codes:40024",
             }
         ));
@@ -1001,7 +1055,7 @@ public class NetherActionReconcilePolicyTests
         };
         NetherSnapshot selectWrongReload = Snapshot(floorId: 11, floorLevel: 11, codeReload: 1, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherPlannedAction select = ComposedFloor(NetherRuntimePopupKind.CodeOffer, NetherActionKind.SelectCode) with
         {
@@ -1011,11 +1065,11 @@ public class NetherActionReconcilePolicyTests
 
         NetherSnapshot keepBefore = Snapshot(floorId: 10, codeReload: 2, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherSnapshot keepWrongReload = Snapshot(floorId: 11, floorLevel: 11, codeReload: 1, codeHash: "codes:30024") with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherPlannedAction keep = ComposedFloor(NetherRuntimePopupKind.CodeOffer, NetherActionKind.KeepCode) with
         {
@@ -1041,7 +1095,7 @@ public class NetherActionReconcilePolicyTests
             status: NetherSessionStatus.Battle
         ) with
         {
-            Codes = new[] { new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1) },
+            Codes = new[] { new NetherCodeState(30024, NetherCodeFamily.Safe, 1) },
         };
         NetherPlannedAction action = ComposedFloor(
             NetherRuntimePopupKind.CodeOffer,
@@ -1086,7 +1140,7 @@ public class NetherActionReconcilePolicyTests
             before,
             exact with
             {
-                Codes = new[] { new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1) },
+                Codes = new[] { new NetherCodeState(40024, NetherCodeFamily.Risk, 1) },
                 CodeHash = "codes:40024",
             }
         ));
@@ -1130,16 +1184,16 @@ public class NetherActionReconcilePolicyTests
         {
             Codes =
             [
-                new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1),
-                new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1),
+                new NetherCodeState(30024, NetherCodeFamily.Safe, 1),
+                new NetherCodeState(40024, NetherCodeFamily.Risk, 1),
             ],
         };
         NetherSnapshot exact = before with
         {
             Codes =
             [
-                new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1),
-                new NetherCodeState(51001, NetherCodeEffectKind.General, 1),
+                new NetherCodeState(30024, NetherCodeFamily.Safe, 1),
+                new NetherCodeState(51001, NetherCodeFamily.Rush, 1),
             ],
             CodeHash = "30024|51001",
         };
@@ -1149,7 +1203,7 @@ public class NetherActionReconcilePolicyTests
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(
             action,
             before,
-            exact with { Codes = [new NetherCodeState(51001, NetherCodeEffectKind.General, 1)], CodeHash = "51001" }
+            exact with { Codes = [new NetherCodeState(51001, NetherCodeFamily.Rush, 1)], CodeHash = "51001" }
         ));
         Assert.Equal(NetherActionOutcome.NotApplied, NetherActionReconcilePolicy.Evaluate(
             action,
@@ -1165,16 +1219,16 @@ public class NetherActionReconcilePolicyTests
         {
             Codes =
             [
-                new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1),
-                new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1),
+                new NetherCodeState(30024, NetherCodeFamily.Safe, 1),
+                new NetherCodeState(40024, NetherCodeFamily.Risk, 1),
             ],
         };
         NetherSnapshot exact = Snapshot(floorId: 11, floorLevel: 11, gold: 25, codeHash: "30024|51001") with
         {
             Codes =
             [
-                new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1),
-                new NetherCodeState(51001, NetherCodeEffectKind.General, 1),
+                new NetherCodeState(30024, NetherCodeFamily.Safe, 1),
+                new NetherCodeState(51001, NetherCodeFamily.Rush, 1),
             ],
         };
         NetherPlannedAction action = ComposedFloor(NetherRuntimePopupKind.CodeOffer, NetherActionKind.KeepCode) with

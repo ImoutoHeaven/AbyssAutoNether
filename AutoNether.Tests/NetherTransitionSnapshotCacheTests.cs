@@ -222,7 +222,7 @@ public sealed class NetherTransitionSnapshotCacheTests
                 LockReward = 0,
                 Codes = new[]
                 {
-                    new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1),
+                    new NetherCodeState(30024, NetherCodeFamily.Safe, 1),
                 },
                 AcquiredItems = Array.Empty<NetherRewardItem>(),
             },

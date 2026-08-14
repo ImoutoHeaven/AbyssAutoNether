@@ -245,12 +245,6 @@ internal sealed class NetherTransitionSnapshotCache
             )
         );
 
-    internal static string CreateCodeHash(IEnumerable<NetherCodeState> codes) => string.Join(
-        ";",
-        codes.OrderBy(code => code.CodeId).Select(code =>
-            code.CodeId.ToString(CultureInfo.InvariantCulture) + ":"
-            + code.Level.ToString(CultureInfo.InvariantCulture) + ":"
-            + ((int)code.EffectKind).ToString(CultureInfo.InvariantCulture)
-        )
-    );
+    internal static string CreateCodeHash(IEnumerable<NetherCodeState> codes) =>
+        NetherCodeIdentity.CreatePortfolio(codes);
 }

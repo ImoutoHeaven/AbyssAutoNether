@@ -8,36 +8,41 @@ namespace AutoNether.Tests;
 public sealed class NetherCodeTransformPolicyTests
 {
     [Fact]
-    public void Risk_and_low_value_general_codes_are_removed_before_safe_codes()
+    public void Conversion_removes_the_card_whose_absence_preserves_the_best_evidenced_portfolio()
     {
-        NetherCodeTransformDecision risk = Decide(
-            Code(30024, NetherCodeEffectKind.Safe, rarity: 1, level: 1),
-            Code(51001, NetherCodeEffectKind.General, rarity: 5, level: 5),
-            Code(40024, NetherCodeEffectKind.Risk, rarity: 5, level: 5)
-        );
-        NetherCodeTransformDecision general = Decide(
-            Code(30024, NetherCodeEffectKind.Safe, rarity: 1, level: 1),
-            Code(51001, NetherCodeEffectKind.General, rarity: 4, level: 3),
-            Code(51002, NetherCodeEffectKind.General, rarity: 2, level: 1)
+        NetherCodeTransformDecision decision = Decide(
+            Code(1, NetherCodeFamily.Safe, power: 1),
+            Code(2, NetherCodeFamily.Rush, power: 5),
+            Code(3, NetherCodeFamily.Risk, power: 10)
         );
 
-        Assert.True(risk.CanTransform, risk.Detail);
-        Assert.Equal(40024, risk.RemoveCodeId);
-        Assert.True(general.CanTransform, general.Detail);
-        Assert.Equal(51002, general.RemoveCodeId);
+        Assert.True(decision.CanTransform, decision.Detail);
+        Assert.Equal(1, decision.RemoveCodeId);
     }
 
     [Fact]
-    public void Preferred_safe_and_effective_safe_codes_are_protected()
+    public void Paired_counter_coherence_beats_static_power_when_choosing_a_conversion_source()
     {
         NetherCodeTransformDecision decision = Decide(
-            Code(30024, NetherCodeEffectKind.Safe, rarity: 1, level: 1),
-            Code(30025, NetherCodeEffectKind.Safe, rarity: 1, level: 5)
+            Code(1, NetherCodeFamily.Rush, power: 1),
+            Code(2, NetherCodeFamily.Rush, power: 1),
+            Code(3, NetherCodeFamily.Impact, power: 9999)
         );
 
-        Assert.False(decision.CanTransform);
-        Assert.Equal(NetherPauseReason.NoSafeRoute, decision.PauseReason);
-        Assert.Contains("no-removable-code", decision.Detail);
+        Assert.True(decision.CanTransform, decision.Detail);
+        Assert.Equal(3, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Safe_and_risk_have_no_magic_protection_or_forced_removal()
+    {
+        NetherCodeTransformDecision decision = Decide(
+            Code(30024, NetherCodeFamily.Safe, power: 10),
+            Code(40024, NetherCodeFamily.Risk, power: 1)
+        );
+
+        Assert.True(decision.CanTransform, decision.Detail);
+        Assert.Equal(30024, decision.RemoveCodeId);
     }
 
     [Fact]
@@ -46,14 +51,14 @@ public sealed class NetherCodeTransformPolicyTests
         Assert.Equal(
             NetherPauseReason.UnknownMasterData,
             new NetherCodeTransformPolicy().Decide(
-                [Code(1, NetherCodeEffectKind.General), Code(1, NetherCodeEffectKind.General)],
+                [Code(1, NetherCodeFamily.Rush), Code(1, NetherCodeFamily.Rush)],
                 capacity: 5
             ).PauseReason
         );
         Assert.Equal(
             NetherPauseReason.UnknownMasterData,
             new NetherCodeTransformPolicy().Decide(
-                [Code(1, NetherCodeEffectKind.General) with { IsKnown = false }],
+                [Code(1, NetherCodeFamily.Rush) with { IsKnown = false }],
                 capacity: 5
             ).PauseReason
         );
@@ -64,18 +69,22 @@ public sealed class NetherCodeTransformPolicyTests
 
     private static NetherCodeState Code(
         long id,
-        NetherCodeEffectKind kind,
+        NetherCodeFamily family,
         int rarity = 1,
-        int level = 1
-    ) => new(id, kind, level)
+        int abilityLevel = 1,
+        int power = 0
+    ) => new(id, family, abilityLevel)
     {
         IsKnown = true,
-        Category = kind switch
+        Category = family switch
         {
-            NetherCodeEffectKind.Safe => NetherCodeCategory.ErosionResistance,
-            NetherCodeEffectKind.Risk => NetherCodeCategory.ErosionEnhancement,
-            _ => NetherCodeCategory.Technique,
+            NetherCodeFamily.Rush => NetherCodeCategory.Rush,
+            NetherCodeFamily.Impact => NetherCodeCategory.Impact,
+            NetherCodeFamily.Safe => NetherCodeCategory.Safe,
+            NetherCodeFamily.Risk => NetherCodeCategory.Risk,
+            _ => NetherCodeCategory.Unknown,
         },
         Rarity = rarity,
+        Power = power,
     };
 }

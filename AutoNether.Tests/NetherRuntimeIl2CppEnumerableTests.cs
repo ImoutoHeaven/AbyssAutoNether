@@ -18,14 +18,13 @@ namespace AutoNether.Tests
             NetherActiveCodeErosionProjection projection =
                 new NetherRuntimeActiveCodeErosionExtractor().Extract(
                     possessions,
-                    new[] { new FakeMasterCode(30024, 6, 4, 0, 0) }
+                    new[] { new FakeMasterCode(30024, 1, 4, 0, 0) }
                 );
 
             Assert.True(projection.ErosionProjectionKnown, projection.Detail);
             Assert.Equal(new long[] { 30024 }, projection.SortedCodeIds);
-            NetherCodeEffect effect = Assert.Single(projection.ErosionEffects);
-            Assert.Equal(NetherCodeEffectKind.ErosionAdditionUp, effect.EffectKind);
-            Assert.Equal(4, effect.Amount);
+            Assert.Empty(projection.ErosionEffects);
+            Assert.Equal(4, Assert.Single(projection.Entries).EffectParameter1);
         }
 
         [Fact]

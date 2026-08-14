@@ -186,7 +186,7 @@ public class NetherCodeReloadEpochCoordinatorTests
     }
 
     private static NetherRuntimeCodeCandidatesResult Candidates(params long[] ids) => new(
-        ids.Select(id => new NetherCodeCandidate(id, NetherCodeEffectKind.Safe, 1)).ToArray(),
+        ids.Select(id => new NetherCodeCandidate(id, NetherCodeFamily.Safe, 1)).ToArray(),
         IsMasterComplete: true,
         Detail: string.Empty
     );

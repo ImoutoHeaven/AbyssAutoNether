@@ -38,9 +38,10 @@ internal sealed class NetherDetailedAuditLogger
     // Unknown native event rows need enough room to preserve their exact target/content tuple.
     // This remains bounded so a malformed runtime object cannot create an unbounded log line.
     private const int MaximumValueLength = 192;
-    // Route diagnostics need node identity, graph links, three safety gates, both erosion
-    // projections, and the component failure. Keep all twelve while bounding every value.
-    private const int MaximumFields = 12;
+    // Route diagnostics need twelve fields. Code-semantic diagnostics additionally need the
+    // native effect identity, ability level, raw parameters, and coverage provenance. Keep all
+    // sixteen while continuing to bound every value and every audit family.
+    private const int MaximumFields = 16;
     private static readonly HashSet<string> SensitiveFieldNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "name",

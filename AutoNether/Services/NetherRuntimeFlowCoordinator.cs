@@ -35,14 +35,19 @@ internal readonly record struct NetherRuntimeParentPollResult(NetherRuntimeParen
 internal sealed class NetherRuntimeFlowCoordinator
 {
     private readonly INetherRuntimeParentDriver _driver;
+    private readonly NetherPopupReadinessGate _ownedPopupReadinessWait;
     private NetherPlannedAction? _parent;
     private long _generation;
     private long _lastDispatchedSequence;
     private long _lastDispatchedDecisionEpoch;
 
-    public NetherRuntimeFlowCoordinator(INetherRuntimeParentDriver driver)
+    public NetherRuntimeFlowCoordinator(
+        INetherRuntimeParentDriver driver,
+        int maximumOwnedPopupReadinessPolls = 600
+    )
     {
         _driver = driver ?? throw new ArgumentNullException(nameof(driver));
+        _ownedPopupReadinessWait = new NetherPopupReadinessGate(maximumOwnedPopupReadinessPolls);
     }
 
     public long Generation => _generation;
@@ -63,6 +68,8 @@ internal sealed class NetherRuntimeFlowCoordinator
         _parent = action;
         _generation = checked(_generation + 1);
         _lastDispatchedSequence = 0;
+        _lastDispatchedDecisionEpoch = 0;
+        _ownedPopupReadinessWait.Clear();
         return true;
     }
 
@@ -75,12 +82,30 @@ internal sealed class NetherRuntimeFlowCoordinator
 
         bool dispatchedOwnedPopup = false;
         NetherRuntimePopupResult popup = _driver.TryGetOwnedPopup(_parent.Value);
+        if (popup.IsPending)
+        {
+            NetherRuntimePopupContext context = popup.Popup!;
+            if (context.OwnerAction != NetherActionKind.SelectFloor
+                || context.OwnerGeneration != _generation)
+            {
+                return Fail("owned-popup-unavailable:pending-popup-owner-mismatch");
+            }
+            NetherNativeActionResult wait = _ownedPopupReadinessWait.Await(
+                NetherPopupReadinessIdentity.From(context),
+                "owned-code-popup-readiness"
+            );
+            return wait.Kind == NetherNativeActionResultKind.Started
+                ? NetherRuntimeParentPollResult.Pending(popup.Detail + ":" + wait.Detail)
+                : Fail("owned-popup-unavailable:" + popup.Detail + ":" + wait.Detail);
+        }
         if (!popup.IsSuccess && popup.Detail != "missing-owned-floor-popup")
             return Fail("owned-popup-unavailable:" + popup.Detail);
         if (popup.IsSuccess)
         {
+            _ownedPopupReadinessWait.ObserveReady();
             NetherRuntimePopupContext context = popup.Popup!;
-            if (context.OwnerAction == NetherActionKind.SelectFloor
+            if (context.RuntimeGeneration > 0
+                && context.OwnerAction == NetherActionKind.SelectFloor
                 && context.OwnerGeneration == _generation
                 && IsNewDispatchIdentity(context))
             {
@@ -116,6 +141,7 @@ internal sealed class NetherRuntimeFlowCoordinator
         _parent = null;
         _lastDispatchedSequence = 0;
         _lastDispatchedDecisionEpoch = 0;
+        _ownedPopupReadinessWait.Clear();
     }
 
     private bool IsNewDispatchIdentity(NetherRuntimePopupContext context)

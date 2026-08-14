@@ -23,6 +23,9 @@ internal readonly record struct NetherRuntimeCodeCandidatesResult(
     string Detail
 )
 {
+    public IReadOnlyDictionary<long, int> CurrentPartyCoverage { get; init; } =
+        new Dictionary<long, int>();
+
     public bool IsSuccess => Detail.Length == 0;
 
     public static NetherRuntimeCodeCandidatesResult Failure(string detail) => new(

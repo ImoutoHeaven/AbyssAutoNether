@@ -38,6 +38,9 @@ internal readonly record struct NetherRuntimeCodeCandidatesResult(
     string Detail
 )
 {
+    public IReadOnlyDictionary<long, int> CurrentPartyCoverage { get; init; } =
+        new Dictionary<long, int>();
+
     public bool IsSuccess => Detail.Length == 0;
 
     public static NetherRuntimeCodeCandidatesResult Failure(string detail) => new(
@@ -173,6 +176,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherBattleResultContinuationFlow _battleResultContinuation = new();
     private readonly NetherTransitionSnapshotCache _transitionSnapshotCache = new();
     private readonly NetherNativeWaitGate _battleResultSnapshotWait = new(maximumMissingPolls: 600);
+    private readonly NetherPopupReadinessGate _battleResultPopupReadiness = new(maximumPendingPolls: 600);
     private readonly NetherNativeWaitGate _codeSelectionTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementPopupWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementConfirmPopupWait = new(maximumMissingPolls: 600);
@@ -216,8 +220,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private long _sceneObservedRuntimeGeneration;
     private long _sceneEnteredRuntimeGeneration;
     private long _startStatusCodeGeneration;
+    private long _recoveredCodeObservedSequence;
     private object? _battleResultViewController;
     private long _battleResultCodeGeneration;
+    private long _battleResultCodeObservedSequence;
     private bool _battleResultCharactersRequired;
     private NetherPlannedAction? _floorParentAction;
     private long _floorParentGeneration;
@@ -1308,6 +1314,15 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 return NetherRuntimeCodeCandidatesResult.Failure("missing-m-nether-codes-cache");
             var masterById = rows.Where(row => row != null).ToDictionary(row => row.id);
 
+            PopupRegistration? coverageRegistration;
+            lock (_gate)
+            {
+                coverageRegistration = _codeSelectPopup is PopupRegistration current
+                    && IsCurrentFloorOwnedPopup(current)
+                        ? current
+                        : null;
+            }
+
             object? selectableCodeIds = data.SelectableNetherCodeIds;
             if (selectableCodeIds == null)
                 return NetherRuntimeCodeCandidatesResult.Failure("missing-selectable-nether-code-ids");
@@ -1337,8 +1352,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     row.id,
                     row.category,
                     row.effect_type,
-                    LevelFromMaster(row),
-                    row.rarity
+                    row.effect_parameter_1,
+                    row.effect_parameter_2,
+                    row.effect_parameter_3,
+                    row.rarity,
+                    row.power
                 );
                 if (NetherCodeRuntimeSemanticMapper.RequiresBoundedSemanticAudit(candidate)
                     && semanticAuditMasters != null)
@@ -1346,9 +1364,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 candidates.Add(candidate);
             }
 
-            // Technique/Strength are valid ordinary rewards.  Their optional Rush/Impact,
-            // party-coverage, and research labels are not present in MNetherCodes, so retain a
-            // bounded semantic audit without turning those rewards into unsupported data.
+            // Ability scope/target/situations are asset semantics, not category or power fields.
+            // Retain a bounded audit for those exact runtime assets without guessing coverage.
             if (semanticAuditMasters != null)
             {
                 foreach (object rawCode in Enumerate(dataStore.GetPossessionNetherCodeDataEnumerable()))
@@ -1361,17 +1378,85 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                             master.id,
                             master.category,
                             master.effect_type,
-                            LevelFromMaster(master),
-                            master.rarity
+                            master.effect_parameter_1,
+                            master.effect_parameter_2,
+                            master.effect_parameter_3,
+                            master.rarity,
+                            master.power,
+                            code.Amount
                         );
-                        if (!current.IsKnown || current.EffectKind == NetherCodeEffectKind.General)
+                        if (!current.IsKnown
+                            || !current.EffectSemanticsKnown
+                            || current.MasterEffectType is NetherCodeMasterEffectType.NetherAbility
+                                or NetherCodeMasterEffectType.CommonAbility)
                             semanticAuditMasters[master.id] = master;
                     }
                 }
                 LogCodeMasterSemanticAudit(semanticAuditMasters.Values, detailedLogging);
             }
 
-            return new NetherRuntimeCodeCandidatesResult(candidates, candidates.All(candidate => candidate.IsKnown), string.Empty);
+            var candidatePartyCoverage = new Dictionary<long, int>();
+            var currentPartyCoverage = new Dictionary<long, int>();
+            if (coverageRegistration is PopupRegistration coverageOwner)
+            {
+                bool coverageComplete = true;
+                foreach (long codeId in candidates.Select(candidate => candidate.CodeId).Distinct())
+                {
+                    if (!TryGetNativeCodeDisplayCoverage(coverageOwner, codeId, out int coverage))
+                    {
+                        coverageComplete = false;
+                        break;
+                    }
+                    candidatePartyCoverage[codeId] = coverage;
+                }
+
+                if (coverageComplete)
+                {
+                    foreach (long codeId in Enumerate(dataStore.GetPossessionNetherCodeDataEnumerable())
+                        .OfType<NetherCodeData>()
+                        .Where(code => code != null && code.MNetherCodeId > 0 && code.Amount > 0)
+                        .Select(code => code.MNetherCodeId)
+                        .Distinct())
+                    {
+                        if (!TryGetNativeCodeDisplayCoverage(coverageOwner, codeId, out int coverage))
+                        {
+                            coverageComplete = false;
+                            break;
+                        }
+                        currentPartyCoverage[codeId] = coverage;
+                    }
+                }
+
+                lock (_gate)
+                    coverageComplete = coverageComplete && IsSameCurrentCodeOfferRegistration(coverageOwner);
+                if (!coverageComplete)
+                {
+                    candidatePartyCoverage.Clear();
+                    currentPartyCoverage.Clear();
+                }
+            }
+
+            if (candidatePartyCoverage.Count > 0)
+            {
+                candidates = candidates.Select(candidate =>
+                    candidatePartyCoverage.TryGetValue(candidate.CodeId, out int coverage)
+                        ? candidate with
+                        {
+                            PartyCoverageKnown = true,
+                            PartyCoverage = coverage,
+                        }
+                        : candidate
+                ).ToList();
+            }
+
+            return new NetherRuntimeCodeCandidatesResult(
+                candidates,
+                candidates.All(candidate => candidate.IsKnown),
+                string.Empty
+            )
+            {
+                CurrentPartyCoverage = currentPartyCoverage,
+            };
         }
         catch (Exception ex)
         {
@@ -1400,6 +1485,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 })
             {
                 if (candidate is { IsLive: true }
+                    && candidate.Value.RuntimeGeneration == _runtimeGeneration
+                    && _runtimeGeneration > 0
                     && (registration == null || candidate.Value.Sequence > registration.Value.Sequence))
                     registration = candidate;
             }
@@ -1551,9 +1638,22 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         string controllerType = registration.Controller.GetType().FullName ?? string.Empty;
         long decisionEpoch = 0;
+        long runtimeGeneration;
         bool hasRecoveredFloorEventTaskEvidence = false;
         lock (_gate)
         {
+            if (!registration.IsLive
+                || registration.RuntimeGeneration <= 0
+                || registration.RuntimeGeneration != _runtimeGeneration)
+            {
+                return NetherRuntimePopupResult.Failure(
+                    "stale-popup-runtime-generation:registered="
+                        + registration.RuntimeGeneration
+                        + ":current="
+                        + _runtimeGeneration
+                );
+            }
+            runtimeGeneration = registration.RuntimeGeneration;
             if (controllerType == CodeSelectPopupControllerTypeName)
             {
                 decisionEpoch = GetOwnedPopupDecisionEpoch(new NetherOwnedPopupStageOwner(
@@ -1571,7 +1671,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             {
                 hasRecoveredFloorEventTaskEvidence = _recoveredFloorEventTaskLease.CanClaim(
                     _floorSelectionController,
-                    _runtimeGeneration,
+                    registration.RuntimeGeneration,
                     registration.Popup,
                     registration.Sequence
                 );
@@ -1591,22 +1691,94 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ShopPopupControllerTypeName => TryMapShopPopup(registration),
                 _ => NetherRuntimePopupResult.Failure("unsupported-native-popup-controller:" + controllerType),
             };
-            return !mapped.IsSuccess
-                ? mapped
-                : NetherRuntimePopupResult.Success(mapped.Popup! with
-                {
-                    OwnerAction = registration.OwnerAction,
-                    OwnerGeneration = registration.OwnerGeneration,
-                    Sequence = registration.Sequence,
-                    DecisionEpoch = decisionEpoch,
-                    HasRecoveredFloorEventTaskEvidence = hasRecoveredFloorEventTaskEvidence,
-                });
+            if (mapped.Popup == null)
+                return mapped;
+
+            NetherRuntimePopupContext context = mapped.Popup with
+            {
+                RuntimeGeneration = runtimeGeneration,
+                OwnerAction = registration.OwnerAction,
+                OwnerGeneration = registration.OwnerGeneration,
+                Sequence = registration.Sequence,
+                DecisionEpoch = decisionEpoch,
+                HasRecoveredFloorEventTaskEvidence = hasRecoveredFloorEventTaskEvidence,
+            };
+            return mapped.IsPending
+                ? NetherRuntimePopupResult.Pending(context, mapped.Detail)
+                : NetherRuntimePopupResult.Success(context);
         }
         catch (Exception ex)
         {
             return NetherRuntimePopupResult.Failure("popup-map-exception:" + ex.GetType().Name + ":" + ex.Message);
         }
     }
+
+    /// <summary>
+    /// Reproduces only the packaged UI's GetBuffTargetCount projection.  Native code proves that
+    /// this count is multiplied by MNetherCodes.power for display; it does not prove that every
+    /// counted member satisfies the ability's runtime Target/Situations trigger.  The capture is
+    /// optional and is accepted only while the exact popup owner remains unchanged before and
+    /// after every native call.
+    /// </summary>
+    private bool TryGetNativeCodeDisplayCoverage(
+        PopupRegistration expected,
+        long codeId,
+        out int coverage
+    )
+    {
+        coverage = 0;
+        Project.Nether.NetherPartyModel? partyModel;
+        lock (_gate)
+        {
+            if (!IsSameCurrentCodeOfferRegistration(expected)
+                || !TryReadMember(expected.Controller, "_partyModel", out object? rawPartyModel)
+                || rawPartyModel is not Project.Nether.NetherPartyModel mappedPartyModel)
+            {
+                return false;
+            }
+            partyModel = mappedPartyModel;
+        }
+
+        try
+        {
+            var characters = partyModel.GetValidCharacterModels();
+            Project.Nether.NetherCodeModel? codeModel =
+                Project.Nether.NetherCodeModel.CreateModel(codeId);
+            if (characters == null || codeModel == null)
+                return false;
+
+            int mappedCoverage = Project.Nether.NetherAbyssCodePowerCalculator.GetBuffTargetCount(
+                codeModel,
+                characters
+            );
+            if (mappedCoverage < 0)
+                return false;
+
+            lock (_gate)
+            {
+                if (!IsSameCurrentCodeOfferRegistration(expected))
+                    return false;
+            }
+            coverage = mappedCoverage;
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Requires the bridge lock; compares the complete immutable popup owner identity.</summary>
+    private bool IsSameCurrentCodeOfferRegistration(PopupRegistration expected) =>
+        _codeSelectPopup is PopupRegistration current
+        && current.IsLive
+        && ReferenceEquals(current.Controller, expected.Controller)
+        && ReferenceEquals(current.Popup, expected.Popup)
+        && current.RuntimeGeneration == expected.RuntimeGeneration
+        && current.OwnerAction == expected.OwnerAction
+        && current.OwnerGeneration == expected.OwnerGeneration
+        && current.Sequence == expected.Sequence
+        && IsCurrentFloorOwnedPopup(current);
 
     private static NetherRuntimePopupResult TryMapCodeSelectPopup(PopupRegistration registration)
     {
@@ -1638,10 +1810,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             modelReadable,
             rawModel != null
         );
-        return readiness.IsReady
-            ? NetherRuntimePopupResult.Success(
-                new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.CodeOffer }
-            )
+        NetherRuntimePopupContext context = new() { Kind = NetherRuntimePopupKind.CodeOffer };
+        if (readiness.IsReady)
+            return NetherRuntimePopupResult.Success(context);
+        return readiness.IsPending
+            ? NetherRuntimePopupResult.Pending(context, readiness.Detail)
             : NetherRuntimePopupResult.Failure(readiness.Detail);
     }
 
@@ -1700,21 +1873,46 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         PopupRegistration? registration;
         long generation;
+        long runtimeGeneration;
+        long observedSequence;
         lock (_gate)
         {
             registration = _codeSelectPopup;
             generation = _battleResultCodeGeneration;
+            runtimeGeneration = _runtimeGeneration;
+            observedSequence = _battleResultCodeObservedSequence;
         }
-        if (registration is not PopupRegistration candidate
-            || !candidate.IsLive
-            || generation <= 0
-            || candidate.OwnerAction != NetherActionKind.BattleSettlement
-            || candidate.OwnerGeneration != generation)
+        PopupRegistration candidate = registration.GetValueOrDefault();
+        NetherOwnedCodePopupRegistrationDecision readiness =
+            NetherOwnedCodePopupRegistrationReadiness.Evaluate(
+                "battle-result-code",
+                runtimeGeneration,
+                NetherActionKind.BattleSettlement,
+                generation,
+                observedSequence,
+                registration.HasValue,
+                candidate.IsLive,
+                candidate.RuntimeGeneration,
+                candidate.OwnerAction,
+                candidate.OwnerGeneration,
+                candidate.Sequence
+            );
+        if (readiness.IsAwaiting)
         {
-            return NetherRuntimePopupResult.Failure(
-                "missing-live-battle-result-code-popup:generation=" + generation
+            return NetherRuntimePopupResult.Pending(
+                new NetherRuntimePopupContext
+                {
+                    Kind = NetherRuntimePopupKind.CodeOffer,
+                    RuntimeGeneration = runtimeGeneration,
+                    OwnerAction = NetherActionKind.BattleSettlement,
+                    OwnerGeneration = generation,
+                    Sequence = 0,
+                },
+                readiness.Detail
             );
         }
+        if (!readiness.IsReady)
+            return NetherRuntimePopupResult.Failure(readiness.Detail);
         return TryMapPopupRegistration(candidate);
     }
 
@@ -1804,21 +2002,46 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         PopupRegistration? registration;
         long generation;
+        long runtimeGeneration;
+        long observedSequence;
         lock (_gate)
         {
             registration = _codeSelectPopup;
             generation = _startStatusCodeGeneration;
+            runtimeGeneration = _runtimeGeneration;
+            observedSequence = _recoveredCodeObservedSequence;
         }
-        if (registration is not PopupRegistration candidate
-            || !candidate.IsLive
-            || generation <= 0
-            || candidate.OwnerAction != NetherActionKind.RecoveredCodeOffer
-            || candidate.OwnerGeneration != generation)
+        PopupRegistration candidate = registration.GetValueOrDefault();
+        NetherOwnedCodePopupRegistrationDecision readiness =
+            NetherOwnedCodePopupRegistrationReadiness.Evaluate(
+                "recovered-code",
+                runtimeGeneration,
+                NetherActionKind.RecoveredCodeOffer,
+                generation,
+                observedSequence,
+                registration.HasValue,
+                candidate.IsLive,
+                candidate.RuntimeGeneration,
+                candidate.OwnerAction,
+                candidate.OwnerGeneration,
+                candidate.Sequence
+            );
+        if (readiness.IsAwaiting)
         {
-            return NetherRuntimePopupResult.Failure(
-                "missing-live-recovered-code-popup:generation=" + generation
+            return NetherRuntimePopupResult.Pending(
+                new NetherRuntimePopupContext
+                {
+                    Kind = NetherRuntimePopupKind.CodeOffer,
+                    RuntimeGeneration = runtimeGeneration,
+                    OwnerAction = NetherActionKind.RecoveredCodeOffer,
+                    OwnerGeneration = generation,
+                    Sequence = 0,
+                },
+                readiness.Detail
             );
         }
+        if (!readiness.IsReady)
+            return NetherRuntimePopupResult.Failure(readiness.Detail);
         return TryMapPopupRegistration(candidate);
     }
 
@@ -1927,7 +2150,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
 
             registration = _continuePopup;
-            if (registration is not PopupRegistration candidate || !candidate.IsLive)
+            if (registration is not PopupRegistration candidate
+                || !candidate.IsLive
+                || candidate.RuntimeGeneration <= 0
+                || candidate.RuntimeGeneration != _runtimeGeneration)
             {
                 return NetherRecoveredCheckpointObservation.Waiting(
                     "existing-checkpoint-continue-popup-not-yet-registered"
@@ -1992,6 +2218,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 || parent.State != NetherStartStatusParentState.Pending
                 || _continuePopup is not PopupRegistration registration
                 || !registration.IsLive
+                || registration.RuntimeGeneration <= 0
+                || registration.RuntimeGeneration != _runtimeGeneration
                 || registration.OwnerAction != NetherActionKind.None
                 || registration.OwnerGeneration != 0)
             {
@@ -2916,15 +3144,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             NetherSnapshot snapshot = ready.Snapshot!;
             NetherRuntimePopupResult popup = snapshot.Status == NetherSessionStatus.Wait
                 ? TryGetActivePopup()
-                : new NetherRuntimePopupResult(null, string.Empty);
-            if (!NetherBattleResultReboundReadiness.IsModalReady(
-                    snapshot.Status,
-                    popup.IsSuccess
-                ))
+                : NetherRuntimePopupResult.Failure("popup-not-required");
+            if (snapshot.Status == NetherSessionStatus.Wait && popup.IsPending)
             {
                 const string waitBoundary = "battle-result-rebound-modal";
                 string waitDetail = popup.Detail;
-                NetherNativeActionResult wait = _battleResultSnapshotWait.AwaitRegistration(
+                NetherNativeActionResult wait = _battleResultPopupReadiness.Await(
+                    NetherPopupReadinessIdentity.From(popup.Popup!),
                     waitBoundary
                 );
                 if (wait.Kind == NetherNativeActionResultKind.Started)
@@ -2942,7 +3168,20 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 );
             }
 
+            if (snapshot.Status == NetherSessionStatus.Wait && !popup.IsSuccess)
+            {
+                _battleResultPopupReadiness.Clear();
+                _battleResultContinuation.Reset();
+                return new(
+                    NetherBattleResultContinuationStepKind.BindingUnavailable,
+                    "battle-result-rebound-modal:" + popup.Detail
+                );
+            }
+
+            _battleResultPopupReadiness.ObserveReady();
+
             _battleResultSnapshotWait.Clear();
+            _battleResultPopupReadiness.Clear();
             _battleResultContinuation.Reset();
             return step with { Snapshot = snapshot };
         }
@@ -2958,8 +3197,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _sceneEnteredRuntimeGeneration = 0;
             _startStatusParentCapture.Clear();
             _startStatusCodeGeneration = 0;
+            _recoveredCodeObservedSequence = 0;
             _battleResultViewController = null;
             _battleResultCodeGeneration = 0;
+            _battleResultCodeObservedSequence = 0;
             _battleResultCharactersRequired = false;
             _floorParentAction = null;
             _floorParentGeneration = 0;
@@ -2977,6 +3218,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _shopConfirmParentSequence = 0;
             _codeSelectPopup = null;
             _codeListPopup = null;
+            _codeReplacementConfirmPopup = null;
+            _codeReplacementCompletePopup = null;
             _codeTransformConfirmPopup = null;
             _codeTransformCompletePopup = null;
             _returnPopup = null;
@@ -2992,6 +3235,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _resultScene.Reset();
             _battleResultContinuation.Reset();
             _battleResultSnapshotWait.Clear();
+            _battleResultPopupReadiness.Clear();
             _battleActive = false;
             _battleClearObserved = false;
             _battleCloseObserved = false;
@@ -3038,9 +3282,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             replaced = !ReferenceEquals(_floorSelectionController, controller);
             if (replaced)
             {
+                _battleResultPopupReadiness.Clear();
                 if (_battleResultCodeGeneration > 0)
                     ClearBattleResultCodeOwnerCore();
                 ClearRecoveredCodeOfferCore();
+                ClearRuntimePopupRegistrationsForControllerReplacementCore();
                 _runtimeGeneration = checked(_runtimeGeneration + 1);
                 _sceneObservedRuntimeGeneration = 0;
                 _sceneEnteredRuntimeGeneration = 0;
@@ -3093,6 +3339,38 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
     }
 
+    /// <summary>
+    /// A popup/controller registration is valid only for the floor runtime generation that
+    /// created it.  Preserve independent Continue/Result parent-task evidence, but discard every
+    /// visual callback and child task before advancing to a replacement FloorSelection owner.
+    /// </summary>
+    private void ClearRuntimePopupRegistrationsForControllerReplacementCore()
+    {
+        _popupOwnership.Clear();
+        _eventPopup = null;
+        _recoverPopup = null;
+        _treasurePopup = null;
+        _shopPopup = null;
+        _shopConfirmPopup = null;
+        _shopConfirmParentSequence = 0;
+        _codeSelectPopup = null;
+        _codeListPopup = null;
+        _codeReplacementConfirmPopup = null;
+        _codeReplacementCompletePopup = null;
+        _codeTransformConfirmPopup = null;
+        _codeTransformCompletePopup = null;
+        _returnPopup = null;
+        _continuePopup = null;
+        _boostPopup = null;
+        _floorEventHintPopup = null;
+        _returnScrollController = null;
+        _nativeActionTask = null;
+        ResetOwnedPopupStages();
+        ClearCodeKeepCancelFlow();
+        ClearCodeSelectionFlow();
+        ClearCodeTransformFlow();
+    }
+
     private void UnregisterFloorSelectionCore(object controller)
     {
         if (controller == null)
@@ -3116,6 +3394,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 // only floor-owned callbacks/tasks and retain Result evidence for the global
                 // scene coordinator to poll.
                 _floorSelectionController = null;
+                _battleResultPopupReadiness.Clear();
                 _sceneObservedRuntimeGeneration = 0;
                 _sceneEnteredRuntimeGeneration = 0;
                 ClearRecoveredCodeOfferCore();
@@ -3140,6 +3419,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _shopConfirmParentSequence = 0;
                 _codeSelectPopup = null;
                 _codeListPopup = null;
+                _codeReplacementConfirmPopup = null;
+                _codeReplacementCompletePopup = null;
+                _codeTransformConfirmPopup = null;
+                _codeTransformCompletePopup = null;
                 _floorEventHintPopup = null;
                 ClearCodeSelectionFlow();
                 if (_pendingCheckpointAction == null)
@@ -3209,6 +3492,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherActionKind ownerAction;
         long ownerGeneration;
         long sequence;
+        long runtimeGeneration;
         bool recognized = true;
         bool recoveredTaskBound = false;
         bool contentConfirmBound = false;
@@ -3222,6 +3506,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             ownerAction = NetherActionKind.None;
             ownerGeneration = 0;
             sequence = checked(++_popupSequence);
+            runtimeGeneration = _runtimeGeneration;
             if (isCodeReceivedPopup
                 && _codeReceivedConfirmLease.TryGetOwner(
                     out NetherActionKind codeOwnerAction,
@@ -3258,6 +3543,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 if (expectedStage
                     && _codeListPopup is PopupRegistration replacementList
                     && replacementList.IsLive
+                    && replacementList.RuntimeGeneration == _runtimeGeneration
                     && TryReadCodeListPopupType(replacementList.Controller, out int replacementPopupType)
                     && replacementPopupType == 2
                     && IsCodeOwnerCurrent(
@@ -3344,6 +3630,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 {
                     if (_startStatusCodeGeneration <= 0)
                     {
+                        _recoveredCodeObservedSequence = 0;
                         _startStatusCodeGeneration = _popupOwnership.BeginOwner(
                             NetherActionKind.RecoveredCodeOffer
                         );
@@ -3376,7 +3663,16 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ownerAction = checkpointAction.Kind;
                 ownerGeneration = _checkpointOwnerGeneration;
             }
-            PopupRegistration registration = new(controller, popup, close, sequence, ownerAction, ownerGeneration, IsLive: true);
+            PopupRegistration registration = new(
+                controller,
+                popup,
+                close,
+                sequence,
+                ownerAction,
+                ownerGeneration,
+                runtimeGeneration,
+                IsLive: true
+            );
             switch (typeName)
             {
                 case EventPopupControllerTypeName:
@@ -3395,6 +3691,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     _shopConfirmPopup = registration;
                     _shopConfirmParentSequence = _shopPopup is PopupRegistration shop
                         && shop.IsLive
+                        && shop.RuntimeGeneration == _runtimeGeneration
                         && shop.OwnerAction == ownerAction
                         && shop.OwnerGeneration == ownerGeneration
                             ? shop.Sequence
@@ -3402,6 +3699,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     break;
                 case CodeSelectPopupControllerTypeName:
                     _codeSelectPopup = registration;
+                    if (ownerAction == NetherActionKind.BattleSettlement)
+                        _battleResultCodeObservedSequence = sequence;
+                    else if (ownerAction == NetherActionKind.RecoveredCodeOffer)
+                        _recoveredCodeObservedSequence = sequence;
                     break;
                 case CodeReceivedPopupControllerTypeName:
                     // This popup can only be opened from the retained confirmation UniTask.
@@ -3450,6 +3751,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     codeReplacementConfirmBound =
                         _codeListPopup is PopupRegistration currentReplacementList
                         && currentReplacementList.IsLive
+                        && currentReplacementList.RuntimeGeneration == _runtimeGeneration
                         && currentReplacementList.OwnerAction == ownerAction
                         && currentReplacementList.OwnerGeneration == ownerGeneration
                         && sequence > currentReplacementList.Sequence
@@ -3465,6 +3767,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     if (ownerAction != NetherActionKind.None
                         && _codeListPopup is PopupRegistration completeReplacementList
                         && completeReplacementList.IsLive
+                        && completeReplacementList.RuntimeGeneration == _runtimeGeneration
                         && completeReplacementList.OwnerAction == ownerAction
                         && completeReplacementList.OwnerGeneration == ownerGeneration
                         && sequence > completeReplacementList.Sequence
@@ -3547,6 +3850,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("sequence", sequence.ToString()),
             new("owner", ownerAction.ToString()),
             new("ownerGeneration", ownerGeneration.ToString()),
+            new("runtimeGeneration", runtimeGeneration.ToString()),
             new("recoveredTaskBound", recoveredTaskBound.ToString()),
             new("contentConfirmBound", contentConfirmBound.ToString()),
             new("hintConfirmBound", hintConfirmBound.ToString()),
@@ -3623,6 +3927,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             })
         {
             if (candidate is { IsLive: true }
+                && candidate.Value.RuntimeGeneration == _runtimeGeneration
+                && _runtimeGeneration > 0
                 && candidate.Value.Sequence == ownership.Sequence
                 && candidate.Value.OwnerAction == ownership.OwnerAction
                 && candidate.Value.OwnerGeneration == ownership.Generation
@@ -3636,7 +3942,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private bool IsCurrentFloorOwnedPopup(PopupRegistration? registration)
     {
-        if (registration is not PopupRegistration candidate || !candidate.IsLive)
+        if (registration is not PopupRegistration candidate
+            || !candidate.IsLive
+            || candidate.RuntimeGeneration <= 0
+            || candidate.RuntimeGeneration != _runtimeGeneration)
             return false;
         return candidate.OwnerAction switch
         {
@@ -3661,11 +3970,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         CheckpointControllerRegistration registration,
         NetherCheckpointPopupKind kind
     ) => registration.IsLive
+        && registration.RuntimeGeneration > 0
+        && registration.RuntimeGeneration == _runtimeGeneration
         && registration.OwnerAction == _pendingCheckpointAction?.Kind
         && registration.OwnerGeneration == _checkpointOwnerGeneration
         && registration.Sequence > _checkpointMinimumSequence
         && _returnPopup is PopupRegistration returnPopup
         && returnPopup.IsLive
+        && returnPopup.RuntimeGeneration == _runtimeGeneration
         && ReferenceEquals(registration.ParentPopup, returnPopup.Popup)
         && kind == NetherCheckpointPopupKind.ReturnScroll;
 
@@ -3681,6 +3993,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _shopConfirmParentSequence = 0;
         ClearFloorPopup(ref _codeSelectPopup, generation);
         ClearFloorPopup(ref _codeListPopup, generation);
+        ClearFloorPopup(ref _codeReplacementConfirmPopup, generation);
+        ClearFloorPopup(ref _codeReplacementCompletePopup, generation);
         ClearFloorPopup(ref _codeTransformConfirmPopup, generation);
         ClearFloorPopup(ref _codeTransformCompletePopup, generation);
         ClearFloorPopup(ref _floorEventHintPopup, generation);
@@ -3691,6 +4005,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _floorEventHintConfirmLease.Reset();
         ResetOwnedPopupStages();
         ClearCodeKeepCancelFlow();
+        ClearCodeSelectionFlow();
         ClearCodeTransformFlow();
     }
 
@@ -3701,12 +4016,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _popupOwnership.InvalidateOwner(NetherActionKind.BattleSettlement, generation);
         ClearBattleResultPopup(ref _codeSelectPopup, generation);
         ClearBattleResultPopup(ref _codeListPopup, generation);
+        ClearBattleResultPopup(ref _codeReplacementConfirmPopup, generation);
+        ClearBattleResultPopup(ref _codeReplacementCompletePopup, generation);
         ClearBattleResultPopup(ref _codeTransformConfirmPopup, generation);
+        ClearBattleResultPopup(ref _codeTransformCompletePopup, generation);
         _battleResultViewController = null;
         _battleResultCodeGeneration = 0;
+        _battleResultCodeObservedSequence = 0;
+        _battleResultPopupReadiness.Clear();
         ResetOwnedPopupStages();
         ClearCodeSelectionFlow();
         ClearCodeKeepCancelFlow();
+        ClearCodeTransformFlow();
         _battleResultCodeDiagnosticGate.Reset();
     }
 
@@ -3717,14 +4038,19 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _popupOwnership.InvalidateOwner(NetherActionKind.RecoveredCodeOffer, generation);
         ClearRecoveredCodePopup(ref _codeSelectPopup, generation);
         ClearRecoveredCodePopup(ref _codeListPopup, generation);
+        ClearRecoveredCodePopup(ref _codeReplacementConfirmPopup, generation);
+        ClearRecoveredCodePopup(ref _codeReplacementCompletePopup, generation);
         ClearRecoveredCodePopup(ref _codeTransformConfirmPopup, generation);
+        ClearRecoveredCodePopup(ref _codeTransformCompletePopup, generation);
         if (_checkpointStartStatusParentSource != CheckpointStartStatusParentSource.Recovered)
             _startStatusParentCapture.Clear();
         _startStatusCodeGeneration = 0;
+        _recoveredCodeObservedSequence = 0;
         _recoveredCheckpointHandoffPrepared = false;
         ResetOwnedPopupStages();
         ClearCodeSelectionFlow();
         ClearCodeKeepCancelFlow();
+        ClearCodeTransformFlow();
         _recoveredCodeDiagnosticGate.Reset();
     }
 
@@ -3775,6 +4101,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             // OnThumbnailClicked postfix must not replace it with a newer uncorrelated entry.
             if (_returnScrollController is CheckpointControllerRegistration existing
                 && existing.IsLive
+                && existing.RuntimeGeneration == _runtimeGeneration
                 && existing.ParentPopup != null
                 && ReferenceEquals(existing.Controller, controller))
             {
@@ -3794,6 +4121,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 sequence,
                 ownerAction,
                 ownerGeneration,
+                _runtimeGeneration,
                 IsLive: true,
                 ParentPopup: null
             );
@@ -3813,6 +4141,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     )
     {
         if (!registration.IsLive
+            || registration.RuntimeGeneration <= 0
+            || registration.RuntimeGeneration != _runtimeGeneration
             || registration.OwnerAction != _pendingCheckpointAction?.Kind
             || registration.OwnerGeneration != _checkpointOwnerGeneration
             || registration.Sequence <= _checkpointMinimumSequence)
@@ -3827,6 +4157,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         if (_returnScrollController is CheckpointControllerRegistration existing
             && existing.IsLive
+            && existing.RuntimeGeneration == registration.RuntimeGeneration
             && ReferenceEquals(existing.ParentPopup, registration.Popup)
             && existing.OwnerAction == registration.OwnerAction
             && existing.OwnerGeneration == registration.OwnerGeneration
@@ -3847,6 +4178,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 registration.Sequence,
                 registration.OwnerAction,
                 registration.OwnerGeneration,
+                registration.RuntimeGeneration,
                 IsLive: true,
                 ParentPopup: registration.Popup
             );
@@ -4041,6 +4373,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             {
                 ClearBattleResultCodeOwnerCore();
                 _battleResultViewController = controller;
+                _battleResultCodeObservedSequence = 0;
                 _battleResultCodeGeneration = _popupOwnership.BeginOwner(
                     NetherActionKind.BattleSettlement
                 );
@@ -4051,6 +4384,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             codeGeneration = _battleResultCodeGeneration;
             _battleResultContinuation.Observe(controller, initializeTask, baseline);
             _battleResultSnapshotWait.Clear();
+            _battleResultPopupReadiness.Clear();
         }
         NetherAutoClimbController.LogDiagnostic(
             "runtime-lifecycle",
@@ -4582,6 +4916,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         if (_codeSelectPopup is not PopupRegistration existing
             || !existing.IsLive
+            || existing.RuntimeGeneration <= 0
+            || existing.RuntimeGeneration != _runtimeGeneration
             || existing.OwnerAction != NetherActionKind.None
             || !_startStatusParentCapture.HasCandidateFor(_floorSelectionController)
             || !_startStatusParentCapture.TryAttachPopup(_floorSelectionController!))
@@ -4591,6 +4927,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         if (_startStatusCodeGeneration <= 0)
         {
+            _recoveredCodeObservedSequence = 0;
             _startStatusCodeGeneration = _popupOwnership.BeginOwner(
                 NetherActionKind.RecoveredCodeOffer
             );
@@ -4614,6 +4951,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             OwnerGeneration = ownership.Generation,
         };
         _popupSequence = Math.Max(_popupSequence, ownership.Sequence);
+        _recoveredCodeObservedSequence = ownership.Sequence;
         return true;
     }
 
@@ -4662,6 +5000,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 }
                 else if (_codeListPopup is not PopupRegistration registration
                     || !registration.IsLive
+                    || registration.RuntimeGeneration <= 0
+                    || registration.RuntimeGeneration != _runtimeGeneration
                     || !ReferenceEquals(registration.Controller, controller)
                     || registration.OwnerAction != owner.OwnerAction
                     || registration.OwnerGeneration != owner.Generation
@@ -4918,7 +5258,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         if (action.CodeId <= 0)
             return NetherNativeActionResult.Rejected("invalid-code-id");
-        if (action.ReplaceCodeId < 0 || action.ReplaceCodeId == action.CodeId)
+        if (action.ReplaceCodeId < 0)
             return NetherNativeActionResult.Rejected("invalid-code-replacement");
         PopupRegistration? registration;
         lock (_gate)
@@ -5124,6 +5464,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         if (_codeListPopup is not PopupRegistration replacementList
             || !replacementList.IsLive
+            || replacementList.RuntimeGeneration != _runtimeGeneration
             || !IsCodeOwnerCurrent(
                 replacementList.OwnerAction,
                 replacementList.OwnerGeneration
@@ -5155,6 +5496,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
 
         if (!confirmation.Value.IsLive
+            || confirmation.Value.RuntimeGeneration != _runtimeGeneration
             || confirmation.Value.OwnerAction != replacementList.OwnerAction
             || confirmation.Value.OwnerGeneration != replacementList.OwnerGeneration
             || !_codeSelectionFlow.CanConfirmReplacement(confirmation.Value.Sequence))
@@ -5238,6 +5580,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         if (_codeListPopup is not PopupRegistration replacementList
             || !replacementList.IsLive
+            || replacementList.RuntimeGeneration != _runtimeGeneration
             || !TryReadCodeListPopupType(replacementList.Controller, out int popupType)
             || popupType != 2
             || !IsCodeOwnerCurrent(
@@ -5271,6 +5614,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
 
         if (!complete.Value.IsLive
+            || complete.Value.RuntimeGeneration != _runtimeGeneration
             || complete.Value.OwnerAction != replacementList.OwnerAction
             || complete.Value.OwnerGeneration != replacementList.OwnerGeneration
             || !_codeSelectionFlow.CanDismissReplacementComplete(complete.Value.Sequence))
@@ -5721,6 +6065,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             registration = _codeListPopup;
         if (registration is not PopupRegistration list
             || !list.IsLive
+            || list.RuntimeGeneration != _runtimeGeneration
             || list.OwnerAction != owner.OwnerAction
             || list.OwnerGeneration != owner.Generation
             || list.Sequence != owner.Sequence
@@ -5930,6 +6275,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         PopupRegistration registration,
         NetherCodeTransformOwner owner
     ) => registration.IsLive
+        && registration.RuntimeGeneration > 0
+        && registration.RuntimeGeneration == _runtimeGeneration
         && registration.OwnerAction == owner.OwnerAction
         && registration.OwnerGeneration == owner.Generation
         && registration.Sequence > owner.Sequence
@@ -6015,6 +6362,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 && _continuePopup is PopupRegistration existingContinue)
             {
                 if (!existingContinue.IsLive
+                    || existingContinue.RuntimeGeneration <= 0
+                    || existingContinue.RuntimeGeneration != _runtimeGeneration
                     || existingContinue.OwnerAction != NetherActionKind.None
                     || existingContinue.OwnerGeneration != 0
                     || _floorSelectionController == null
@@ -6433,6 +6782,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 current.OwnerGeneration,
                 current.Sequence,
                 current.IsLive
+                    && current.RuntimeGeneration > 0
+                    && current.RuntimeGeneration == _runtimeGeneration
             )
             : null;
         return _checkpointPopupWait.WaitFor(kind, observation);
@@ -6448,6 +6799,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 current.OwnerGeneration,
                 current.Sequence,
                 current.IsLive
+                    && current.RuntimeGeneration > 0
+                    && current.RuntimeGeneration == _runtimeGeneration
             )
             : null;
         return _checkpointPopupWait.WaitFor(NetherCheckpointPopupKind.ReturnScroll, observation);
@@ -6471,6 +6824,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private bool IsCurrentCheckpointPopup(PopupRegistration registration, NetherCheckpointPopupKind kind) =>
         registration.IsLive
+        && registration.RuntimeGeneration > 0
+        && registration.RuntimeGeneration == _runtimeGeneration
         && registration.OwnerAction == _pendingCheckpointAction?.Kind
         && registration.OwnerGeneration == _checkpointOwnerGeneration
         && registration.Sequence > _checkpointMinimumSequence
@@ -7230,8 +7585,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 master.id,
                 master.category,
                 master.effect_type,
-                code.Amount,
-                master.rarity
+                master.effect_parameter_1,
+                master.effect_parameter_2,
+                master.effect_parameter_3,
+                master.rarity,
+                master.power,
+                code.Amount
             ));
         }
         codes = mapped;
@@ -7591,16 +7950,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         });
     }
 
-    private static int LevelFromMaster(MNetherCodes row)
-    {
-        // Erosion code parameters are represented in the current master as a positive value.
-        // Ability assets are deliberately not coerced into a level until their effect mapping
-        // has been proven; callers will see IsKnown=false for those rows.
-        if (row.effect_parameter_1 is > 0 and <= int.MaxValue)
-            return checked((int)row.effect_parameter_1);
-        return 1;
-    }
-
     private void LogCodeMasterSemanticAudit(IEnumerable<MNetherCodes> rows, bool detailedLogging)
     {
         if (!detailedLogging)
@@ -7608,10 +7957,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         try
         {
             Project.NetherCodeAbilityAssetDataStore? abilityStore = Engine.Get<Project.NetherCodeAbilityAssetDataStore>();
+            Project.AbilityAssetDataStore? commonAbilityStore = Engine.Get<Project.AbilityAssetDataStore>();
             NetherCodeMasterAudit[] audits = rows
                 .OrderBy(row => row.id)
                 .Take(NetherCodeDiagnosticAudit.MaximumEntries)
-                .Select(row => CreateCodeMasterAudit(row, abilityStore))
+                .Select(row => CreateCodeMasterAudit(row, abilityStore, commonAbilityStore))
                 .ToArray();
             string? audit = NetherCodeDiagnosticAudit.Format(detailedLogging, audits);
             if (audit != null
@@ -7630,24 +7980,45 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private static NetherCodeMasterAudit CreateCodeMasterAudit(
         MNetherCodes row,
-        Project.NetherCodeAbilityAssetDataStore? abilityStore
+        Project.NetherCodeAbilityAssetDataStore? abilityStore,
+        Project.AbilityAssetDataStore? commonAbilityStore
     )
     {
         long abilityId = 0;
         string effectLevelType = "unavailable";
         string scopeType = "unavailable";
         string targetType = "unavailable";
+        string situationTypes = "unavailable";
         string abilityEffectType = "unavailable";
         try
         {
-            Project.IAbilityEffectData? ability = abilityStore?.GetAbilityEffectAsset(row.id);
+            Project.IAbilityEffectData? ability = row.effect_type switch
+            {
+                (int)NetherCodeMasterEffectType.NetherAbility =>
+                    abilityStore?.GetAbilityEffectAsset(row.effect_parameter_1),
+                (int)NetherCodeMasterEffectType.CommonAbility =>
+                    commonAbilityStore?.GetAbilityEffectAsset(row.effect_parameter_1),
+                _ => null,
+            };
             if (ability != null)
             {
                 abilityId = ability.ID;
                 effectLevelType = ability.EffectLevelType.ToString();
                 scopeType = RuntimeTypeIdentifier(ability.Scope);
                 targetType = RuntimeTypeIdentifier(ability.Target);
-                abilityEffectType = RuntimeTypeIdentifier(ability.GetAbilityEffect(LevelFromMaster(row), 0));
+                situationTypes = string.Join(
+                    "|",
+                    Enumerate(ability.Situations)
+                        .Take(8)
+                        .Select(RuntimeTypeIdentifier)
+                );
+                if (string.IsNullOrEmpty(situationTypes))
+                    situationTypes = "none";
+                abilityEffectType = row.effect_parameter_2 is > 0 and <= int.MaxValue
+                    ? RuntimeTypeIdentifier(
+                        ability.GetAbilityEffect(checked((int)row.effect_parameter_2), 0)
+                    )
+                    : "invalid-ability-level";
             }
         }
         catch (Exception ex)
@@ -7669,6 +8040,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             effectLevelType,
             scopeType,
             targetType,
+            situationTypes,
             abilityEffectType
         );
     }
@@ -7702,14 +8074,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         )
     );
 
-    private static string CreateCodeHash(IEnumerable<NetherCodeState> codes) => string.Join(
-        ";",
-        codes.OrderBy(code => code.CodeId).Select(code =>
-            code.CodeId.ToString(CultureInfo.InvariantCulture) + ":"
-            + code.Level.ToString(CultureInfo.InvariantCulture) + ":"
-            + ((int)code.EffectKind).ToString(CultureInfo.InvariantCulture)
-        )
-    );
+    private static string CreateCodeHash(IEnumerable<NetherCodeState> codes) =>
+        NetherCodeIdentity.CreatePortfolio(codes);
 
     private static string CreateMapHash(IEnumerable<NetherFloorNode> floors) => string.Join(
         ";",
@@ -8154,6 +8520,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         long Sequence,
         NetherActionKind OwnerAction,
         long OwnerGeneration,
+        long RuntimeGeneration,
         bool IsLive
     );
 
@@ -8162,6 +8529,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         long Sequence,
         NetherActionKind OwnerAction,
         long OwnerGeneration,
+        long RuntimeGeneration,
         bool IsLive,
         object? ParentPopup
     );

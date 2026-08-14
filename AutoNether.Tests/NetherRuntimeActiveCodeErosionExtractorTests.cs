@@ -14,16 +14,16 @@ public class NetherRuntimeActiveCodeErosionExtractorTests
             new[] { new FakePossessionCode(40024, 3), new FakePossessionCode(30024, 2) },
             new[]
             {
-                new FakeMasterCode(30024, 6, 4, 0, 0),
-                new FakeMasterCode(40024, 9, 7, 0, 0),
+                new FakeMasterCode(30024, 1, 4, 0, 0),
+                new FakeMasterCode(40024, 2, 7, 0, 0),
             }
         );
 
         Assert.True(projection.ErosionProjectionKnown);
         Assert.Equal(new long[] { 30024, 40024 }, projection.SortedCodeIds);
-        Assert.Equal(2, projection.ErosionEffects.Count);
-        Assert.Equal(NetherCodeEffectKind.ErosionAdditionUp, projection.ErosionEffects[0].EffectKind);
-        Assert.Equal(NetherCodeEffectKind.ErosionRateDown, projection.ErosionEffects[1].EffectKind);
+        Assert.Empty(projection.ErosionEffects);
+        Assert.Equal(4, projection.Entries[0].EffectParameter1);
+        Assert.Equal(7, projection.Entries[1].EffectParameter1);
     }
 
     [Fact]
@@ -62,10 +62,9 @@ public class NetherRuntimeActiveCodeErosionExtractorTests
             activeNetherId: 1
         );
 
-        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
-        NetherCodeEffect effect = Assert.Single(projection.ErosionEffects);
-        Assert.Equal(NetherCodeEffectKind.ErosionAdditionDown, effect.EffectKind);
-        Assert.Equal(5, effect.Amount);
+        Assert.False(projection.ErosionProjectionKnown);
+        Assert.Empty(projection.ErosionEffects);
+        Assert.Contains("service-authoritative-nether-code-erosion-effect:type=7", projection.Detail);
     }
 
     private sealed class FakePossessionCode

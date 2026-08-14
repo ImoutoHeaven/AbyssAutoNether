@@ -38,13 +38,14 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     }
 
     [Fact]
-    public void Authoritative_candidates_block_next_until_result_popup_registers()
+    public void Result_owner_blocks_next_while_its_popup_registration_is_pending()
     {
         var driver = new Driver
         {
             Snapshot = Snapshot(),
             Candidates = Candidates(30024),
-            Popup = null,
+            Popup = ResultPopup() with { Sequence = 0 },
+            PopupIsPending = true,
         };
         var flow = new NetherBattleResultCodeCoordinator(maximumPopupPolls: 2);
 
@@ -55,6 +56,7 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         Assert.Empty(driver.InvokedActions);
 
         driver.Popup = ResultPopup();
+        driver.PopupIsPending = false;
         Assert.Equal(
             NetherBattleResultCodeStepKind.AwaitingNative,
             flow.Pump(driver, Settings(), null, allowInvoke: true).Kind
@@ -67,8 +69,14 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     {
         var driver = new Driver
         {
-            Snapshot = Snapshot() with { CodeReloadCount = 2 },
-            Candidates = Candidates(40024),
+            Snapshot = Snapshot() with
+            {
+                CodeReloadCount = 2,
+                CodeCapacity = 1,
+                Codes = new[] { RushState(51000, power: 100) },
+                CodeHash = "codes:rush-51000",
+            },
+            Candidates = Candidates(52001, NetherCodeCategory.Impact),
             Popup = ResultPopup(),
         };
         var flow = new NetherBattleResultCodeCoordinator(maximumPopupPolls: 2);
@@ -86,7 +94,7 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         );
 
         driver.Snapshot = driver.Snapshot with { CodeReloadCount = 1 };
-        driver.Candidates = Candidates(30024);
+        driver.Candidates = Candidates(52002, NetherCodeCategory.Rush, power: 200);
         driver.Popup = ResultPopup() with { DecisionEpoch = 1 };
         Assert.Equal(
             NetherBattleResultCodeStepKind.AwaitingNative,
@@ -138,6 +146,7 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     private static NetherRuntimePopupContext ResultPopup() => new()
     {
         Kind = NetherRuntimePopupKind.CodeOffer,
+        RuntimeGeneration = 3,
         OwnerAction = NetherActionKind.BattleSettlement,
         OwnerGeneration = 9,
         Sequence = 12,
@@ -163,28 +172,40 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         MapHash = "map",
     };
 
-    private static NetherRuntimeCodeCandidatesResult Candidates(long codeId) => new(
+    private static NetherRuntimeCodeCandidatesResult Candidates(
+        long codeId,
+        NetherCodeCategory category = NetherCodeCategory.Safe,
+        int power = 0
+    ) => new(
         new[]
         {
-            codeId == 30024
-                ? NetherCodeRuntimeSemanticMapper.MapCandidate(
-                    codeId,
-                    (int)NetherCodeCategory.ErosionResistance,
-                    effectType: 1,
-                    level: 1,
-                    rarity: 1
-                )
-                : NetherCodeRuntimeSemanticMapper.MapCandidate(
-                    codeId,
-                    (int)NetherCodeCategory.ErosionEnhancement,
-                    effectType: 1,
-                    level: 1,
-                    rarity: 1
-                ),
+            NetherCodeRuntimeSemanticMapper.MapCandidate(
+                codeId,
+                (int)category,
+                effectType: 1,
+                effectParameter1: 100006,
+                effectParameter2: 1,
+                effectParameter3: 0,
+                rarity: 1,
+                power: power
+            ) with { PartyCoverageKnown = true, PartyCoverage = 1 },
         },
         IsMasterComplete: true,
         Detail: string.Empty
     );
+
+    private static NetherCodeState RushState(long codeId, int power) =>
+        NetherCodeRuntimeSemanticMapper.MapState(
+            codeId,
+            (int)NetherCodeCategory.Rush,
+            effectType: 1,
+            effectParameter1: 100006,
+            effectParameter2: 1,
+            effectParameter3: 0,
+            rarity: 1,
+            power: power,
+            possessionAmount: 1
+        ) with { PartyCoverageKnown = true, PartyCoverage = 1 };
 
     private static NetherAutoClimbSettings Settings() => new()
     {
@@ -197,6 +218,7 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         public NetherSnapshot Snapshot { get; set; } = Snapshot();
         public NetherRuntimeCodeCandidatesResult Candidates { get; set; } = Candidates(30024);
         public NetherRuntimePopupContext? Popup { get; set; }
+        public bool PopupIsPending { get; set; }
         public List<NetherPlannedAction> InvokedActions { get; } = new();
         public Queue<NetherBattleResultCodeNativeStep> NativeSteps { get; } = new();
 
@@ -206,8 +228,10 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         public NetherRuntimeCodeCandidatesResult TryGetCodeCandidates() => Candidates;
 
         public NetherRuntimePopupResult TryGetBattleResultCodePopup() => Popup == null
-            ? NetherRuntimePopupResult.Failure("popup-not-yet-registered")
-            : NetherRuntimePopupResult.Success(Popup);
+            ? NetherRuntimePopupResult.Failure("popup-registration-missing")
+            : PopupIsPending
+                ? NetherRuntimePopupResult.Pending(Popup, "code-offer-model-not-ready")
+                : NetherRuntimePopupResult.Success(Popup);
 
         public NetherNativeActionResult InvokeBattleResultCode(
             NetherRuntimePopupContext popup,

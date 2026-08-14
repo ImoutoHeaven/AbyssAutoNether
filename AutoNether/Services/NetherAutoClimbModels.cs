@@ -288,22 +288,39 @@ internal enum NetherEffectKind
 internal enum NetherCodeEffectKind
 {
     Unknown = 0,
-    Safe = 1,
-    Risk = 2,
-    Rush = 3,
-    Impact = 4,
-    ErosionAdditionUp = 5,
-    ErosionAdditionDown = 6,
-    ErosionRateUp = 7,
-    ErosionRateDown = 8,
-    ResearchOnly = 9,
-    /// <summary>
-    /// A category-confirmed ordinary tactic code.  The packaged category proves it is
-    /// selectable, but does not prove a Rush/Impact, party-coverage, or research semantic.
-    /// It therefore participates as a deterministic general candidate rather than being
-    /// guessed into either combat lane.
-    /// </summary>
-    General = 10,
+    ErosionAdditionUp = 1,
+    ErosionAdditionDown = 2,
+    ErosionRateUp = 3,
+    ErosionRateDown = 4,
+}
+
+/// <summary>
+/// The four displayed Abyss-code families.  These come from MNetherCodes.category and are a
+/// separate axis from MNetherCodes.effect_type; a Risk-family card can still carry an ordinary
+/// ability or a direct erosion modifier.
+/// </summary>
+internal enum NetherCodeFamily
+{
+    Unknown = 0,
+    Rush = 1,
+    Impact = 2,
+    Safe = 3,
+    Risk = 4,
+}
+
+/// <summary>
+/// Exact public Project.NetherCodeEffectType values observed in the current client.  Unknown raw
+/// values remain preserved in the state object but are never assigned invented semantics.
+/// </summary>
+internal enum NetherCodeMasterEffectType
+{
+    Unknown = 0,
+    NetherAbility = 1,
+    CommonAbility = 2,
+    ErosionAdditionUp = 6,
+    ErosionAdditionDown = 7,
+    ErosionRateUp = 8,
+    ErosionRateDown = 9,
 }
 
 /// <summary>
@@ -312,10 +329,18 @@ internal enum NetherCodeEffectKind
 internal enum NetherCodeCategory
 {
     Unknown = 0,
-    Technique = 1,
-    Strength = 2,
-    ErosionResistance = 3,
-    ErosionEnhancement = 4,
+    // Native enum member: Technique.  NetherText maps it to ラッシュコード系統.
+    Rush = 1,
+    Technique = Rush,
+    // Native enum member: Strength.  NetherText maps it to インパクトコード系統.
+    Impact = 2,
+    Strength = Impact,
+    // Native enum member: ErosionResistance.
+    Safe = 3,
+    ErosionResistance = Safe,
+    // Native enum member: ErosionEnhancement.
+    Risk = 4,
+    ErosionEnhancement = Risk,
 }
 
 /// <summary>Exact Project.NetherCodeCategoryGroupType values, kept local to the policy seam.</summary>
@@ -401,20 +426,33 @@ internal readonly record struct NetherCharacterState(
     bool IsActive = true
 );
 
-internal sealed record NetherCodeState(long CodeId, NetherCodeEffectKind EffectKind, int Level)
+internal sealed record NetherCodeState(long CodeId, NetherCodeFamily Family, int AbilityLevel)
 {
     public bool IsKnown { get; init; } = true;
+    /// <summary>
+    /// False when category/master identity is authoritative but this plugin has not decoded the
+    /// native effect shape.  Category policy may still count the card; effect-specific policy may
+    /// not infer a trigger, target, erosion delta, or ability value from it.
+    /// </summary>
+    public bool EffectSemanticsKnown { get; init; } = true;
     public NetherCodeCategory Category { get; init; }
     public int Rarity { get; init; }
+    /// <summary>Static MNetherCodes.power.  It is display/reference power, not proven party DPS.</summary>
+    public int Power { get; init; }
+    public NetherCodeMasterEffectType MasterEffectType { get; init; }
+    public long EffectParameter1 { get; init; }
+    public long EffectParameter2 { get; init; }
+    public long EffectParameter3 { get; init; }
+    /// <summary>p1 for effect types 1/2; zero for non-ability effects.</summary>
+    public long AbilityAssetId { get; init; }
+    /// <summary>Server possession amount. Native category counters deliberately ignore it.</summary>
+    public int PossessionAmount { get; init; } = 1;
     /// <summary>
     /// A numeric zero is not evidence that no party member benefits.  Runtime mapping keeps
     /// this false until an exact ability/party authority proves the value.
     /// </summary>
     public bool PartyCoverageKnown { get; init; }
     public int PartyCoverage { get; init; }
-    /// <summary>False is a value only when <see cref="IsResearchOnlyKnown"/> is true.</summary>
-    public bool IsResearchOnlyKnown { get; init; }
-    public bool IsResearchOnly { get; init; }
 }
 
 internal sealed record NetherEffect(NetherEffectKind Kind, int Amount)

@@ -136,7 +136,7 @@ public class NetherAutoClimbControllerEndToEndTests
         {
             Codes = new[]
             {
-                new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1)
+                new NetherCodeState(30024, NetherCodeFamily.Safe, 1)
                 {
                     Category = NetherCodeCategory.ErosionResistance,
                     Rarity = 1,
@@ -322,7 +322,7 @@ public class NetherAutoClimbControllerEndToEndTests
         {
             Codes = new[]
             {
-                new NetherCodeState(30024, NetherCodeEffectKind.Safe, 1)
+                new NetherCodeState(30024, NetherCodeFamily.Safe, 1)
                 {
                     Category = NetherCodeCategory.ErosionResistance,
                     Rarity = 1,
@@ -1383,8 +1383,11 @@ public class NetherAutoClimbControllerEndToEndTests
                     codeId: 51001,
                     rawCategory: (int)NetherCodeCategory.Technique,
                     effectType: 1,
-                    level: 2,
-                    rarity: 3
+                    effectParameter1: 100006,
+                    effectParameter2: 2,
+                    effectParameter3: 0,
+                    rarity: 3,
+                    power: 0
                 ),
             },
             IsMasterComplete: true,
@@ -1410,15 +1413,16 @@ public class NetherAutoClimbControllerEndToEndTests
                 && message.Contains("decision=Select")
                 && message.Contains("selectedCodeId=51001")
                 && message.Contains("lane=Auto"));
-            Assert.Contains(Logger.Messages, message =>
+            string candidateAudit = Logger.Messages.Single(message =>
                 message.Contains("audit=interactive")
-                && message.Contains("key=code-candidate:direct:51001:")
-                && message.Contains("category=Technique")
-                && message.Contains("effect=General")
-                && message.Contains("rarity=3")
-                && message.Contains("level=2")
-                && message.Contains("coverageKnown=False")
-                && message.Contains("researchKnown=False"));
+                && message.Contains("key=code-candidate:direct:51001:"));
+            Assert.Contains("category=Rush", candidateAudit);
+            Assert.Contains("family=Rush", candidateAudit);
+            Assert.Contains("rarity=3", candidateAudit);
+            Assert.Contains("effectType=NetherAbility", candidateAudit);
+            Assert.Contains("abilityAssetId=100006", candidateAudit);
+            Assert.Contains("abilityLevel=2", candidateAudit);
+            Assert.Contains("coverageKnown=False", candidateAudit);
         }
         finally
         {
@@ -1503,8 +1507,12 @@ public class NetherAutoClimbControllerEndToEndTests
                     codeId: 30024,
                     rawCategory: (int)NetherCodeCategory.ErosionResistance,
                     effectType: 1,
-                    level: 1,
-                    rarity: 1
+                    effectParameter1: 100006,
+                    effectParameter2: 1,
+                    effectParameter3: 0,
+                    rarity: 1,
+                    power: 0,
+                    possessionAmount: 1
                 ),
             },
             CodeHash = "code:30024",
@@ -1538,8 +1546,11 @@ public class NetherAutoClimbControllerEndToEndTests
                         codeId: 30024,
                         rawCategory: (int)NetherCodeCategory.ErosionResistance,
                         effectType: 1,
-                        level: 1,
-                        rarity: 1
+                        effectParameter1: 100006,
+                        effectParameter2: 1,
+                        effectParameter3: 0,
+                        rarity: 1,
+                        power: 0
                     ),
                 },
                 IsMasterComplete: true,
@@ -1589,6 +1600,213 @@ public class NetherAutoClimbControllerEndToEndTests
             Assert.Equal(1, bridge.GetOnlyBeginCount);
             Assert.Equal(1, bridge.GetOnlyPollCount);
             Assert.Equal(2, bridge.OwnedPopupInvokeCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_controller_waits_for_registered_code_offer_native_model_before_selecting()
+    {
+        var bridge = new ScriptedRuntimeBridge();
+        bridge.CurrentSnapshot = bridge.WaitForInteractivePopup;
+        bridge.ActivePopupResultOverride = NetherRuntimePopupResult.Pending(
+            PendingActiveCodeOffer(sequence: 1617),
+            "code-offer-model-not-ready"
+        );
+        bridge.CodeCandidates = FamilyCodeCandidates(51001, NetherCodeCategory.Rush);
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Empty(bridge.Invocations);
+
+            bridge.ActivePopupResultOverride = null;
+            bridge.ActivePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+            };
+            NetherAutoClimbController.Update();
+
+            Assert.NotEqual(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Equal(new[] { NetherActionKind.SelectCode }, bridge.Invocations);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_controller_does_not_route_behind_registered_code_offer_whose_model_is_pending()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            ActivePopupResultOverride = NetherRuntimePopupResult.Pending(
+                PendingActiveCodeOffer(sequence: 1660),
+                "code-offer-model-not-ready"
+            ),
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Empty(bridge.Invocations);
+
+            bridge.ActivePopupResultOverride = NetherRuntimePopupResult.Failure("missing-active-native-popup");
+            NetherAutoClimbController.Update();
+
+            Assert.NotEqual(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Equal(new[] { NetherActionKind.SelectFloor }, bridge.Invocations);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_controller_pauses_when_registered_code_offer_native_model_never_becomes_ready()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = new ScriptedRuntimeBridge().WaitForInteractivePopup,
+            ActivePopupResultOverride = NetherRuntimePopupResult.Pending(
+                PendingActiveCodeOffer(sequence: 1700),
+                "code-offer-model-not-ready"
+            ),
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            Pump(601);
+
+            Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.BindingUnavailable, NetherAutoClimbController.PauseReason);
+            Assert.Contains(
+                "active-code-popup-readiness-timeout",
+                NetherAutoClimbController.PauseDetail
+            );
+            Assert.Empty(bridge.Invocations);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Pending_active_popup_budget_is_cleared_when_f12_is_turned_off()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = new ScriptedRuntimeBridge().WaitForInteractivePopup,
+            ActivePopupResultOverride = NetherRuntimePopupResult.Pending(
+                PendingActiveCodeOffer(sequence: 1733),
+                "code-offer-model-not-ready"
+            ),
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            Pump(599);
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+
+            NetherAutoClimbController.Toggle();
+            Assert.False(NetherAutoClimbController.IsEnabled);
+            NetherAutoClimbController.Toggle();
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Pump(3);
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Empty(bridge.Invocations);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Pending_active_popup_budget_is_cleared_when_floor_scene_owner_terminates()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = new ScriptedRuntimeBridge().WaitForInteractivePopup,
+            ActivePopupResultOverride = NetherRuntimePopupResult.Pending(
+                PendingActiveCodeOffer(sequence: 1734),
+                "code-offer-model-not-ready"
+            ),
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            Pump(599);
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+
+            bridge.HasRegisteredFloorSelection = false;
+            NetherAutoClimbController.OnNetherFloorSelectionTerminated();
+            bridge.HasRegisteredFloorSelection = true;
+            Pump(3);
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Empty(bridge.Invocations);
         }
         finally
         {
@@ -2101,22 +2319,34 @@ public class NetherAutoClimbControllerEndToEndTests
             40024,
             (int)NetherCodeCategory.ErosionEnhancement,
             effectType: 1,
-            level: 1,
-            rarity: 1
+            effectParameter1: 100006,
+            effectParameter2: 1,
+            effectParameter3: 0,
+            rarity: 1,
+            power: 0,
+            possessionAmount: 1
         );
         NetherCodeState transformed = NetherCodeRuntimeSemanticMapper.MapState(
             51001,
             (int)NetherCodeCategory.Technique,
             effectType: 1,
-            level: 2,
-            rarity: 2
+            effectParameter1: 100006,
+            effectParameter2: 2,
+            effectParameter3: 0,
+            rarity: 2,
+            power: 0,
+            possessionAmount: 1
         );
         NetherCodeState selected = NetherCodeRuntimeSemanticMapper.MapState(
             30024,
             (int)NetherCodeCategory.ErosionResistance,
             effectType: 1,
-            level: 1,
-            rarity: 1
+            effectParameter1: 100006,
+            effectParameter2: 1,
+            effectParameter3: 0,
+            rarity: 1,
+            power: 0,
+            possessionAmount: 1
         );
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(
             NetherSessionStatus.Play,
@@ -2277,8 +2507,12 @@ public class NetherAutoClimbControllerEndToEndTests
             40024,
             (int)NetherCodeCategory.ErosionEnhancement,
             effectType: 1,
-            level: 1,
-            rarity: 1
+            effectParameter1: 100006,
+            effectParameter2: 1,
+            effectParameter3: 0,
+            rarity: 1,
+            power: 0,
+            possessionAmount: 1
         );
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(
             NetherSessionStatus.Play,
@@ -2359,32 +2593,36 @@ public class NetherAutoClimbControllerEndToEndTests
     [Fact]
     public void Production_controller_rerolls_same_live_code_offer_then_redispatches_once_before_parent_get()
     {
+        NetherCodeState currentRush = RushCodeState(51000, power: 100);
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10)
-            with { CodeReloadCount = 2, CodeCapacity = 3, CodeHash = "codes:before-reload" };
+            with
+            {
+                CodeReloadCount = 2,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot popupWait = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Wait, floorId: 2, gold: 10)
-            with { CodeReloadCount = 2, CodeCapacity = 3, CodeHash = "codes:before-reload" };
+            with
+            {
+                CodeReloadCount = 2,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot afterReload = popupWait with
         {
             CodeReloadCount = 1,
-            CodeHash = "codes:after-reload-offer",
+            CodeHash = "codes:rush-51000",
             MapHash = "code-reload-wait",
         };
         NetherSnapshot afterSelect = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 2, gold: 10)
             with
             {
                 CodeReloadCount = 1,
-                CodeCapacity = 3,
-                CodeHash = "codes:30024",
-                Codes = new[]
-                {
-                    NetherCodeRuntimeSemanticMapper.MapState(
-                        codeId: 30024,
-                        rawCategory: (int)NetherCodeCategory.ErosionResistance,
-                        effectType: 1,
-                        level: 1,
-                        rarity: 1
-                    ),
-                },
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-52002",
+                Codes = new[] { RushCodeState(52002, power: 200) },
             };
         var bridge = new ScriptedRuntimeBridge
         {
@@ -2399,33 +2637,11 @@ public class NetherAutoClimbControllerEndToEndTests
                 OwnerGeneration = 1,
                 Sequence = 1,
             },
-            CodeCandidates = new NetherRuntimeCodeCandidatesResult(
-                new[]
-                {
-                    NetherCodeRuntimeSemanticMapper.MapCandidate(
-                        codeId: 40024,
-                        rawCategory: (int)NetherCodeCategory.ErosionEnhancement,
-                        effectType: 1,
-                        level: 1,
-                        rarity: 1
-                    ),
-                },
-                IsMasterComplete: true,
-                Detail: string.Empty
-            ),
-            ReloadCodeCandidates = new NetherRuntimeCodeCandidatesResult(
-                new[]
-                {
-                    NetherCodeRuntimeSemanticMapper.MapCandidate(
-                        codeId: 30024,
-                        rawCategory: (int)NetherCodeCategory.ErosionResistance,
-                        effectType: 1,
-                        level: 1,
-                        rarity: 1
-                    ),
-                },
-                IsMasterComplete: true,
-                Detail: string.Empty
+            CodeCandidates = FamilyCodeCandidates(52001, NetherCodeCategory.Impact),
+            ReloadCodeCandidates = FamilyCodeCandidates(
+                52002,
+                NetherCodeCategory.Rush,
+                power: 200
             ),
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
             InteractivePreEntryFactory = (snapshot, settings) => ScriptedRuntimeBridge.InteractivePreEntry(snapshot, settings),
@@ -2496,12 +2712,31 @@ public class NetherAutoClimbControllerEndToEndTests
     [Fact]
     public void Production_controller_keeps_an_owned_offer_at_reload_reserve_only_after_cancel_task_and_parent_terminal()
     {
+        NetherCodeState currentRush = RushCodeState(51000, power: 100);
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10)
-            with { CodeReloadCount = 1, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() };
+            with
+            {
+                CodeReloadCount = 1,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot popupWait = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Wait, floorId: 2, gold: 10)
-            with { CodeReloadCount = 1, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() };
+            with
+            {
+                CodeReloadCount = 1,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot afterKeep = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 2, gold: 10)
-            with { CodeReloadCount = 1, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() };
+            with
+            {
+                CodeReloadCount = 1,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         var bridge = new ScriptedRuntimeBridge
         {
             CurrentSnapshot = routeStart,
@@ -2514,7 +2749,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 OwnerGeneration = 1,
                 Sequence = 1,
             },
-            CodeCandidates = RiskCodeCandidates(40024),
+            CodeCandidates = FamilyCodeCandidates(52001, NetherCodeCategory.Impact),
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
             InteractivePreEntryFactory = (snapshot, settings) => ScriptedRuntimeBridge.InteractivePreEntry(snapshot, settings),
             RequireExplicitFloorParentTerminal = true,
@@ -2785,8 +3020,12 @@ public class NetherAutoClimbControllerEndToEndTests
                     codeId: 30024,
                     rawCategory: (int)NetherCodeCategory.ErosionResistance,
                     effectType: 1,
-                    level: 1,
-                    rarity: 1
+                    effectParameter1: 100006,
+                    effectParameter2: 1,
+                    effectParameter3: 0,
+                    rarity: 1,
+                    power: 0,
+                    possessionAmount: 1
                 ),
             },
             CodeHash = "code:30024",
@@ -3327,32 +3566,36 @@ public class NetherAutoClimbControllerEndToEndTests
     [Fact]
     public void Production_controller_drains_owned_code_reload_after_off_without_a_second_reload()
     {
+        NetherCodeState currentRush = RushCodeState(51000, power: 100);
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10)
-            with { CodeReloadCount = 2, CodeCapacity = 3, CodeHash = "codes:before-off-reload" };
+            with
+            {
+                CodeReloadCount = 2,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot popupWait = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Wait, floorId: 2, gold: 10)
-            with { CodeReloadCount = 2, CodeCapacity = 3, CodeHash = "codes:before-off-reload" };
+            with
+            {
+                CodeReloadCount = 2,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot afterReload = popupWait with
         {
             CodeReloadCount = 1,
-            CodeHash = "codes:after-off-reload-offer",
+            CodeHash = "codes:rush-51000",
             MapHash = "code-reload-off-wait",
         };
         NetherSnapshot afterSelect = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 2, gold: 10)
             with
             {
                 CodeReloadCount = 1,
-                CodeCapacity = 3,
-                CodeHash = "codes:30024",
-                Codes = new[]
-                {
-                    NetherCodeRuntimeSemanticMapper.MapState(
-                        codeId: 30024,
-                        rawCategory: (int)NetherCodeCategory.ErosionResistance,
-                        effectType: 1,
-                        level: 1,
-                        rarity: 1
-                    ),
-                },
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-52002",
+                Codes = new[] { RushCodeState(52002, power: 200) },
             };
         var bridge = new ScriptedRuntimeBridge
         {
@@ -3367,33 +3610,11 @@ public class NetherAutoClimbControllerEndToEndTests
                 OwnerGeneration = 1,
                 Sequence = 1,
             },
-            CodeCandidates = new NetherRuntimeCodeCandidatesResult(
-                new[]
-                {
-                    NetherCodeRuntimeSemanticMapper.MapCandidate(
-                        codeId: 40024,
-                        rawCategory: (int)NetherCodeCategory.ErosionEnhancement,
-                        effectType: 1,
-                        level: 1,
-                        rarity: 1
-                    ),
-                },
-                IsMasterComplete: true,
-                Detail: string.Empty
-            ),
-            ReloadCodeCandidates = new NetherRuntimeCodeCandidatesResult(
-                new[]
-                {
-                    NetherCodeRuntimeSemanticMapper.MapCandidate(
-                        codeId: 30024,
-                        rawCategory: (int)NetherCodeCategory.ErosionResistance,
-                        effectType: 1,
-                        level: 1,
-                        rarity: 1
-                    ),
-                },
-                IsMasterComplete: true,
-                Detail: string.Empty
+            CodeCandidates = FamilyCodeCandidates(52001, NetherCodeCategory.Impact),
+            ReloadCodeCandidates = FamilyCodeCandidates(
+                52002,
+                NetherCodeCategory.Rush,
+                power: 200
             ),
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
             InteractivePreEntryFactory = (snapshot, settings) => ScriptedRuntimeBridge.InteractivePreEntry(snapshot, settings),
@@ -3598,39 +3819,43 @@ public class NetherAutoClimbControllerEndToEndTests
 
     private static ScriptedRuntimeBridge CreateTwoEpochReloadBridge(bool finalKeep = false)
     {
-        string initialCodeHash = finalKeep ? "codes:none" : "codes:reload-e0";
+        NetherCodeState currentRush = RushCodeState(51000, power: 100);
+        const string initialCodeHash = "codes:rush-51000";
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10)
-            with { CodeReloadCount = 3, CodeCapacity = 3, CodeHash = initialCodeHash };
+            with
+            {
+                CodeReloadCount = 3,
+                CodeCapacity = 1,
+                CodeHash = initialCodeHash,
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot popupWait = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Wait, floorId: 2, gold: 10)
-            with { CodeReloadCount = 3, CodeCapacity = 3, CodeHash = initialCodeHash };
+            with
+            {
+                CodeReloadCount = 3,
+                CodeCapacity = 1,
+                CodeHash = initialCodeHash,
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot afterFirstReload = popupWait with
         {
             CodeReloadCount = 2,
-            CodeHash = finalKeep ? initialCodeHash : "codes:reload-e1",
+            CodeHash = initialCodeHash,
             MapHash = "code-reload-e1-wait",
         };
         NetherSnapshot afterSecondReload = popupWait with
         {
             CodeReloadCount = 1,
-            CodeHash = finalKeep ? initialCodeHash : "codes:reload-e2",
+            CodeHash = initialCodeHash,
             MapHash = "code-reload-e2-wait",
         };
         NetherSnapshot afterSelect = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 2, gold: 10)
             with
             {
                 CodeReloadCount = 1,
-                CodeCapacity = 3,
-                CodeHash = "codes:30024",
-                Codes = new[]
-                {
-                    NetherCodeRuntimeSemanticMapper.MapState(
-                        codeId: 30024,
-                        rawCategory: (int)NetherCodeCategory.ErosionResistance,
-                        effectType: 1,
-                        level: 1,
-                        rarity: 1
-                    ),
-                },
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-52003",
+                Codes = new[] { RushCodeState(52003, power: 200) },
             };
         var bridge = new ScriptedRuntimeBridge
         {
@@ -3644,7 +3869,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 OwnerGeneration = 1,
                 Sequence = 1,
             },
-            CodeCandidates = RiskCodeCandidates(40024),
+            CodeCandidates = FamilyCodeCandidates(52001, NetherCodeCategory.Impact),
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
             InteractivePreEntryFactory = (snapshot, settings) => ScriptedRuntimeBridge.InteractivePreEntry(snapshot, settings),
             RequireExplicitFloorParentTerminal = true,
@@ -3658,28 +3883,55 @@ public class NetherAutoClimbControllerEndToEndTests
             ) with
             {
                 CodeReloadCount = 1,
-                CodeCapacity = 3,
+                CodeCapacity = 1,
                 CodeHash = initialCodeHash,
-                Codes = Array.Empty<NetherCodeState>(),
+                Codes = new[] { currentRush },
             };
         }
-        bridge.EnqueueCodeReloadRefresh(afterFirstReload, RiskCodeCandidates(40025));
-        bridge.EnqueueCodeReloadRefresh(afterSecondReload, finalKeep ? RiskCodeCandidates(40026) : SafeCodeCandidates(30024));
+        bridge.EnqueueCodeReloadRefresh(
+            afterFirstReload,
+            FamilyCodeCandidates(52002, NetherCodeCategory.Impact)
+        );
+        bridge.EnqueueCodeReloadRefresh(
+            afterSecondReload,
+            finalKeep
+                ? FamilyCodeCandidates(52004, NetherCodeCategory.Impact)
+                : FamilyCodeCandidates(52003, NetherCodeCategory.Rush, power: 200)
+        );
         return bridge;
     }
 
     private static ScriptedRuntimeBridge CreateReserveKeepBridge()
     {
+        NetherCodeState currentRush = RushCodeState(51000, power: 100);
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10)
-            with { CodeReloadCount = 1, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() };
+            with
+            {
+                CodeReloadCount = 1,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot popupWait = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Wait, floorId: 2, gold: 10)
-            with { CodeReloadCount = 1, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() };
+            with
+            {
+                CodeReloadCount = 1,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         return new ScriptedRuntimeBridge
         {
             CurrentSnapshot = routeStart,
             FloorSelectionDispatchSnapshot = popupWait,
             OwnedPopupAfterSnapshot = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 2, gold: 10)
-                with { CodeReloadCount = 1, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() },
+                with
+                {
+                    CodeReloadCount = 1,
+                    CodeCapacity = 1,
+                    CodeHash = "codes:rush-51000",
+                    Codes = new[] { currentRush },
+                },
             OwnedPopup = new NetherRuntimePopupContext
             {
                 Kind = NetherRuntimePopupKind.CodeOffer,
@@ -3687,7 +3939,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 OwnerGeneration = 1,
                 Sequence = 1,
             },
-            CodeCandidates = RiskCodeCandidates(40024),
+            CodeCandidates = FamilyCodeCandidates(52001, NetherCodeCategory.Impact),
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
             InteractivePreEntryFactory = (snapshot, settings) => ScriptedRuntimeBridge.InteractivePreEntry(snapshot, settings),
             RequireExplicitFloorParentTerminal = true,
@@ -3697,52 +3949,73 @@ public class NetherAutoClimbControllerEndToEndTests
     private static ScriptedRuntimeBridge CreateOneReloadKeepBridge()
     {
         ScriptedRuntimeBridge bridge = CreateReserveKeepBridge();
+        NetherCodeState currentRush = RushCodeState(51000, power: 100);
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10)
-            with { CodeReloadCount = 2, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() };
+            with
+            {
+                CodeReloadCount = 2,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         NetherSnapshot popupWait = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Wait, floorId: 2, gold: 10)
-            with { CodeReloadCount = 2, CodeCapacity = 3, CodeHash = "codes:none", Codes = Array.Empty<NetherCodeState>() };
+            with
+            {
+                CodeReloadCount = 2,
+                CodeCapacity = 1,
+                CodeHash = "codes:rush-51000",
+                Codes = new[] { currentRush },
+            };
         bridge.CurrentSnapshot = routeStart;
         bridge.FloorSelectionDispatchSnapshot = popupWait;
         bridge.CodeReloadAfterSnapshot = popupWait with
         {
             CodeReloadCount = 1,
-            CodeHash = "codes:none",
+            CodeHash = "codes:rush-51000",
             MapHash = "code-reload-keep-e1-wait",
         };
-        bridge.CodeCandidates = RiskCodeCandidates(40024);
-        bridge.ReloadCodeCandidates = RiskCodeCandidates(40025);
+        bridge.CodeCandidates = FamilyCodeCandidates(52001, NetherCodeCategory.Impact);
+        bridge.ReloadCodeCandidates = FamilyCodeCandidates(52002, NetherCodeCategory.Impact);
         return bridge;
     }
 
-    private static NetherRuntimeCodeCandidatesResult SafeCodeCandidates(long codeId) => new(
+    private static NetherRuntimeCodeCandidatesResult SafeCodeCandidates(long codeId) =>
+        FamilyCodeCandidates(codeId, NetherCodeCategory.Safe);
+
+    private static NetherRuntimeCodeCandidatesResult FamilyCodeCandidates(
+        long codeId,
+        NetherCodeCategory category,
+        int power = 0
+    ) => new(
         new[]
         {
             NetherCodeRuntimeSemanticMapper.MapCandidate(
                 codeId,
-                (int)NetherCodeCategory.ErosionResistance,
+                (int)category,
                 effectType: 1,
-                level: 1,
-                rarity: 1
-            ),
+                effectParameter1: 100006,
+                effectParameter2: 1,
+                effectParameter3: 0,
+                rarity: 1,
+                power: power
+            ) with { PartyCoverageKnown = true, PartyCoverage = 1 },
         },
         IsMasterComplete: true,
         Detail: string.Empty
     );
 
-    private static NetherRuntimeCodeCandidatesResult RiskCodeCandidates(long codeId) => new(
-        new[]
-        {
-            NetherCodeRuntimeSemanticMapper.MapCandidate(
-                codeId,
-                (int)NetherCodeCategory.ErosionEnhancement,
-                effectType: 1,
-                level: 1,
-                rarity: 1
-            ),
-        },
-        IsMasterComplete: true,
-        Detail: string.Empty
-    );
+    private static NetherCodeState RushCodeState(long codeId, int power) =>
+        NetherCodeRuntimeSemanticMapper.MapState(
+            codeId,
+            (int)NetherCodeCategory.Rush,
+            effectType: 1,
+            effectParameter1: 100006,
+            effectParameter2: 1,
+            effectParameter3: 0,
+            rarity: 1,
+            power: power,
+            possessionAmount: 1
+        ) with { PartyCoverageKnown = true, PartyCoverage = 1 };
 
     private static ScriptedRuntimeBridge RunOwnedFloorTransaction(
         NetherFloorNodeType kind,
@@ -3835,6 +4108,15 @@ public class NetherAutoClimbControllerEndToEndTests
         }
     }
 
+    private static NetherRuntimePopupContext PendingActiveCodeOffer(long sequence) => new()
+    {
+        Kind = NetherRuntimePopupKind.CodeOffer,
+        RuntimeGeneration = 1,
+        OwnerAction = NetherActionKind.SelectFloor,
+        OwnerGeneration = 1,
+        Sequence = sequence,
+    };
+
     private sealed class ScriptedRuntimeBridge : INetherRuntimeBridge, INetherOwnedPopupNativeStagePort
     {
         private bool _eventNativePending;
@@ -3918,6 +4200,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherRuntimePopupContext InteractivePopup { get; }
         public NetherSnapshot CurrentSnapshot { get; set; }
         public NetherRuntimePopupContext? ActivePopup { get; set; }
+        public NetherRuntimePopupResult? ActivePopupResultOverride { get; set; }
         public NetherRuntimePopupContext? OwnedPopup { get; set; }
         public NetherSnapshot? FloorSelectionDispatchSnapshot { get; set; }
         public NetherSnapshot? OwnedPopupAfterSnapshot { get; set; }
@@ -4070,7 +4353,12 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherRuntimePopupResult TryGetBattleResultCodePopup() =>
             BattleResultCodePopup == null
                 ? NetherRuntimePopupResult.Failure("scripted-result-code-popup-missing")
-                : NetherRuntimePopupResult.Success(BattleResultCodePopup);
+                : NetherRuntimePopupResult.Success(BattleResultCodePopup with
+                {
+                    RuntimeGeneration = BattleResultCodePopup.RuntimeGeneration > 0
+                        ? BattleResultCodePopup.RuntimeGeneration
+                        : CurrentRuntimeGeneration,
+                });
 
         public NetherNativeActionResult InvokeBattleResultCode(
             NetherRuntimePopupContext popup,
@@ -4093,7 +4381,12 @@ public class NetherAutoClimbControllerEndToEndTests
 
         public NetherRuntimePopupResult TryGetRecoveredCodePopup() => RecoveredCodePopup == null
             ? NetherRuntimePopupResult.Failure("scripted-recovered-code-popup-missing")
-            : NetherRuntimePopupResult.Success(RecoveredCodePopup);
+            : NetherRuntimePopupResult.Success(RecoveredCodePopup with
+            {
+                RuntimeGeneration = RecoveredCodePopup.RuntimeGeneration > 0
+                    ? RecoveredCodePopup.RuntimeGeneration
+                    : CurrentRuntimeGeneration,
+            });
 
         public NetherNativeActionResult InvokeRecoveredCode(
             NetherRuntimePopupContext popup,
@@ -4167,15 +4460,21 @@ public class NetherAutoClimbControllerEndToEndTests
             RecoveredCodeCompletedCount++;
         }
 
-        public NetherRuntimePopupResult TryGetActivePopup() => ActivePopup == null
-            ? NetherRuntimePopupResult.Failure("no-live-popup")
-            : NetherRuntimePopupResult.Success(ActivePopup);
+        public NetherRuntimePopupResult TryGetActivePopup() => ActivePopupResultOverride
+            ?? (ActivePopup == null
+                ? NetherRuntimePopupResult.Failure("missing-active-native-popup")
+                : NetherRuntimePopupResult.Success(ActivePopup));
 
         public NetherRuntimePopupResult TryGetOwnedPopup(NetherPlannedAction parent)
         {
             if (OwnedPopup != null)
             {
-                NetherRuntimePopupContext popup = OwnedPopup;
+                NetherRuntimePopupContext popup = OwnedPopup with
+                {
+                    RuntimeGeneration = OwnedPopup.RuntimeGeneration > 0
+                        ? OwnedPopup.RuntimeGeneration
+                        : CurrentRuntimeGeneration,
+                };
                 if (popup.Kind == NetherRuntimePopupKind.CodeOffer)
                 {
                     popup = popup with
@@ -4194,7 +4493,12 @@ public class NetherAutoClimbControllerEndToEndTests
             }
             return _queuedOwnedPopups.Count == 0
                 ? NetherRuntimePopupResult.Failure("missing-owned-floor-popup")
-                : NetherRuntimePopupResult.Success(_queuedOwnedPopups.Peek());
+                : NetherRuntimePopupResult.Success(_queuedOwnedPopups.Peek() with
+                {
+                    RuntimeGeneration = _queuedOwnedPopups.Peek().RuntimeGeneration > 0
+                        ? _queuedOwnedPopups.Peek().RuntimeGeneration
+                        : CurrentRuntimeGeneration,
+                });
         }
 
         public void EnqueueOwnedPopup(NetherRuntimePopupContext popup, NetherSnapshot? snapshotAfterInvoke)

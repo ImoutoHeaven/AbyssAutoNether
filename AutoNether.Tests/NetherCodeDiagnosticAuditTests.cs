@@ -10,7 +10,7 @@ public class NetherCodeDiagnosticAuditTests
     {
         string? audit = NetherCodeDiagnosticAudit.Format(
             detailedLogging: false,
-            new[] { new NetherCodeMasterAudit(10001, 1, 2, 3, 4, 5, 6, 7, "asset", 8, "level", "scope", "target", "effect") }
+            new[] { new NetherCodeMasterAudit(10001, 1, 2, 3, 4, 5, 6, 7, "asset", 8, "level", "scope", "target", "situation", "effect") }
         );
 
         Assert.Null(audit);
@@ -36,6 +36,7 @@ public class NetherCodeDiagnosticAuditTests
                 effectLevelType: "Level",
                 scopeType: "Self",
                 targetType: "Enemy",
+                situationTypes: "Battle",
                 abilityEffectType: "Damage"
             );
         }
@@ -48,6 +49,7 @@ public class NetherCodeDiagnosticAuditTests
         Assert.Contains("effectType=1", audit);
         Assert.Contains("p1=300", audit);
         Assert.Contains("abilityId=700", audit);
+        Assert.Contains("situations=Battle", audit);
         Assert.DoesNotContain("id=10008", audit);
         Assert.DoesNotContain("name=", audit);
         Assert.DoesNotContain("description=", audit);

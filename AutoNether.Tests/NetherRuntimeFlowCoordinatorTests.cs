@@ -206,16 +206,76 @@ public class NetherRuntimeFlowCoordinatorTests
         Assert.False(coordinator.HasPendingParent);
     }
 
+    [Fact]
+    public void Registered_code_offer_waits_for_its_native_model_before_polling_the_parent()
+    {
+        var driver = new FakeDriver
+        {
+            PopupFailure = "code-offer-model-not-ready",
+            PopupFailureIsPending = true,
+            // A native event parent may already look terminal while the Code Offer controller
+            // is still completing its next-frame model initialization.  Consuming it here would
+            // lose the only owner for the live popup.
+            ParentPoll = NetherNativeActionResult.Completed("premature-parent-terminal"),
+        };
+        var coordinator = new NetherRuntimeFlowCoordinator(driver);
+        var floor = new NetherPlannedAction(NetherActionKind.SelectFloor)
+        {
+            FloorId = 389,
+            FloorLevel = 83,
+        };
+
+        Assert.True(coordinator.BeginFloorParent(floor));
+        NetherRuntimeParentPollResult waiting = coordinator.Poll(
+            _ => throw new Xunit.Sdk.XunitException("uninitialized Code Offer must not dispatch")
+        );
+
+        Assert.Equal(NetherRuntimeParentPollKind.Pending, waiting.Kind);
+        Assert.True(coordinator.HasPendingParent);
+
+        driver.Popup = new NetherRuntimePopupContext
+        {
+            Kind = NetherRuntimePopupKind.CodeOffer,
+            OwnerAction = NetherActionKind.SelectFloor,
+            OwnerGeneration = coordinator.Generation,
+            Sequence = 128,
+        };
+        int dispatches = 0;
+        NetherRuntimeParentPollResult initialized = coordinator.Poll(_ =>
+        {
+            dispatches++;
+            return NetherNativeActionResult.Started("code-offer-dispatched");
+        });
+
+        Assert.Equal(NetherRuntimeParentPollKind.Pending, initialized.Kind);
+        Assert.Equal(1, dispatches);
+        Assert.True(coordinator.HasPendingParent);
+    }
+
     private sealed class FakeDriver : INetherRuntimeParentDriver
     {
         public NetherRuntimePopupContext? Popup { get; set; }
         public string PopupFailure { get; set; } = "missing-owned-floor-popup";
+        public bool PopupFailureIsPending { get; set; }
+        public NetherRuntimePopupContext PendingPopup { get; set; } = new()
+        {
+            Kind = NetherRuntimePopupKind.CodeOffer,
+            RuntimeGeneration = 1,
+            OwnerAction = NetherActionKind.SelectFloor,
+            OwnerGeneration = 1,
+            Sequence = 1,
+        };
         public NetherNativeActionResult ParentPoll { get; set; } = NetherNativeActionResult.Started("pending");
         public int DispatchCount { get; private set; }
 
         public NetherRuntimePopupResult TryGetOwnedPopup(NetherPlannedAction parent) => Popup == null
-            ? NetherRuntimePopupResult.Failure(PopupFailure)
-            : NetherRuntimePopupResult.Success(Popup);
+            ? PopupFailureIsPending
+                ? NetherRuntimePopupResult.Pending(PendingPopup, PopupFailure)
+                : NetherRuntimePopupResult.Failure(PopupFailure)
+            : NetherRuntimePopupResult.Success(Popup with
+            {
+                RuntimeGeneration = Popup.RuntimeGeneration > 0 ? Popup.RuntimeGeneration : 1,
+            });
 
         public NetherNativeActionResult PollFloorParent() => ParentPoll;
 

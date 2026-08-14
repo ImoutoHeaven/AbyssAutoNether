@@ -355,16 +355,58 @@ internal static class NetherActionReconcilePolicy
         NetherSnapshot after
     )
     {
-        if (action.CodeId <= 0 || ContainsCode(before, action.CodeId))
+        Dictionary<long, NetherCodeState>? beforeCodes = TryGetCodeMap(before);
+        Dictionary<long, NetherCodeState>? afterCodes = TryGetCodeMap(after);
+        if (beforeCodes == null
+            || afterCodes == null
+            || action.CodeId <= 0
+            || action.ReplaceCodeId > 0 && !beforeCodes.ContainsKey(action.ReplaceCodeId))
+        {
             return NetherActionOutcome.Ambiguous;
-        if (action.ReplaceCodeId > 0 && !ContainsCode(before, action.ReplaceCodeId))
-            return NetherActionOutcome.Ambiguous;
+        }
 
-        bool selected = ContainsCode(after, action.CodeId);
-        bool replacementRemoved = action.ReplaceCodeId <= 0 || !ContainsCode(after, action.ReplaceCodeId);
-        return selected && replacementRemoved
-            ? NetherActionOutcome.Applied
-            : UnchangedOrAmbiguous(before, after);
+        // Native Apply consumes the server's absolute A.amount, then removes R.id.  Without the
+        // exact NetherFixCodeResponseEntity, a selected ID that was already active (including
+        // same-ID replacement) cannot be distinguished from overwrite/no-op/remove semantics by
+        // comparing two active snapshots.  The policy does not generate this path; recovered or
+        // manual actions therefore remain fail-closed instead of assuming Amount + 1.
+        if (beforeCodes.ContainsKey(action.CodeId)
+            || action.ReplaceCodeId == action.CodeId)
+        {
+            return NetherActionOutcome.Ambiguous;
+        }
+
+        var expectedIds = new HashSet<long>(beforeCodes.Keys);
+        if (action.ReplaceCodeId > 0)
+            expectedIds.Remove(action.ReplaceCodeId);
+        expectedIds.Add(action.CodeId);
+        if (!expectedIds.SetEquals(afterCodes.Keys))
+            return UnchangedOrAmbiguous(before, after);
+
+        foreach ((long codeId, NetherCodeState codeBefore) in beforeCodes)
+        {
+            if (codeId == action.ReplaceCodeId)
+                continue;
+            if (!afterCodes.TryGetValue(codeId, out NetherCodeState? codeAfter))
+                return UnchangedOrAmbiguous(before, after);
+
+            if (!string.Equals(
+                    NetherCodeIdentity.Create(codeBefore),
+                    NetherCodeIdentity.Create(codeAfter),
+                    StringComparison.Ordinal
+                ))
+            {
+                return UnchangedOrAmbiguous(before, after);
+            }
+        }
+
+        if (!afterCodes.TryGetValue(action.CodeId, out NetherCodeState? selectedAfter)
+            || selectedAfter.PossessionAmount <= 0)
+        {
+            return UnchangedOrAmbiguous(before, after);
+        }
+
+        return NetherActionOutcome.Applied;
     }
 
     private static NetherActionOutcome EvaluateCodeReload(NetherSnapshot before, NetherSnapshot after) =>
@@ -511,12 +553,20 @@ internal static class NetherActionReconcilePolicy
         HashSet<long>? afterIds = TryGetCodeIds(after);
         if (beforeIds == null || afterIds == null
             || transformedCodeId <= 0
-            || selectedCodeId <= 0
-            || !beforeIds.Contains(transformedCodeId)
-            || beforeIds.Contains(selectedCodeId)
+            || selectedCodeId <= 0)
+        {
+            return NetherActionOutcome.Ambiguous;
+        }
+
+        // An already-active selected ID or same-ID remove needs the exact absolute-Amount fix
+        // response.  The generated policy excludes both; recovered/manual compound actions stay
+        // ambiguous instead of receiving an invented stack delta.
+        if (beforeIds.Contains(selectedCodeId) || selectedReplacementId == selectedCodeId)
+            return NetherActionOutcome.Ambiguous;
+
+        if (!beforeIds.Contains(transformedCodeId)
             || afterIds.Contains(transformedCodeId)
             || !afterIds.Contains(selectedCodeId)
-            || selectedReplacementId == selectedCodeId
             || string.Equals(before.CodeHash, after.CodeHash, StringComparison.Ordinal))
         {
             return UnchangedOrAmbiguous(before, after);
@@ -532,12 +582,21 @@ internal static class NetherActionReconcilePolicy
             return UnchangedOrAmbiguous(before, after);
         }
 
-        int expectedCount = selectedReplacementId > 0 ? beforeIds.Count : checked(beforeIds.Count + 1);
-        int expectedNewIds = selectedReplacementId > 0 && !beforeIds.Contains(selectedReplacementId) ? 1 : 2;
+        // Transform contributes one positive active ID and selection contributes another unless
+        // the chosen removal was that newly transformed ID.  This checks only unique active IDs;
+        // it makes no claim about server-owned Amount values.
+        int expectedCount = selectedReplacementId > 0
+            ? beforeIds.Count
+            : checked(beforeIds.Count + 1);
+        int expectedNewIds = selectedReplacementId > 0
+            && !beforeIds.Contains(selectedReplacementId)
+                ? 1
+                : 2;
         return afterIds.Count == expectedCount
             && afterIds.Count(id => !beforeIds.Contains(id)) == expectedNewIds
                 ? NetherActionOutcome.Applied
                 : UnchangedOrAmbiguous(before, after);
+
     }
 
     private static HashSet<long>? TryGetCodeIds(NetherSnapshot snapshot)
@@ -549,6 +608,19 @@ internal static class NetherActionReconcilePolicy
         }
         var ids = new HashSet<long>(snapshot.Codes.Select(code => code.CodeId));
         return ids.Count == snapshot.Codes.Count ? ids : null;
+    }
+
+    private static Dictionary<long, NetherCodeState>? TryGetCodeMap(NetherSnapshot snapshot)
+    {
+        if (snapshot.Codes == null)
+            return null;
+        var codes = new Dictionary<long, NetherCodeState>();
+        foreach (NetherCodeState? code in snapshot.Codes)
+        {
+            if (code == null || code.CodeId <= 0 || !codes.TryAdd(code.CodeId, code))
+                return null;
+        }
+        return codes;
     }
 
     private static NetherActionOutcome EvaluateBattleSettlement(
@@ -681,21 +753,8 @@ internal static class NetherActionReconcilePolicy
         snapshot.AcquiredItems
     );
 
-    private static string CreateCodeIdentity(NetherSnapshot snapshot) => string.Join(
-        ";",
-        snapshot.Codes
-            .Select(code => code.CodeId
-                + ":" + code.Level
-                + ":" + (int)code.EffectKind
-                + ":" + code.IsKnown
-                + ":" + (int)code.Category
-                + ":" + code.Rarity
-                + ":" + code.PartyCoverageKnown
-                + ":" + code.PartyCoverage
-                + ":" + code.IsResearchOnlyKnown
-                + ":" + code.IsResearchOnly)
-            .OrderBy(identity => identity, StringComparer.Ordinal)
-    );
+    private static string CreateCodeIdentity(NetherSnapshot snapshot) =>
+        NetherCodeIdentity.CreatePortfolio(snapshot.Codes);
 
     private static bool HasUnchangedCodePortfolio(NetherSnapshot before, NetherSnapshot after) =>
         !string.IsNullOrWhiteSpace(before.CodeHash)

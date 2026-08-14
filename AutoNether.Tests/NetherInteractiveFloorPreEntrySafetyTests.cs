@@ -164,7 +164,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             NetherFloorNodeType.Recovery,
             events: [Event(354, 700)],
             parts: [Part(700, targetType1: 7, parameter1: 0)],
-            codes: [Code(40024, NetherCodeEffectKind.Risk)]
+            codes: [Code(40024, NetherCodeFamily.Risk)]
         ));
         NetherInteractiveFloorPreEntrySafetyResult offer = Evaluate(Input(
             NetherFloorNodeType.Event,
@@ -185,18 +185,18 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
-    public void Transform_option_without_a_removable_current_code_fails_before_floor_click()
+    public void Transform_option_without_any_current_code_fails_before_floor_click()
     {
         NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
             NetherFloorNodeType.Event,
             events: [Event(100, 1001)],
             parts: [Part(1001, targetType1: 7, parameter1: 0)],
-            codes: [Code(30024, NetherCodeEffectKind.Safe)]
+            codes: []
         ));
 
         Assert.False(result.IsSafe);
-        Assert.Equal(NetherPauseReason.NoSafeRoute, result.PauseReason);
-        Assert.Contains("no-removable-code", result.Detail);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, result.PauseReason);
+        Assert.Contains("invalid-code-transform-portfolio", result.Detail);
     }
 
     [Fact]
@@ -335,17 +335,28 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     {
         CanCloseShop = canCloseShop,
         FloorExtendId = floorExtendId,
-        CurrentCodes = codes ?? [Code(40024, NetherCodeEffectKind.Risk)],
+        CurrentCodes = codes ?? [Code(40024, NetherCodeFamily.Risk)],
         CodeCapacity = 5,
     };
 
-    private static NetherCodeState Code(long id, NetherCodeEffectKind kind) => new(id, kind, 1)
+    private static NetherCodeState Code(long id, NetherCodeFamily family) => new(id, family, 1)
     {
         IsKnown = true,
-        Category = kind == NetherCodeEffectKind.Safe
-            ? NetherCodeCategory.ErosionResistance
-            : NetherCodeCategory.ErosionEnhancement,
+        Category = family switch
+        {
+            NetherCodeFamily.Rush => NetherCodeCategory.Rush,
+            NetherCodeFamily.Impact => NetherCodeCategory.Impact,
+            NetherCodeFamily.Safe => NetherCodeCategory.Safe,
+            NetherCodeFamily.Risk => NetherCodeCategory.Risk,
+            _ => NetherCodeCategory.Unknown,
+        },
         Rarity = 1,
+        Power = 0,
+        PossessionAmount = 1,
+        MasterEffectType = NetherCodeMasterEffectType.NetherAbility,
+        AbilityAssetId = 100006,
+        EffectParameter1 = 100006,
+        EffectParameter2 = 1,
     };
 
     private static NetherFloorEventMasterRow Event(long eventId, params long[] partIds) => new(

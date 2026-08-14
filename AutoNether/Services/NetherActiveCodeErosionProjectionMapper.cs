@@ -37,8 +37,8 @@ internal readonly record struct NetherCodeErosionMasterInput(
 
 /// <summary>
 /// Exact erosion-relevant fields from one <c>MNetherCodeCategorySkills</c> row.  A category
-/// effect is active only when the current portfolio contains at least <see cref="Counter"/>
-/// distinct codes in that category for the current Nether.
+/// effect is active only when native GetCategoryCount reaches <see cref="Counter"/>. That count
+/// is max(0, cards in this category - cards in its paired category).
 /// </summary>
 internal readonly record struct NetherCodeCategoryErosionMasterInput(
     long SkillId,
@@ -102,9 +102,10 @@ internal sealed record NetherActiveCodeErosionProjection
 
 /// <summary>
 /// Builds a fail-closed erosion projection from live possession codes, their exact master rows,
-/// and every category-skill threshold for the current Nether. Effect types 1/2/12 are confirmed
-/// non-erosion inputs: they stay in the fingerprint but produce no modifier. Types 6–9 map
-/// directly to the existing <see cref="NetherCodeEffect"/> model. No code ID, including 30024 or
+/// and every category-skill threshold for the current Nether. Effect types 1/2 are confirmed
+/// non-erosion inputs and stay in the fingerprint. Types 6–9 expose only enum identity in the
+/// current client; their p1/p2/p3 amount/sign/unit contract is not consumed by client code, so
+/// any active instance makes arithmetic projection unavailable. No code ID, including 30024 or
 /// 40024, has a special erosion meaning here.
 /// </summary>
 internal sealed class NetherActiveCodeErosionProjectionMapper
@@ -183,7 +184,10 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
             NetherCodeErosionMasterInput master = matches[0];
             if (!master.HasRequiredFields || master.CodeId != possession.CodeId)
                 return Unknown("invalid-m-nether-code:" + possession.CodeId);
-            if (includeCategorySkills && (master.NetherId != activeNetherId || master.Category <= 0))
+            if (includeCategorySkills
+                && (master.NetherId != activeNetherId
+                    || !Enum.IsDefined(typeof(NetherCodeCategory), master.Category)
+                    || master.Category == (int)NetherCodeCategory.Unknown))
                 return Unknown("invalid-m-nether-code-category:" + possession.CodeId);
 
             entries.Add(new NetherActiveCodeErosionEntry(
@@ -201,11 +205,10 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
 
             switch (master.EffectType)
             {
-                // Confirmed ordinary/party effects and category research-point rewards: their
-                // raw values remain in the entry/hash, but they do not alter battle erosion.
+                // Confirmed ordinary/party ability effects retain their raw values in the
+                // entry/hash, but do not alter battle erosion.
                 case 1:
                 case 2:
-                case 12:
                     break;
                 case 6:
                 case 7:
@@ -231,8 +234,8 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
         var categoryEntries = new List<NetherActiveCodeCategoryErosionEntry>();
         if (includeCategorySkills)
         {
-            Dictionary<int, int> categoryCounts = entries
-                .GroupBy(entry => entry.Category)
+            Dictionary<NetherCodeCategory, int> categoryCounts = entries
+                .GroupBy(entry => (NetherCodeCategory)entry.Category)
                 .ToDictionary(group => group.Key, group => group.Count());
             var skillIds = new HashSet<long>();
             foreach (NetherCodeCategoryErosionMasterInput skill in categorySkills!
@@ -242,14 +245,19 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
                 if (!skill.HasRequiredFields
                     || skill.SkillId <= 0
                     || skill.Counter <= 0
-                    || skill.Category <= 0
+                    || !Enum.IsDefined(typeof(NetherCodeCategory), skill.Category)
+                    || skill.Category == (int)NetherCodeCategory.Unknown
                     || !skillIds.Add(skill.SkillId))
                 {
                     return Unknown("invalid-or-duplicate-m-nether-code-category-skill:" + skill.SkillId);
                 }
 
-                bool isActive = categoryCounts.TryGetValue(skill.Category, out int count)
-                    && count >= skill.Counter;
+                NetherCodeCategory category = (NetherCodeCategory)skill.Category;
+                NetherCodeCategory paired = NetherCodeCategorySemantics.GetPairedCategory(category);
+                categoryCounts.TryGetValue(category, out int ownCount);
+                categoryCounts.TryGetValue(paired, out int pairedCount);
+                int effectiveCount = Math.Max(0, ownCount - pairedCount);
+                bool isActive = effectiveCount >= skill.Counter;
                 categoryEntries.Add(new NetherActiveCodeCategoryErosionEntry(
                     skill.SkillId,
                     skill.NetherId,
@@ -269,7 +277,6 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
                     // Current category combat abilities use type 1 and do not alter erosion.
                     case 1:
                     case 2:
-                    case 12:
                         break;
                     case 6:
                     case 7:
@@ -311,45 +318,19 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
     )
     {
         effect = default;
-        error = string.Empty;
-        if (effectParameter1 is <= 0 or > int.MaxValue)
-        {
-            error = "invalid-nether-code-effect-parameter-1";
-            return false;
-        }
-        // Parameters two and three cannot be projected by NetherErosionPolicy's single amount
-        // contract.  Treating them as zero would change a native effect, so only the explicitly
-        // unparameterized shape is currently safe.
-        if (effectParameter2 != 0 || effectParameter3 != 0)
-        {
-            error = "unprojectable-nether-code-effect-parameter-2-or-3";
-            return false;
-        }
-
-        NetherCodeEffectKind kind = effectType switch
-        {
-            6 => NetherCodeEffectKind.ErosionAdditionUp,
-            7 => NetherCodeEffectKind.ErosionAdditionDown,
-            8 => NetherCodeEffectKind.ErosionRateUp,
-            9 => NetherCodeEffectKind.ErosionRateDown,
-            _ => NetherCodeEffectKind.Unknown,
-        };
-        if (kind == NetherCodeEffectKind.Unknown)
-        {
-            error = "unknown-nether-code-effect-type";
-            return false;
-        }
-
-        effect = new NetherCodeEffect(
-            sourceId,
-            kind,
-            checked((int)effectParameter1)
-        )
-        {
-            IsKnown = true,
-            OrderKnown = true,
-        };
-        return true;
+        error = effectType is >= 6 and <= 9
+            ? "service-authoritative-nether-code-erosion-effect:type="
+                + effectType
+                + ":source="
+                + sourceId
+                + ":p1="
+                + effectParameter1
+                + ":p2="
+                + effectParameter2
+                + ":p3="
+                + effectParameter3
+            : "unknown-nether-code-effect-type:" + effectType;
+        return false;
     }
 
     private static NetherActiveCodeErosionProjection Known(

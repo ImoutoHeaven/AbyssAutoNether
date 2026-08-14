@@ -109,7 +109,7 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
             floor: new FloorFixture { MNetherMapFloorId = 900, ExtendId = 36, FloorType = (int)NetherFloorNodeType.Event },
             events: new object[] { Event(36, 900, 1, 1, 20043) },
             parts: new object[] { Part(20043, target1: 7, parameter1: 0) },
-            codes: [new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1)]
+            codes: [new NetherCodeState(40024, NetherCodeFamily.Risk, 1)]
         );
 
         Assert.True(result.IsCaptured);
@@ -173,7 +173,7 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
         CanCloseShop: canCloseShop
     )
     {
-        CurrentCodes = codes ?? [new NetherCodeState(40024, NetherCodeEffectKind.Risk, 1)],
+        CurrentCodes = codes ?? [new NetherCodeState(40024, NetherCodeFamily.Risk, 1)],
         CodeCapacity = 5,
     });
 

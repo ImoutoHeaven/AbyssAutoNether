@@ -676,17 +676,8 @@ internal sealed class NetherRecoveredCodeOfferCoordinator
         && string.Equals(before.CodeHash, after.CodeHash, StringComparison.Ordinal)
         && string.Equals(CreateCodeIdentity(before), CreateCodeIdentity(after), StringComparison.Ordinal);
 
-    private static string CreateCodeIdentity(NetherSnapshot snapshot) => string.Join(
-        ";",
-        snapshot.Codes
-            .Select(code => code.CodeId
-                + ":" + code.Level
-                + ":" + (int)code.EffectKind
-                + ":" + code.IsKnown
-                + ":" + (int)code.Category
-                + ":" + code.Rarity)
-            .OrderBy(identity => identity, StringComparer.Ordinal)
-    );
+    private static string CreateCodeIdentity(NetherSnapshot snapshot) =>
+        NetherCodeIdentity.CreatePortfolio(snapshot.Codes);
 
     private static string FormatCodeIds(NetherSnapshot? snapshot)
     {

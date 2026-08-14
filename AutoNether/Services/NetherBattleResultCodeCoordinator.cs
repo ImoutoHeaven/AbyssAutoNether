@@ -77,7 +77,7 @@ internal readonly record struct NetherBattleResultCodeStep(
 internal sealed class NetherBattleResultCodeCoordinator
 {
     private readonly NetherCodePolicy _policy = new();
-    private readonly NetherNativeWaitGate _popupWait;
+    private readonly NetherPopupReadinessGate _popupWait;
     private readonly NetherActionKind _expectedOwnerAction;
     private bool _nativeInFlight;
     private bool _completed;
@@ -95,7 +95,7 @@ internal sealed class NetherBattleResultCodeCoordinator
         {
             throw new ArgumentOutOfRangeException(nameof(expectedOwnerAction));
         }
-        _popupWait = new NetherNativeWaitGate(maximumPopupPolls);
+        _popupWait = new NetherPopupReadinessGate(maximumPopupPolls);
         _expectedOwnerAction = expectedOwnerAction;
     }
 
@@ -205,9 +205,22 @@ internal sealed class NetherBattleResultCodeCoordinator
         }
 
         NetherRuntimePopupResult popupResult = driver.TryGetBattleResultCodePopup();
-        if (!popupResult.IsSuccess)
+        if (popupResult.IsPending)
         {
-            NetherNativeActionResult wait = _popupWait.AwaitRegistration("battle-result-code-popup");
+            NetherRuntimePopupContext pendingPopup = popupResult.Popup!;
+            if (!IsExpectedPopupOwner(pendingPopup, allowAwaitingRegistration: true))
+            {
+                return Terminate(
+                    NetherBattleResultCodeStepKind.BindingUnavailable,
+                    "battle-result-code-pending-popup-owner-mismatch:"
+                        + pendingPopup.OwnerAction + ":" + pendingPopup.OwnerGeneration + ":"
+                        + pendingPopup.Sequence
+                );
+            }
+            NetherNativeActionResult wait = _popupWait.Await(
+                NetherPopupReadinessIdentity.From(pendingPopup),
+                "battle-result-code-popup"
+            );
             return wait.Kind == NetherNativeActionResultKind.Started
                 ? new(
                     NetherBattleResultCodeStepKind.AwaitingPopup,
@@ -219,12 +232,16 @@ internal sealed class NetherBattleResultCodeCoordinator
                     popupResult.Detail + ":" + wait.Detail
                 );
         }
+        if (!popupResult.IsSuccess)
+        {
+            return Terminate(
+                NetherBattleResultCodeStepKind.BindingUnavailable,
+                popupResult.Detail
+            );
+        }
 
         NetherRuntimePopupContext popup = popupResult.Popup!;
-        if (popup.Kind != NetherRuntimePopupKind.CodeOffer
-            || popup.OwnerAction != _expectedOwnerAction
-            || popup.OwnerGeneration <= 0
-            || popup.Sequence <= 0)
+        if (!IsExpectedPopupOwner(popup, allowAwaitingRegistration: false))
         {
             return Terminate(
                 NetherBattleResultCodeStepKind.BindingUnavailable,
@@ -232,7 +249,27 @@ internal sealed class NetherBattleResultCodeCoordinator
                     + popup.OwnerAction + ":" + popup.OwnerGeneration + ":" + popup.Sequence
             );
         }
-        _popupWait.Clear();
+        _popupWait.ObserveReady();
+
+        // The controller registers before its async model/party fields are authoritative. Capture
+        // the offer again only after readiness so policy sees the same live popup generation and
+        // may use its exact native UI Scope coverage. A changed/vanished offer is not equivalent
+        // to the initial no-offer branch above.
+        candidates = driver.TryGetCodeCandidates();
+        if (!candidates.IsSuccess)
+        {
+            return Terminate(
+                NetherBattleResultCodeStepKind.BindingUnavailable,
+                "battle-result-code-candidates-after-popup-ready:" + candidates.Detail
+            );
+        }
+        if (candidates.Candidates.Count == 0)
+        {
+            return Terminate(
+                NetherBattleResultCodeStepKind.BindingUnavailable,
+                "battle-result-code-offer-changed-after-popup-ready"
+            );
+        }
 
         NetherRuntimeSnapshotResult snapshotResult = driver.TryCaptureBattleResultCodeSnapshot();
         if (!snapshotResult.IsSuccess)
@@ -246,7 +283,10 @@ internal sealed class NetherBattleResultCodeCoordinator
         NetherCodeDecision decision = _policy.Decide(
             new NetherCodePortfolio
             {
-                CurrentCodes = snapshot.Codes,
+                CurrentCodes = NetherCodePartyCoverageProjection.Apply(
+                    snapshot.Codes,
+                    candidates.CurrentPartyCoverage
+                ),
                 Capacity = snapshot.CodeCapacity,
                 ReloadCount = snapshot.CodeReloadCount,
                 IsMasterComplete = candidates.IsMasterComplete,
@@ -317,4 +357,14 @@ internal sealed class NetherBattleResultCodeCoordinator
         _popupWait.Clear();
         return new(kind, detail ?? string.Empty, _lockedLane);
     }
+
+    private bool IsExpectedPopupOwner(
+        NetherRuntimePopupContext popup,
+        bool allowAwaitingRegistration
+    ) =>
+        popup.Kind == NetherRuntimePopupKind.CodeOffer
+        && popup.RuntimeGeneration > 0
+        && popup.OwnerAction == _expectedOwnerAction
+        && popup.OwnerGeneration > 0
+        && (allowAwaitingRegistration ? popup.Sequence >= 0 : popup.Sequence > 0);
 }

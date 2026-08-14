@@ -28,6 +28,12 @@ internal sealed record NetherRuntimePopupContext
 {
     public NetherRuntimePopupKind Kind { get; init; }
     /// <summary>
+    /// Runtime-controller generation which registered this popup.  OwnerGeneration identifies
+    /// the logical native action; RuntimeGeneration prevents a registration from surviving a
+    /// controller/scene replacement with the same logical owner.
+    /// </summary>
+    public long RuntimeGeneration { get; init; }
+    /// <summary>
     /// A popup may be consumed only by the native parent action which created it.  The bridge
     /// stamps this immutable ownership tuple at registration time; a later floor click or an
     /// out-of-order close can therefore never replay a stale Wait popup.
@@ -60,13 +66,53 @@ internal sealed record NetherRuntimePopupContext
     public IReadOnlyList<NetherShopContent> ShopContents { get; init; } = Array.Empty<NetherShopContent>();
 }
 
-internal readonly record struct NetherRuntimePopupResult(NetherRuntimePopupContext? Popup, string Detail)
+internal enum NetherRuntimePopupResultKind
 {
-    public bool IsSuccess => Popup != null && Detail.Length == 0;
+    Invalid,
+    Success,
+    Pending,
+    Failure,
+}
 
-    public static NetherRuntimePopupResult Success(NetherRuntimePopupContext popup) => new(popup, string.Empty);
+internal readonly record struct NetherRuntimePopupResult
+{
+    private NetherRuntimePopupResult(
+        NetherRuntimePopupResultKind kind,
+        NetherRuntimePopupContext? popup,
+        string detail
+    )
+    {
+        Kind = kind;
+        Popup = popup;
+        Detail = detail ?? string.Empty;
+    }
 
-    public static NetherRuntimePopupResult Failure(string detail) => new(null, detail);
+    public NetherRuntimePopupResultKind Kind { get; }
+    public NetherRuntimePopupContext? Popup { get; }
+    public string Detail { get; }
+
+    public bool IsSuccess => Kind == NetherRuntimePopupResultKind.Success && Popup != null;
+
+    public bool IsPending => Kind == NetherRuntimePopupResultKind.Pending && Popup != null;
+
+    public bool IsDefinitelyAbsent => Kind == NetherRuntimePopupResultKind.Failure
+        && Popup == null
+        && Detail == "missing-active-native-popup";
+
+    public static NetherRuntimePopupResult Success(NetherRuntimePopupContext popup) =>
+        new(NetherRuntimePopupResultKind.Success, popup, string.Empty);
+
+    public static NetherRuntimePopupResult Failure(string detail) =>
+        new(NetherRuntimePopupResultKind.Failure, null, detail ?? string.Empty);
+
+    /// <summary>
+    /// An exact native owner exists and is either waiting for its popup controller to register
+    /// (sequence zero) or for that registered controller to finish asynchronous initialization
+    /// (positive sequence). Callers preserve the owner and wait within a bounded identity gate;
+    /// this is neither a generic "popup absent" result nor a permanent binding failure.
+    /// </summary>
+    public static NetherRuntimePopupResult Pending(NetherRuntimePopupContext popup, string detail) =>
+        new(NetherRuntimePopupResultKind.Pending, popup, detail ?? string.Empty);
 }
 
 internal enum NetherPopupDispatchKind

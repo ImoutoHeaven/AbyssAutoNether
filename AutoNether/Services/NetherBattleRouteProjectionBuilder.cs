@@ -228,12 +228,6 @@ internal sealed class NetherBattleRouteProjectionBuilder
                 case NetherCodeEffectKind.ErosionRateDown:
                     mapped.Add(new NetherErosionModifier(NetherErosionOperation.Rate, effect.Amount, isIncrease: false));
                     break;
-                case NetherCodeEffectKind.Safe:
-                case NetherCodeEffectKind.Risk:
-                case NetherCodeEffectKind.Rush:
-                case NetherCodeEffectKind.Impact:
-                case NetherCodeEffectKind.ResearchOnly:
-                    break;
                 default:
                     error = "unknown-active-nether-code-effect-kind:" + effect.CodeId.ToString(CultureInfo.InvariantCulture);
                     return false;

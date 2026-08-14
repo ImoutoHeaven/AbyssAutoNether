@@ -219,20 +219,7 @@ internal sealed class NetherCodeReloadEpochCoordinator
             return false;
         }
 
-        var builder = new StringBuilder(candidates.Length * 32);
-        foreach (NetherCodeCandidate candidate in candidates)
-        {
-            builder.Append(candidate.CodeId).Append(':')
-                .Append((int)candidate.EffectKind).Append(':')
-                .Append(candidate.Level).Append(':')
-                .Append((int)candidate.Category).Append(':')
-                .Append(candidate.Rarity).Append(':')
-                .Append(candidate.PartyCoverageKnown ? '1' : '0').Append(':')
-                .Append(candidate.PartyCoverage).Append(':')
-                .Append(candidate.IsResearchOnlyKnown ? '1' : '0').Append(':')
-                .Append(candidate.IsResearchOnly ? '1' : '0').Append(';');
-        }
-        fingerprint = builder.ToString();
+        fingerprint = NetherCodeIdentity.CreateCandidates(candidates);
         return true;
     }
 }

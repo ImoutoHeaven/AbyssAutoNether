@@ -26,6 +26,7 @@ internal readonly record struct NetherCodeMasterAudit(
     string effectLevelType,
     string scopeType,
     string targetType,
+    string situationTypes,
     string abilityEffectType
 );
 
@@ -62,6 +63,7 @@ internal static class NetherCodeDiagnosticAudit
         ",levelType=", Sanitize(audit.effectLevelType),
         ",scope=", Sanitize(audit.scopeType),
         ",target=", Sanitize(audit.targetType),
+        ",situations=", Sanitize(audit.situationTypes),
         ",abilityEffect=", Sanitize(audit.abilityEffectType)
     );
 

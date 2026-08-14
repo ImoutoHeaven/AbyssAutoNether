@@ -6,15 +6,21 @@ using System.Linq;
 
 namespace AutoNether.Services;
 
-internal sealed record NetherCodeCandidate(long CodeId, NetherCodeEffectKind EffectKind, int Level)
+internal sealed record NetherCodeCandidate(long CodeId, NetherCodeFamily Family, int AbilityLevel)
 {
     public bool IsKnown { get; init; } = true;
+    public bool EffectSemanticsKnown { get; init; } = true;
     public NetherCodeCategory Category { get; init; }
     public int Rarity { get; init; }
+    /// <summary>Static MNetherCodes.power; a deterministic reference, not proven party DPS.</summary>
+    public int Power { get; init; }
+    public NetherCodeMasterEffectType MasterEffectType { get; init; }
+    public long EffectParameter1 { get; init; }
+    public long EffectParameter2 { get; init; }
+    public long EffectParameter3 { get; init; }
+    public long AbilityAssetId { get; init; }
     public bool PartyCoverageKnown { get; init; }
     public int PartyCoverage { get; init; }
-    public bool IsResearchOnlyKnown { get; init; }
-    public bool IsResearchOnly { get; init; }
 }
 
 internal sealed record NetherCodePortfolio
@@ -26,6 +32,10 @@ internal sealed record NetherCodePortfolio
     public NetherCombatLane? LockedLane { get; init; }
 }
 
+/// <summary>
+/// Native GetCategoryCount values.  Each owned NetherCodeModel contributes exactly one card;
+/// its ability level, master power, and server Amount do not multiply this count.
+/// </summary>
 internal readonly record struct NetherCodeEffectiveLevels(int Safe, int Risk, int Rush, int Impact);
 
 internal enum NetherCodeDecisionKind
@@ -44,15 +54,18 @@ internal sealed record NetherCodeDecision
     public NetherCombatLane LockedLane { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
-    public IReadOnlyList<long> ProtectedCodeIds { get; init; } = Array.Empty<long>();
     public IReadOnlyList<long> RemovableCodeIds { get; init; } = Array.Empty<long>();
 }
 
+/// <summary>
+/// Evidence-bounded baseline policy. Category cohesion follows the native paired-card counters;
+/// explicit Rush/Impact configuration is honored, while Safe and Risk remain peers. Static
+/// master power and ability level are not compared across abilities.  The packaged UI multiplies
+/// master power by Scope-eligible party members; this is only a display projection, not proof of
+/// runtime Target/Situations benefit, and it contributes only when every compared value is known.
+/// </summary>
 internal sealed class NetherCodePolicy
 {
-    private const long PreferredSafeCodeId = 30024;
-    private const long RejectedRiskCodeId = 40024;
-
     public NetherCodeDecision Decide(
         NetherCodePortfolio portfolio,
         IReadOnlyList<NetherCodeCandidate> candidates,
@@ -65,360 +78,295 @@ internal sealed class NetherCodePolicy
             throw new ArgumentNullException(nameof(candidates));
         if (settings == null)
             throw new ArgumentNullException(nameof(settings));
-        if (!portfolio.IsMasterComplete || portfolio.Capacity < 1 || portfolio.ReloadCount < 0
-            || portfolio.CurrentCodes.Count > portfolio.Capacity
-            || portfolio.CurrentCodes.Any(code => !code.IsKnown)
-            || candidates.Any(candidate => !candidate.IsKnown))
+        if (!IsValid(portfolio, candidates))
             return Pause(NetherPauseReason.UnknownMasterData, "incomplete-code-portfolio");
 
-        NetherCodeEffectiveLevels effective = CalculateEffectiveLevels(portfolio.CurrentCodes);
-        if (effective.Safe < 0 || effective.Risk < 0 || effective.Rush < 0 || effective.Impact < 0)
-            return Pause(NetherPauseReason.UnknownEffect, "code-level-overflow");
-        IReadOnlyList<long> protectedIds = BuildProtectedIds(portfolio.CurrentCodes, effective);
+        NetherCombatLane lane = ResolveLane(portfolio, settings.CombatLane);
+        var ownedIds = new HashSet<long>(portfolio.CurrentCodes.Select(code => code.CodeId));
+        NetherCodeCandidate[] eligible = candidates
+            .GroupBy(candidate => candidate.CodeId)
+            .Select(group => group.First())
+            // Native offers may contain an already-owned ID. The server owns Amount updates, but
+            // no inspected client logic proves their strategy value. At capacity, selecting one
+            // still enters replacement and sacrifices a different unique slot. Do not invent a
+            // stack-value policy: retain/reload until a genuinely new unique card is offered.
+            .Where(candidate => !ownedIds.Contains(candidate.CodeId))
+            .ToArray();
+        if (eligible.Length == 0)
+            return ReloadOrKeep(portfolio, settings, lane, "no-new-code-candidate");
 
-        List<NetherCodeCandidate> eligible = candidates
-            .Where(candidate => !portfolio.CurrentCodes.Any(current => current.CodeId == candidate.CodeId))
-            .Where(candidate => candidate.EffectKind != NetherCodeEffectKind.Risk && candidate.CodeId != RejectedRiskCodeId)
-            // The native category extension proves that paired categories are mutually
-            // exclusive.  A non-full portfolio has no exact replacement parent to resolve that
-            // conflict, so leave it for player control; a full portfolio can name the single
-            // conflicting code as the verified replacement target below.
-            .Where(candidate => portfolio.CurrentCodes.Count == portfolio.Capacity
-                || !HasCategoryConflict(candidate, portfolio.CurrentCodes))
-            .ToList();
-
-        // Category is enough to prove that ErosionResistance is a Safe candidate.  A free
-        // capacity slot lets us accept that independently of unproven Technique/Strength
-        // lane, coverage, or research facts elsewhere in the offer.  This keeps common
-        // category-proven Safe codes usable without reintroducing a guessed combat lane.
         if (portfolio.CurrentCodes.Count < portfolio.Capacity)
         {
-            NetherCodeCandidate? independentSafe = SelectIndependentSafeCandidate(eligible, effective);
-            if (independentSafe != null)
-            {
-                return Select(
-                    independentSafe,
-                    removal: 0,
-                    lockedLane: PreserveConfiguredLane(portfolio, settings),
-                    protectedIds,
-                    removable: Array.Empty<NetherCodeState>()
+            NetherCodeCandidate selected = eligible
+                .OrderByDescending(candidate => ScoreAfterAdd(portfolio.CurrentCodes, candidate, lane))
+                .ThenBy(candidate => candidate.CodeId)
+                .First();
+            return ScoreAfterAdd(portfolio.CurrentCodes, selected, lane)
+                    .CompareTo(Score(portfolio.CurrentCodes, lane)) > 0
+                ? Select(selected, 0, lane, Array.Empty<long>())
+                : ReloadOrKeep(
+                    portfolio,
+                    settings,
+                    lane,
+                    "candidate-has-no-proven-structural-or-coverage-gain"
                 );
+        }
+
+        NetherCodePortfolioScore currentScore = Score(portfolio.CurrentCodes, lane);
+        ReplacementChoice? best = null;
+        foreach (NetherCodeCandidate candidate in eligible)
+        {
+            foreach (NetherCodeState removal in portfolio.CurrentCodes)
+            {
+                if (removal.CodeId == candidate.CodeId)
+                    continue;
+                NetherCodePortfolioScore score = Score(
+                    ApplyCandidate(
+                        portfolio.CurrentCodes.Where(code => code.CodeId != removal.CodeId),
+                        candidate
+                    ),
+                    lane
+                );
+                var choice = new ReplacementChoice(candidate, removal, score);
+                if (best == null || CompareChoice(choice, best.Value) > 0)
+                    best = choice;
             }
         }
 
-        // Technique/Strength are authoritative selectable categories even though their master
-        // rows do not label them Rush/Impact or expose party coverage.  Keep those extra facts
-        // explicitly unknown, but rank ordinary offers by the real rarity/level/category data
-        // instead of turning a valid native reward into UnknownMasterData.
+        long[] removable = RankRemovals(portfolio.CurrentCodes, lane)
+            .Select(code => code.CodeId)
+            .ToArray();
+        if (best is ReplacementChoice replacement && replacement.Score.CompareTo(currentScore) > 0)
+            return Select(replacement.Candidate, replacement.Removal.CodeId, lane, removable);
 
-        // A full portfolio may still replace the one exact paired Risk code for a
-        // category-proven Safe code.  That removal is immutable and does not consult unknown
-        // coverage/research ranking of another ordinary code in the portfolio.
-        if (portfolio.CurrentCodes.Count == portfolio.Capacity)
-        {
-            NetherCodeCandidate? pairedSafe = SelectIndependentSafeCandidate(eligible, effective);
-            if (pairedSafe != null)
-            {
-                IReadOnlyList<NetherCodeState> pairedConflicts = FindCategoryConflicts(pairedSafe, portfolio.CurrentCodes);
-                if (pairedConflicts.Count == 1 && !protectedIds.Contains(pairedConflicts[0].CodeId))
-                {
-                    return Select(
-                        pairedSafe,
-                        pairedConflicts[0].CodeId,
-                        PreserveConfiguredLane(portfolio, settings),
-                        protectedIds,
-                        Array.Empty<NetherCodeState>()
-                    );
-                }
-                if (pairedConflicts.Count > 0)
-                    return Keep(
-                        PreserveConfiguredLane(portfolio, settings),
-                        protectedIds,
-                        "category-conflict-protected"
-                    );
-            }
-        }
-
-        NetherCombatLane lane = ResolveLane(portfolio, eligible, settings.CombatLane);
-        NetherCodeCandidate? selected = SelectCandidate(eligible, effective, lane);
-        if (selected != null)
-        {
-            long removal = 0;
-            IReadOnlyList<NetherCodeState> removable = Array.Empty<NetherCodeState>();
-            if (portfolio.CurrentCodes.Count == portfolio.Capacity)
-            {
-                IReadOnlyList<NetherCodeState> conflicts = FindCategoryConflicts(selected, portfolio.CurrentCodes);
-                if (conflicts.Count > 0)
-                {
-                    if (conflicts.Count != 1 || protectedIds.Contains(conflicts[0].CodeId))
-                        return Keep(lane, protectedIds, "category-conflict-protected", removable);
-                    removal = conflicts[0].CodeId;
-                    if (!IsCandidateUpgrade(selected, conflicts[0], lane))
-                        return ReloadOrKeep(portfolio, settings, effective, lane, protectedIds, "paired-code-not-an-upgrade");
-                }
-                else
-                {
-                    removable = FindRemovableCodes(portfolio.CurrentCodes, protectedIds, lane);
-                    if (removable.Count == 0)
-                        return Keep(lane, protectedIds, "all-codes-protected");
-                    removal = removable[0].CodeId;
-                    if (!IsCandidateUpgrade(selected, removable[0], lane))
-                        return ReloadOrKeep(portfolio, settings, effective, lane, protectedIds, "candidate-not-an-upgrade", removable);
-                }
-            }
-            return Select(selected, removal, lane, protectedIds, removable);
-        }
-
-        if (effective.Safe < 5 && portfolio.ReloadCount > settings.CodeReloadReserve)
-        {
-            return new NetherCodeDecision
-            {
-                Kind = NetherCodeDecisionKind.Reload,
-                LockedLane = lane,
-                ProtectedCodeIds = protectedIds,
-                RemovableCodeIds = Array.Empty<long>(),
-            };
-        }
-
-        IReadOnlyList<NetherCodeState> keepRemovable = FindRemovableCodes(portfolio.CurrentCodes, protectedIds, lane);
-        return Keep(lane, protectedIds, "no-safe-code-candidate", keepRemovable);
+        return ReloadOrKeep(portfolio, settings, lane, "candidate-not-an-evidence-backed-upgrade", removable);
     }
 
     public static NetherCodeEffectiveLevels CalculateEffectiveLevels(IReadOnlyList<NetherCodeState> codes)
     {
         if (codes == null)
             throw new ArgumentNullException(nameof(codes));
-        try
-        {
-            int safe = SumLevels(codes, NetherCodeEffectKind.Safe);
-            int risk = SumLevels(codes, NetherCodeEffectKind.Risk);
-            int rush = SumLevels(codes, NetherCodeEffectKind.Rush);
-            int impact = SumLevels(codes, NetherCodeEffectKind.Impact);
-            return new NetherCodeEffectiveLevels(
-                Math.Max(0, checked(safe - risk)),
-                Math.Max(0, checked(risk - safe)),
-                Math.Max(0, checked(rush - impact)),
-                Math.Max(0, checked(impact - rush))
-            );
-        }
-        catch (OverflowException)
-        {
-            return new NetherCodeEffectiveLevels(-1, -1, -1, -1);
-        }
+        return CalculateEffectiveLevels(codes.Select(code => code.Family));
     }
 
-    private static int SumLevels(IEnumerable<NetherCodeState> codes, NetherCodeEffectKind kind)
+    internal static NetherCodeEffectiveLevels CalculateEffectiveLevels(IEnumerable<NetherCodeFamily> families)
     {
-        int sum = 0;
-        foreach (NetherCodeState code in codes.Where(code => code.EffectKind == kind))
-            sum = checked(sum + code.Level);
-        return sum;
+        NetherCodeFamily[] all = families as NetherCodeFamily[] ?? families.ToArray();
+        int safe = all.Count(family => family == NetherCodeFamily.Safe);
+        int risk = all.Count(family => family == NetherCodeFamily.Risk);
+        int rush = all.Count(family => family == NetherCodeFamily.Rush);
+        int impact = all.Count(family => family == NetherCodeFamily.Impact);
+        return new NetherCodeEffectiveLevels(
+            Math.Max(0, safe - risk),
+            Math.Max(0, risk - safe),
+            Math.Max(0, rush - impact),
+            Math.Max(0, impact - rush)
+        );
     }
+
+    internal static IReadOnlyList<NetherCodeState> RankRemovals(
+        IReadOnlyList<NetherCodeState> codes,
+        NetherCombatLane lane = NetherCombatLane.Auto
+    ) => codes
+        .Select(code => new
+        {
+            Code = code,
+            Remaining = Score(codes.Where(other => other.CodeId != code.CodeId), lane),
+        })
+        .OrderByDescending(item => item.Remaining)
+        .ThenBy(item => item.Code.CodeId)
+        .Select(item => item.Code)
+        .ToArray();
+
+    private static bool IsValid(
+        NetherCodePortfolio portfolio,
+        IReadOnlyList<NetherCodeCandidate> candidates
+    ) => portfolio.IsMasterComplete
+        && portfolio.Capacity > 0
+        && portfolio.ReloadCount >= 0
+        && portfolio.CurrentCodes.Count <= portfolio.Capacity
+        && portfolio.CurrentCodes.Select(code => code.CodeId).Distinct().Count() == portfolio.CurrentCodes.Count
+        && portfolio.CurrentCodes.All(IsValid)
+        && candidates.All(IsValid);
+
+    private static bool IsValid(NetherCodeState code) => code != null
+        && code.IsKnown
+        && code.CodeId > 0
+        && code.Family != NetherCodeFamily.Unknown
+        && code.AbilityLevel >= 0
+        && code.Rarity >= 0
+        && code.Power >= 0
+        && code.PossessionAmount >= 0
+        && (!code.PartyCoverageKnown || code.PartyCoverage >= 0);
+
+    private static bool IsValid(NetherCodeCandidate code) => code != null
+        && code.IsKnown
+        && code.CodeId > 0
+        && code.Family != NetherCodeFamily.Unknown
+        && code.AbilityLevel >= 0
+        && code.Rarity >= 0
+        && code.Power >= 0
+        && (!code.PartyCoverageKnown || code.PartyCoverage >= 0);
 
     private static NetherCombatLane ResolveLane(
         NetherCodePortfolio portfolio,
-        IReadOnlyList<NetherCodeCandidate> candidates,
-        NetherCombatLane configuredLane
+        NetherCombatLane configured
     )
     {
-        if (configuredLane != NetherCombatLane.Auto)
-            return configuredLane;
-        if (portfolio.LockedLane is NetherCombatLane locked && locked != NetherCombatLane.Auto)
-            return locked;
-
-        int rushCoverage = Coverage(portfolio.CurrentCodes, candidates, NetherCombatLane.Rush);
-        int impactCoverage = Coverage(portfolio.CurrentCodes, candidates, NetherCombatLane.Impact);
-        if (rushCoverage == 0 && impactCoverage == 0)
+        if (configured != NetherCombatLane.Auto)
+            return configured;
+        // A previous offer decision and the native paired-card counter do not prove party
+        // composition. Auto resolves only from a complete native UI Scope projection for every
+        // currently held Rush/Impact card. One unknown value keeps the lane neutral.
+        NetherCodeCandidate[] laneEvidence = portfolio.CurrentCodes
+            .Select(ToCandidateView)
+            .Where(code => ToLane(code.Family) != null)
+            .ToArray();
+        if (laneEvidence.Length == 0 || laneEvidence.Any(code => !code.PartyCoverageKnown))
             return NetherCombatLane.Auto;
-        return rushCoverage >= impactCoverage ? NetherCombatLane.Rush : NetherCombatLane.Impact;
+
+        int rushCoverage = Coverage(laneEvidence, NetherCombatLane.Rush);
+        int impactCoverage = Coverage(laneEvidence, NetherCombatLane.Impact);
+        if (rushCoverage == impactCoverage)
+            return NetherCombatLane.Auto;
+        return rushCoverage > impactCoverage ? NetherCombatLane.Rush : NetherCombatLane.Impact;
     }
 
-    private static NetherCombatLane PreserveConfiguredLane(
-        NetherCodePortfolio portfolio,
-        NetherAutoClimbSettings settings
-    ) => portfolio.LockedLane
-        ?? (settings.CombatLane == NetherCombatLane.Auto ? NetherCombatLane.Auto : settings.CombatLane);
+    private static int Coverage(
+        IEnumerable<NetherCodeCandidate> codes,
+        NetherCombatLane lane
+    ) => codes.Where(code => ToLane(code.Family) == lane)
+        .Sum(code => code.PartyCoverage);
 
-    private static NetherCodeCandidate? SelectIndependentSafeCandidate(
-        IEnumerable<NetherCodeCandidate> candidates,
-        NetherCodeEffectiveLevels effective
-    ) => candidates
-        .Where(candidate => candidate.EffectKind == NetherCodeEffectKind.Safe)
-        .OrderByDescending(candidate => candidate.CodeId == PreferredSafeCodeId)
-        .ThenByDescending(candidate => SafeAfterCandidate(effective, candidate) >= 5)
-        .ThenByDescending(candidate => candidate.Rarity)
-        .ThenByDescending(candidate => candidate.Level)
-        .ThenBy(candidate => candidate.CodeId)
-        .FirstOrDefault();
+    private static NetherCombatLane? ToLane(NetherCodeFamily family) => family switch
+    {
+        NetherCodeFamily.Rush => NetherCombatLane.Rush,
+        NetherCodeFamily.Impact => NetherCombatLane.Impact,
+        _ => null,
+    };
+
+    private static NetherCodePortfolioScore ScoreAfterAdd(
+        IReadOnlyList<NetherCodeState> current,
+        NetherCodeCandidate candidate,
+        NetherCombatLane lane
+    ) => Score(ApplyCandidate(current, candidate), lane);
+
+    private static IEnumerable<NetherCodeCandidate> ApplyCandidate(
+        IEnumerable<NetherCodeState> current,
+        NetherCodeCandidate candidate
+    ) => ApplyCandidate(current.Select(ToCandidateView), candidate);
+
+    private static IEnumerable<NetherCodeCandidate> ApplyCandidate(
+        IEnumerable<NetherCodeCandidate> current,
+        NetherCodeCandidate candidate
+    )
+    {
+        NetherCodeCandidate[] existing = current.ToArray();
+        return existing.Any(code => code.CodeId == candidate.CodeId)
+            ? existing
+            : existing.Append(candidate);
+    }
+
+    private static NetherCodeCandidate ToCandidateView(NetherCodeState code) => new(
+        code.CodeId,
+        code.Family,
+        code.AbilityLevel
+    )
+    {
+        IsKnown = code.IsKnown,
+        EffectSemanticsKnown = code.EffectSemanticsKnown,
+        Category = code.Category,
+        Rarity = code.Rarity,
+        Power = code.Power,
+        MasterEffectType = code.MasterEffectType,
+        EffectParameter1 = code.EffectParameter1,
+        EffectParameter2 = code.EffectParameter2,
+        EffectParameter3 = code.EffectParameter3,
+        AbilityAssetId = code.AbilityAssetId,
+        PartyCoverageKnown = code.PartyCoverageKnown,
+        PartyCoverage = code.PartyCoverage,
+    };
+
+    private static NetherCodePortfolioScore Score(
+        IEnumerable<NetherCodeState> codes,
+        NetherCombatLane lane
+    ) => Score(codes.Select(ToCandidateView), lane);
+
+    private static NetherCodePortfolioScore Score(
+        IEnumerable<NetherCodeCandidate> codes,
+        NetherCombatLane lane
+    )
+    {
+        NetherCodeCandidate[] all = codes.ToArray();
+        NetherCodeEffectiveLevels effective = CalculateEffectiveLevels(all.Select(code => code.Family));
+        int preferredLaneCount = lane switch
+        {
+            NetherCombatLane.Rush => effective.Rush,
+            NetherCombatLane.Impact => effective.Impact,
+            _ => Math.Max(effective.Rush, effective.Impact),
+        };
+        NetherCodeCandidate[] displayEligible = all
+            .Where(code => lane == NetherCombatLane.Auto || ToLane(code.Family) == lane)
+            .ToArray();
+        bool nativeDisplayPowerKnown = displayEligible.All(code => code.PartyCoverageKnown);
+        long nativeDisplayPower = nativeDisplayPowerKnown
+            ? displayEligible.Sum(code => (long)code.Power * code.PartyCoverage)
+            : 0;
+        return new NetherCodePortfolioScore(
+            preferredLaneCount,
+            effective.Safe + effective.Risk + effective.Rush + effective.Impact,
+            nativeDisplayPowerKnown,
+            nativeDisplayPower
+        );
+    }
+
+    private static int CompareChoice(ReplacementChoice left, ReplacementChoice right)
+    {
+        int score = left.Score.CompareTo(right.Score);
+        if (score != 0)
+            return score;
+        int candidate = right.Candidate.CodeId.CompareTo(left.Candidate.CodeId);
+        if (candidate != 0)
+            return candidate;
+        return right.Removal.CodeId.CompareTo(left.Removal.CodeId);
+    }
 
     private static NetherCodeDecision Select(
         NetherCodeCandidate candidate,
         long removal,
-        NetherCombatLane lockedLane,
-        IReadOnlyList<long> protectedIds,
-        IReadOnlyList<NetherCodeState> removable
+        NetherCombatLane lane,
+        IReadOnlyList<long> removable
     ) => new()
     {
         Kind = NetherCodeDecisionKind.Select,
         SelectedCodeId = candidate.CodeId,
         RemoveCodeId = removal,
-        LockedLane = lockedLane,
-        ProtectedCodeIds = protectedIds,
-        RemovableCodeIds = removable.Select(code => code.CodeId).ToArray(),
+        LockedLane = lane,
+        RemovableCodeIds = removable,
+        Detail = "native-category-counts;optional-native-ui-display-coverage",
     };
-
-    private static int Coverage(
-        IEnumerable<NetherCodeState> current,
-        IEnumerable<NetherCodeCandidate> candidates,
-        NetherCombatLane lane
-    ) => current.Where(code => code.PartyCoverageKnown && ToLane(code.EffectKind) == lane).Sum(code => code.PartyCoverage)
-        + candidates.Where(code => code.PartyCoverageKnown && ToLane(code.EffectKind) == lane).Sum(code => code.PartyCoverage);
-
-    private static NetherCombatLane? ToLane(NetherCodeEffectKind kind) => kind switch
-    {
-        NetherCodeEffectKind.Rush => NetherCombatLane.Rush,
-        NetherCodeEffectKind.Impact => NetherCombatLane.Impact,
-        _ => null,
-    };
-
-    private static bool HasCategoryConflict(
-        NetherCodeCandidate candidate,
-        IReadOnlyList<NetherCodeState> current
-    ) => current.Any(code => NetherCodeCategorySemantics.IsExclusive(candidate.Category, code.Category));
-
-    private static IReadOnlyList<NetherCodeState> FindCategoryConflicts(
-        NetherCodeCandidate candidate,
-        IReadOnlyList<NetherCodeState> current
-    ) => current
-        .Where(code => NetherCodeCategorySemantics.IsExclusive(candidate.Category, code.Category))
-        .OrderBy(code => code.CodeId)
-        .ToArray();
-
-    private static IReadOnlyList<long> BuildProtectedIds(
-        IReadOnlyList<NetherCodeState> codes,
-        NetherCodeEffectiveLevels effective
-    )
-    {
-        var protectedIds = new List<long>();
-        foreach (NetherCodeState code in codes)
-        {
-            if (code.CodeId == PreferredSafeCodeId || (effective.Safe >= 5 && code.EffectKind == NetherCodeEffectKind.Safe))
-                protectedIds.Add(code.CodeId);
-        }
-        return protectedIds;
-    }
-
-    private static IReadOnlyList<NetherCodeState> FindRemovableCodes(
-        IReadOnlyList<NetherCodeState> codes,
-        IReadOnlyList<long> protectedIds,
-        NetherCombatLane lane
-    ) => codes
-        .Where(code => !protectedIds.Contains(code.CodeId))
-        .OrderByDescending(code => code.EffectKind == NetherCodeEffectKind.Risk || code.CodeId == RejectedRiskCodeId)
-        .ThenByDescending(code => code.IsResearchOnlyKnown && code.IsResearchOnly
-            || code.EffectKind == NetherCodeEffectKind.ResearchOnly)
-        .ThenByDescending(code => lane != NetherCombatLane.Auto
-            && ToLane(code.EffectKind) is NetherCombatLane currentLane
-            && currentLane != lane)
-        .ThenBy(code => code.Rarity)
-        .ThenBy(code => code.Level)
-        .ThenBy(code => code.PartyCoverageKnown ? code.PartyCoverage : int.MaxValue)
-        .ThenBy(code => code.CodeId)
-        .ToArray();
-
-    private static NetherCodeCandidate? SelectCandidate(
-        IEnumerable<NetherCodeCandidate> candidates,
-        NetherCodeEffectiveLevels effective,
-        NetherCombatLane lane
-    ) => candidates
-        .OrderByDescending(candidate => candidate.CodeId == PreferredSafeCodeId)
-        .ThenByDescending(candidate => candidate.EffectKind == NetherCodeEffectKind.Safe && SafeAfterCandidate(effective, candidate) >= 5)
-        .ThenByDescending(candidate => candidate.EffectKind == NetherCodeEffectKind.Safe)
-        .ThenByDescending(candidate => lane != NetherCombatLane.Auto && ToLane(candidate.EffectKind) == lane)
-        .ThenByDescending(candidate => candidate.PartyCoverageKnown ? candidate.PartyCoverage : -1)
-        .ThenByDescending(candidate => candidate.Rarity)
-        .ThenByDescending(candidate => candidate.Level)
-        .ThenBy(candidate => candidate.CodeId)
-        .FirstOrDefault();
-
-    private static bool IsCandidateUpgrade(
-        NetherCodeCandidate candidate,
-        NetherCodeState current,
-        NetherCombatLane lane
-    )
-    {
-        if (current.EffectKind == NetherCodeEffectKind.Risk || current.CodeId == RejectedRiskCodeId)
-            return true;
-        if (candidate.EffectKind == NetherCodeEffectKind.Safe
-            && current.EffectKind != NetherCodeEffectKind.Safe)
-        {
-            return true;
-        }
-        if (current.EffectKind == NetherCodeEffectKind.Safe
-            && candidate.EffectKind != NetherCodeEffectKind.Safe)
-        {
-            return false;
-        }
-
-        if (lane != NetherCombatLane.Auto)
-        {
-            bool candidateMatches = ToLane(candidate.EffectKind) == lane;
-            bool currentMatches = ToLane(current.EffectKind) == lane;
-            if (candidateMatches != currentMatches)
-                return candidateMatches;
-        }
-        if (candidate.Rarity != current.Rarity)
-            return candidate.Rarity > current.Rarity;
-        if (candidate.Level != current.Level)
-            return candidate.Level > current.Level;
-        if (candidate.PartyCoverageKnown && current.PartyCoverageKnown
-            && candidate.PartyCoverage != current.PartyCoverage)
-        {
-            return candidate.PartyCoverage > current.PartyCoverage;
-        }
-        if (candidate.IsResearchOnlyKnown && current.IsResearchOnlyKnown
-            && candidate.IsResearchOnly != current.IsResearchOnly)
-        {
-            return !candidate.IsResearchOnly;
-        }
-        return false;
-    }
 
     private static NetherCodeDecision ReloadOrKeep(
         NetherCodePortfolio portfolio,
         NetherAutoClimbSettings settings,
-        NetherCodeEffectiveLevels effective,
         NetherCombatLane lane,
-        IReadOnlyList<long> protectedIds,
         string detail,
-        IReadOnlyList<NetherCodeState>? removable = null
-    ) => effective.Safe < 5 && portfolio.ReloadCount > settings.CodeReloadReserve
+        IReadOnlyList<long>? removable = null
+    ) => portfolio.ReloadCount > settings.CodeReloadReserve
         ? new NetherCodeDecision
         {
             Kind = NetherCodeDecisionKind.Reload,
             LockedLane = lane,
-            ProtectedCodeIds = protectedIds,
-            RemovableCodeIds = removable?.Select(code => code.CodeId).ToArray() ?? Array.Empty<long>(),
+            RemovableCodeIds = removable ?? Array.Empty<long>(),
             Detail = detail + ":reload",
         }
-        : Keep(lane, protectedIds, detail, removable);
-
-    private static int SafeAfterCandidate(NetherCodeEffectiveLevels effective, NetherCodeCandidate candidate) =>
-        candidate.EffectKind == NetherCodeEffectKind.Safe ? checked(effective.Safe + candidate.Level) : effective.Safe;
-
-    private static NetherCodeDecision Keep(
-        NetherCombatLane lane,
-        IReadOnlyList<long> protectedIds,
-        string detail,
-        IReadOnlyList<NetherCodeState>? removable = null
-    ) => new()
-    {
-        Kind = NetherCodeDecisionKind.Keep,
-        LockedLane = lane,
-        Detail = detail,
-        ProtectedCodeIds = protectedIds,
-        RemovableCodeIds = removable?.Select(code => code.CodeId).ToArray() ?? Array.Empty<long>(),
-    };
+        : new NetherCodeDecision
+        {
+            Kind = NetherCodeDecisionKind.Keep,
+            LockedLane = lane,
+            RemovableCodeIds = removable ?? Array.Empty<long>(),
+            Detail = detail + ":keep",
+        };
 
     private static NetherCodeDecision Pause(NetherPauseReason reason, string detail) => new()
     {
@@ -426,4 +374,29 @@ internal sealed class NetherCodePolicy
         PauseReason = reason,
         Detail = detail,
     };
+
+    private readonly record struct ReplacementChoice(
+        NetherCodeCandidate Candidate,
+        NetherCodeState Removal,
+        NetherCodePortfolioScore Score
+    );
+
+    private readonly record struct NetherCodePortfolioScore(
+        int PreferredLaneCount,
+        int CategoryCoherence,
+        bool NativeDisplayPowerKnown,
+        long NativeDisplayPower
+    ) : IComparable<NetherCodePortfolioScore>
+    {
+        public int CompareTo(NetherCodePortfolioScore other)
+        {
+            int compared = PreferredLaneCount.CompareTo(other.PreferredLaneCount);
+            if (compared != 0) return compared;
+            compared = CategoryCoherence.CompareTo(other.CategoryCoherence);
+            if (compared != 0) return compared;
+            return NativeDisplayPowerKnown && other.NativeDisplayPowerKnown
+                ? NativeDisplayPower.CompareTo(other.NativeDisplayPower)
+                : 0;
+        }
+    }
 }
