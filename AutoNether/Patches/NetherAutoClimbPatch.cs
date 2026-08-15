@@ -351,11 +351,17 @@ internal static class NetherAutoClimbCodeListInitializationLifecyclePatch
         try
         {
             if (__args != null && __args.Length == 1 && __args[0] != null)
+            {
+                // InitializePopupAsync returns a pooled, token-versioned UniTask. The native
+                // caller awaits it while AutoNether polls Status, so both consumers must share
+                // the memoized task returned by Preserve rather than the raw single-use source.
+                __result = __result.Preserve();
                 NetherRuntimeBridge.ObserveCodeListInitializationTask(
                     __instance,
                     __args[0],
                     __result
                 );
+            }
         }
         catch (Exception ex)
         {

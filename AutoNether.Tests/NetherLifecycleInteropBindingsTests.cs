@@ -452,12 +452,35 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
+    public void Packaged_unitask_exposes_replay_safe_preserve_and_token_checked_status()
+    {
+        using var packaged = PackagedProjectAssembly.Load("UniTask.dll");
+        Type unitask = packaged.RequireType("Cysharp.Threading.Tasks.UniTask");
+        MethodInfo preserve = Assert.Single(
+            unitask.GetMethods(BindingFlags.Instance | BindingFlags.Public),
+            method => method.Name == "Preserve" && method.GetParameters().Length == 0
+        );
+        PropertyInfo status = Assert.Single(
+            unitask.GetProperties(BindingFlags.Instance | BindingFlags.Public),
+            property => property.Name == "Status"
+        );
+
+        Assert.Equal(unitask, preserve.ReturnType);
+        Assert.Equal("Cysharp.Threading.Tasks.UniTaskStatus", status.PropertyType.FullName);
+        Assert.NotNull(status.GetMethod);
+    }
+
+    [Fact]
     public void Packaged_code_list_exposes_category_to_tab_and_bucket_model_coordinates()
     {
         using var packaged = PackagedProjectAssembly.Load();
         Type controller = packaged.RequireType(
             "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupController"
         );
+        Type popup = packaged.RequireType(
+            "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopup"
+        );
+        Type tabGroup = packaged.RequireType("Project.Outgame.UIParts.TabGroupView");
         Type thumbnail = packaged.RequireType("Project.Nether.AbyssCodeThumbnailModel");
         const BindingFlags flags = BindingFlags.Instance
             | BindingFlags.Public
@@ -486,6 +509,29 @@ public sealed class NetherLifecycleInteropBindingsTests
             property => property.Name == "NetherCodeCategoryType"
         );
         Assert.Equal("Project.NetherCodeCategoryType", category.PropertyType.FullName);
+
+        PropertyInfo popupTabGroup = Assert.Single(
+            popup.GetProperties(flags),
+            property => property.Name == "_tabGroupView"
+        );
+        Assert.Equal(tabGroup, popupTabGroup.PropertyType);
+        PropertyInfo currentIndex = Assert.Single(
+            tabGroup.GetProperties(flags),
+            property => property.Name == "CurrentIndex"
+        );
+        Assert.Equal(typeof(int), currentIndex.PropertyType);
+        Assert.True(NetherLifecycleInteropBindings.TryResolveExactMethod(
+            tabGroup,
+            new NetherNativeMethodDescriptor(
+                "UpdateTabState",
+                new[] { "System.Int32" },
+                "System.Void"
+            ),
+            flags,
+            out string tabError,
+            out MethodInfo? updateTabState
+        ), tabError);
+        Assert.NotNull(updateTabState);
     }
 
 
@@ -875,14 +921,20 @@ public sealed class NetherLifecycleInteropBindingsTests
 
         public Assembly Assembly { get; }
 
-        public static PackagedProjectAssembly Load()
+        public static PackagedProjectAssembly Load(string assemblyName = "Project.dll")
         {
             const string interopDirectory = "/game/BepInEx/interop";
             const string coreDirectory = "/game/BepInEx/core";
-            const string projectPath = interopDirectory + "/Project.dll";
-            Assert.True(File.Exists(projectPath), "packaged Project.dll must be mounted read-only at /game");
+            string assemblyPath = Path.Combine(interopDirectory, assemblyName);
+            Assert.True(
+                File.Exists(assemblyPath),
+                "packaged " + assemblyName + " must be mounted read-only at /game"
+            );
 
-            var context = new AssemblyLoadContext("lifecycle-packaged-project", isCollectible: true);
+            var context = new AssemblyLoadContext(
+                "lifecycle-packaged-" + Path.GetFileNameWithoutExtension(assemblyName),
+                isCollectible: true
+            );
             context.Resolving += (_, name) =>
             {
                 string candidate = Path.Combine(interopDirectory, name.Name + ".dll");
@@ -891,7 +943,7 @@ public sealed class NetherLifecycleInteropBindingsTests
                 candidate = Path.Combine(coreDirectory, name.Name + ".dll");
                 return File.Exists(candidate) ? context.LoadFromAssemblyPath(candidate) : null;
             };
-            return new PackagedProjectAssembly(context, context.LoadFromAssemblyPath(projectPath));
+            return new PackagedProjectAssembly(context, context.LoadFromAssemblyPath(assemblyPath));
         }
 
         public Type RequireType(string name) => Assembly.GetType(name, throwOnError: false)

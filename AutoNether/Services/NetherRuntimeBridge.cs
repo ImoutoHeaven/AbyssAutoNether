@@ -179,6 +179,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherPopupReadinessGate _battleResultPopupReadiness = new(maximumPendingPolls: 600);
     private readonly NetherNativeWaitGate _codeSelectionTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementPopupWait = new(maximumMissingPolls: 600);
+    private readonly NetherNativeWaitGate _codeReplacementTabActivationWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementConfirmPopupWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementConfirmViewWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeReplacementCompletePopupWait = new(maximumMissingPolls: 600);
@@ -203,6 +204,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherContentAcquiredConfirmLease _floorEventHintConfirmLease = new();
     private readonly NetherCodeReceivedConfirmLease _codeReceivedConfirmLease = new();
     private readonly NetherCodeListInitializationTaskEvidence _codeListInitializationEvidence = new();
+    private readonly NetherCodeListSelectionTransaction _codeReplacementSelectionTransaction = new();
     private readonly NetherNativeWaitGate _battleStartTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherStartStatusParentCapture _startStatusParentCapture = new();
     private readonly NetherCheckpointStartStatusParentCapture _checkpointStartStatusParentCapture = new();
@@ -3717,6 +3719,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     break;
                 case CodeListPopupControllerTypeName:
                     _codeListPopup = registration;
+                    _codeReplacementTabActivationWait.Clear();
+                    _codeReplacementSelectionTransaction.Clear();
                     _codeReplacementConfirmPopup = null;
                     _codeReplacementCompletePopup = null;
                     _codeReplacementConfirmPopupWait.Clear();
@@ -5039,6 +5043,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _codeSelectionTask = null;
         _codeSelectionTaskWait.Clear();
         _codeReplacementPopupWait.Clear();
+        _codeReplacementTabActivationWait.Clear();
+        _codeReplacementSelectionTransaction.Clear();
         _codeReplacementConfirmPopupWait.Clear();
         _codeReplacementConfirmViewWait.Clear();
         _codeReplacementCompletePopupWait.Clear();
@@ -5309,6 +5315,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _codeSelectionTask = null;
             _codeSelectionTaskWait.Clear();
             _codeReplacementPopupWait.Clear();
+            _codeReplacementTabActivationWait.Clear();
+            _codeReplacementSelectionTransaction.Clear();
             _codeReplacementConfirmPopupWait.Clear();
             _codeReplacementConfirmViewWait.Clear();
             _codeReplacementCompletePopupWait.Clear();
@@ -5807,30 +5815,104 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return NetherNativeActionResult.BindingUnavailable("native-code-replacement-offer-mismatch");
 
         // `_replaceMId` is the added code; select the planned code-to-remove from the exact
-        // native dictionary/tab map, then use the controller's private UI methods in the same
-        // order as a player click: tab, thumbnail, Replace.
+        // native dictionary/tab map. The packaged controller's OnChangeTab updates only its
+        // model/view; OnClickThumbnail and OnClickReplace both read popup._tabGroupView.CurrentIndex.
+        // Drive the real TabGroupView and wait for that visible index before clicking.
         long removeCodeId = _codeSelectionFlow.ReplacementCodeId;
         if (removeCodeId <= 0)
             return NetherNativeActionResult.BindingUnavailable("missing-pending-code-replacement-id");
         if (!TryFindCodeListSelection(registration.Controller, removeCodeId, out int tabIndex, out int modelIndex, out string mapError))
             return NetherNativeActionResult.BindingUnavailable(mapError);
 
-        NetherNativeActionResult tab = TryInvokeExact(
-            registration.Controller,
-            new NetherNativeMethodDescriptor("OnChangeTab", new[] { "System.Int32" }, "System.Void"),
-            new object[] { tabIndex },
-            "select-code-replacement-tab"
+        if (!TryReadMember(registration.Popup, "_tabGroupView", out object? rawTabGroup)
+            || rawTabGroup == null
+            || !TryReadInt32(rawTabGroup, "CurrentIndex", out int currentTabIndex))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "missing-native-code-replacement-tab-group"
+            );
+        }
+        NetherCodeListSelectionStep tabStep = _codeReplacementSelectionTransaction.Advance(
+            registration.Sequence,
+            tabIndex,
+            currentTabIndex
         );
-        if (tab.Kind != NetherNativeActionResultKind.Started)
-            return tab;
+        if (tabStep.Kind == NetherCodeListSelectionStepKind.Invalid)
+            return NetherNativeActionResult.BindingUnavailable(tabStep.Detail);
+        if (tabStep.Kind == NetherCodeListSelectionStepKind.RequestTabActivation)
+        {
+            _codeReplacementTabActivationWait.Clear();
+            NetherNativeActionResult activate = TryInvokeExact(
+                rawTabGroup,
+                new NetherNativeMethodDescriptor(
+                    "UpdateTabState",
+                    new[] { "System.Int32" },
+                    "System.Void"
+                ),
+                new object[] { tabIndex },
+                "activate-code-replacement-tab",
+                registerNativeActionTask: false
+            );
+            if (activate.Kind != NetherNativeActionResultKind.Started)
+                return activate;
+            return NetherNativeActionResult.Started(
+                "awaiting-native-code-replacement-tab-activation"
+            );
+        }
+        if (tabStep.Kind == NetherCodeListSelectionStepKind.AwaitTabActivation)
+        {
+            if (_codeSelectionTask != null)
+            {
+                NetherNativeActionResult parent = PollResultTask(_codeSelectionTask);
+                if (parent.Kind != NetherNativeActionResultKind.Started)
+                {
+                    return parent.Kind == NetherNativeActionResultKind.Completed
+                        ? NetherNativeActionResult.BindingUnavailable(
+                            "native-code-confirmation-completed-before-replacement-tab-activation"
+                        )
+                        : parent;
+                }
+            }
+            return _codeReplacementTabActivationWait.AwaitRegistration(
+                "code-replacement-tab-activation"
+            );
+        }
+
+        _codeReplacementTabActivationWait.ObserveRegistration();
         NetherNativeActionResult thumbnail = TryInvokeExact(
             registration.Controller,
             new NetherNativeMethodDescriptor("OnClickThumbnail", new[] { "System.Int32" }, "System.Void"),
             new object[] { modelIndex },
-            "select-code-replacement-thumbnail"
+            "select-code-replacement-thumbnail",
+            registerNativeActionTask: false
         );
         if (thumbnail.Kind != NetherNativeActionResultKind.Started)
             return thumbnail;
+        if (!TryReadInt32(rawTabGroup, "CurrentIndex", out int verifiedTabIndex))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "missing-native-code-replacement-current-tab"
+            );
+        }
+        if (!TryReadCodeListBucketSelection(
+                registration.Controller,
+                tabIndex,
+                out IReadOnlyList<NetherCodeListThumbnailSelection>? selection,
+                out string selectionError
+            ))
+        {
+            return NetherNativeActionResult.BindingUnavailable(selectionError);
+        }
+        if (!NetherCodeListSelectionTransaction.TryVerifySelection(
+                tabIndex,
+                verifiedTabIndex,
+                removeCodeId,
+                selection!,
+                out string verificationError
+            ))
+        {
+            return NetherNativeActionResult.BindingUnavailable(verificationError);
+        }
         lock (_gate)
         {
             _codeReplacementConfirmPopup = null;
@@ -5844,7 +5926,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             registration.Controller,
             new NetherNativeMethodDescriptor("OnClickReplace", Array.Empty<string>(), "System.Void"),
             Array.Empty<object>(),
-            "confirm-code-replacement"
+            "confirm-code-replacement",
+            registerNativeActionTask: false
         );
         if (replace.Kind != NetherNativeActionResultKind.Started)
             return replace;
@@ -6949,18 +7032,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private static NetherNativeActionResult PollResultTask(object task)
     {
-        if (!TryReadMember(task, "Status", out object? rawStatus) || rawStatus == null)
-            return NetherNativeActionResult.BindingUnavailable("missing-result-task-status");
-        string status = rawStatus.ToString() ?? string.Empty;
-        if (string.Equals(status, "Pending", StringComparison.Ordinal))
-            return NetherNativeActionResult.Started("awaiting-native-result");
-        if (string.Equals(status, "Succeeded", StringComparison.Ordinal))
-            return NetherNativeActionResult.Completed("native-result-succeeded");
-        if (string.Equals(status, "Canceled", StringComparison.Ordinal))
-            return NetherNativeActionResult.UnknownOutcome("native-result-canceled");
-        if (string.Equals(status, "Faulted", StringComparison.Ordinal))
-            return NetherNativeActionResult.UnknownOutcome("native-result-faulted");
-        return NetherNativeActionResult.UnknownOutcome("unknown-native-result-status:" + status);
+        return NetherNativeTaskStatusPoller.Poll(() =>
+        {
+            bool found = TryReadMember(task, "Status", out object? rawStatus);
+            return found
+                ? NetherNativeTaskStatusRead.Available(rawStatus)
+                : NetherNativeTaskStatusRead.Missing();
+        });
     }
 
     private bool TryCompleteBattleTask(ref object? task, BattleTaskKind kind, out NetherNativeActionResult result)
@@ -8351,6 +8429,66 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         error = "unmapped-code-thumbnail:" + codeId;
         return false;
+    }
+
+    private static bool TryReadCodeListBucketSelection(
+        object controller,
+        int targetTabIndex,
+        out IReadOnlyList<NetherCodeListThumbnailSelection>? selection,
+        out string error
+    )
+    {
+        selection = null;
+        if (targetTabIndex < 0
+            || !TryReadMember(controller, "_modelDictionary", out object? modelDictionary)
+            || modelDictionary == null)
+        {
+            error = "missing-code-list-model-dictionary";
+            return false;
+        }
+
+        object? targetModels = null;
+        foreach (object entry in Enumerate(modelDictionary))
+        {
+            if (!TryReadMember(entry, "Key", out object? rawBucketKey)
+                || rawBucketKey == null
+                || !TryReadMember(entry, "Value", out object? models)
+                || models == null
+                || !TryConvertInt32(rawBucketKey, out int bucketKey))
+            {
+                error = "invalid-code-list-model-dictionary";
+                return false;
+            }
+            if (bucketKey != targetTabIndex)
+                continue;
+            if (targetModels != null)
+            {
+                error = "duplicate-code-list-model-bucket:" + targetTabIndex;
+                return false;
+            }
+            targetModels = models;
+        }
+        if (targetModels == null)
+        {
+            error = "missing-code-list-model-bucket:" + targetTabIndex;
+            return false;
+        }
+
+        var mapped = new List<NetherCodeListThumbnailSelection>();
+        foreach (object model in Enumerate(targetModels))
+        {
+            if (!TryReadCodeId(model, out long codeId)
+                || !TryReadBoolean(model, "IsSelected", out bool isSelected))
+            {
+                error = "invalid-code-list-thumbnail-selection-state";
+                return false;
+            }
+            mapped.Add(new NetherCodeListThumbnailSelection(codeId, isSelected));
+        }
+
+        selection = mapped;
+        error = string.Empty;
+        return true;
     }
 
     private static bool TryReadContentItem(ContentModel model, out long itemId, out int amount)

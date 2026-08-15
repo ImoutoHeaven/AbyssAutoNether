@@ -149,6 +149,71 @@ public class NetherRouteSafetyProductionCoordinatorTests
     }
 
     [Fact]
+    public void CurrentNativeOpaqueEffectTwelve_ReachesBattleProjectionInsteadOfMissingMetadata()
+    {
+        NetherActiveCodeErosionProjection code = new NetherActiveCodeErosionProjectionMapper().Map(
+            new[] { new NetherPossessionCodeErosionInput(30026, 1) },
+            new[] { new NetherCodeErosionMasterInput(30026, 12, 3, 100, 0) }
+        );
+
+        NetherProductionRouteSafetyPlan plan = Plan(code: code);
+
+        Assert.True(code.ErosionProjectionKnown, code.Detail);
+        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).FloorId);
+        Assert.Equal(code.CodeHash, plan.BattleProjectionByFloorId[2].CodeHash);
+        Assert.DoesNotContain(
+            plan.Route.Audit,
+            candidate => candidate.Detail.Contains("projection-metadata:missing", StringComparison.Ordinal)
+        );
+    }
+
+    [Fact]
+    public void ActiveNativeCategorySkillTypeSeven_MapsReliefAndKeepsProductionRouteSelectable()
+    {
+        NetherPossessionCodeErosionInput[] possessions = Enumerable.Range(1, 5)
+            .Select(id => new NetherPossessionCodeErosionInput(id, 1))
+            .ToArray();
+        NetherCodeErosionMasterInput[] masters = Enumerable.Range(1, 5)
+            .Select(id => new NetherCodeErosionMasterInput(id, 1, 0, 0, 0)
+            {
+                NetherId = 1,
+                Category = 3,
+            })
+            .ToArray();
+        NetherActiveCodeErosionProjection code = new NetherActiveCodeErosionProjectionMapper().Map(
+            possessions,
+            masters,
+            new[]
+            {
+                new NetherCodeCategoryErosionMasterInput(
+                    SkillId: 30000,
+                    NetherId: 1,
+                    Counter: 5,
+                    Category: 3,
+                    EffectType: 7,
+                    EffectParameter1: 5,
+                    EffectParameter2: 0,
+                    EffectParameter3: 0
+                ),
+            },
+            activeNetherId: 1
+        );
+
+        NetherProductionRouteSafetyPlan plan = Plan(code: code);
+
+        Assert.True(code.ErosionProjectionKnown, code.Detail);
+        Assert.True(Assert.Single(code.CategorySkillEntries).IsActive);
+        NetherCodeEffect effect = Assert.Single(code.ErosionEffects);
+        Assert.Equal(30000, effect.CodeId);
+        Assert.Equal(NetherCodeEffectKind.ErosionAdditionDown, effect.EffectKind);
+        Assert.Equal(5, effect.Amount);
+        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).FloorId);
+        Assert.Equal(40, plan.BattleProjectionByFloorId[2].ProjectedMaximumErosion);
+    }
+
+    [Fact]
     public void NecessaryBoss_CanUseHeadroomBelowTheHundredHardStop()
     {
         NetherSnapshot snapshot = Snapshot(

@@ -28,23 +28,59 @@ public class NetherActiveCodeErosionProjectionMapperTests
         Assert.Contains("40024:2:2:7:0:0", first.CodeHash);
     }
 
-    [Fact]
-    public void EffectTypesSixThroughNine_AreFailClosedWithoutAClientParameterConsumer()
+    [Theory]
+    [InlineData(6, (int)NetherCodeEffectKind.ErosionAdditionUp)]
+    [InlineData(7, (int)NetherCodeEffectKind.ErosionAdditionDown)]
+    public void NativeAdditionEffectTypes_MapParameterOneAndDirection(
+        int effectType,
+        int expectedKind
+    )
     {
-        foreach (int effectType in new[] { 6, 7, 8, 9 })
-        {
-            NetherActiveCodeErosionProjection projection = Map(
-                new[] { Possession(effectType) },
-                new[] { Master(effectType, effectType, 10 + effectType, 0, 0) }
-            );
+        NetherActiveCodeErosionProjection projection = Map(
+            new[] { Possession(effectType) },
+            new[] { Master(effectType, effectType, 10 + effectType, 0, 0) }
+        );
 
-            Assert.False(projection.ErosionProjectionKnown);
-            Assert.Empty(projection.ErosionEffects);
-            Assert.Contains(
-                "service-authoritative-nether-code-erosion-effect:type=" + effectType,
-                projection.Detail
-            );
-        }
+        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
+        NetherCodeEffect effect = Assert.Single(projection.ErosionEffects);
+        Assert.Equal((NetherCodeEffectKind)expectedKind, effect.EffectKind);
+        Assert.Equal(10 + effectType, effect.Amount);
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(9)]
+    public void NativeRateEffectTypes_RemainFailClosedWithoutAClientUnitContract(int effectType)
+    {
+        NetherActiveCodeErosionProjection projection = Map(
+            new[] { Possession(effectType) },
+            new[] { Master(effectType, effectType, 10 + effectType, 0, 0) }
+        );
+
+        Assert.False(projection.ErosionProjectionKnown);
+        Assert.Empty(projection.ErosionEffects);
+        Assert.Contains("service-authoritative-nether-code-erosion-rate:type=" + effectType, projection.Detail);
+    }
+
+    [Theory]
+    [InlineData(-1, 0, 0)]
+    [InlineData(2147483648L, 0L, 0L)]
+    [InlineData(5, 1, 0)]
+    [InlineData(5, 0, 1)]
+    public void NativeAdditionEffectTypes_RejectNonCanonicalParameterShapes(
+        long parameter1,
+        long parameter2,
+        long parameter3
+    )
+    {
+        NetherActiveCodeErosionProjection projection = Map(
+            new[] { Possession(7) },
+            new[] { Master(7, 7, parameter1, parameter2, parameter3) }
+        );
+
+        Assert.False(projection.ErosionProjectionKnown);
+        Assert.Empty(projection.ErosionEffects);
+        Assert.Contains("unsupported-nether-code-erosion-addition-shape:type=7", projection.Detail);
     }
 
     [Fact]
@@ -63,16 +99,17 @@ public class NetherActiveCodeErosionProjectionMapperTests
     }
 
     [Fact]
-    public void UnpublishedEffectTwelve_IsFailClosedInsteadOfReceivingInventedSemantics()
+    public void CurrentNativeOpaqueEffectTwelve_IsKnownForErosionProjectionWithoutInventingAnEffect()
     {
         NetherActiveCodeErosionProjection projection = Map(
             new[] { Possession(30026) },
             new[] { Master(30026, 12, 3, 100, 0) }
         );
 
-        Assert.False(projection.ErosionProjectionKnown);
+        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
         Assert.Empty(projection.ErosionEffects);
-        Assert.Contains("unknown-nether-code-effect-type:12", projection.Detail);
+        Assert.Equal(new long[] { 30026 }, projection.SortedCodeIds);
+        Assert.Contains("30026:1:12:3:100:0", projection.CodeHash);
     }
 
     [Theory]
@@ -136,12 +173,12 @@ public class NetherActiveCodeErosionProjectionMapperTests
             activeNetherId: 1
         );
 
-        Assert.False(projection.ErosionProjectionKnown);
-        Assert.Empty(projection.ErosionEffects);
-        Assert.Contains(
-            "service-authoritative-nether-code-erosion-effect:type=7",
-            projection.Detail
-        );
+        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
+        Assert.True(Assert.Single(projection.CategorySkillEntries).IsActive);
+        NetherCodeEffect effect = Assert.Single(projection.ErosionEffects);
+        Assert.Equal(30000, effect.CodeId);
+        Assert.Equal(NetherCodeEffectKind.ErosionAdditionDown, effect.EffectKind);
+        Assert.Equal(5, effect.Amount);
     }
 
     [Fact]

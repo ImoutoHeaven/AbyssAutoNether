@@ -78,6 +78,40 @@ public class NetherCodeLifecyclePatchRegistrationTests
     }
 
     [Fact]
+    public void Code_list_initialization_patch_preserves_shared_unitask_before_observation()
+    {
+        string patch = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Patches",
+            "NetherAutoClimbPatch.cs"
+        ));
+        int patchStart = patch.IndexOf(
+            "internal static class NetherAutoClimbCodeListInitializationLifecyclePatch",
+            StringComparison.Ordinal
+        );
+        int patchEnd = patch.IndexOf(
+            "internal static class NetherAutoClimbCodeTransformLifecyclePatch",
+            patchStart,
+            StringComparison.Ordinal
+        );
+        Assert.True(patchStart >= 0 && patchEnd > patchStart, "unable to bound initialization patch");
+        string initializationPatch = patch.Substring(patchStart, patchEnd - patchStart);
+
+        const string preserve = "__result = __result.Preserve();";
+        const string observe = "NetherRuntimeBridge.ObserveCodeListInitializationTask(";
+        int preserveIndex = initializationPatch.IndexOf(preserve, StringComparison.Ordinal);
+        int observeIndex = initializationPatch.IndexOf(observe, StringComparison.Ordinal);
+
+        Assert.True(preserveIndex >= 0, "raw UniTask is shared without Preserve()");
+        Assert.True(
+            observeIndex > preserveIndex,
+            "the retained task must replace __result before native and plugin consumers share it"
+        );
+        Assert.Single(Regex.Matches(initializationPatch, Regex.Escape(preserve)).Cast<Match>());
+    }
+
+    [Fact]
     public void Keep_cancel_starts_and_retains_the_exact_task_without_callback_observer()
     {
         string bridge = File.ReadAllText(Path.Combine(

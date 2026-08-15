@@ -18,9 +18,9 @@ internal readonly record struct NetherPossessionCodeErosionInput(long CodeId, lo
 }
 
 /// <summary>
-/// All raw effect fields from one <c>MNetherCodes</c> master row.  Parameter two and three are
-/// deliberately retained rather than discarded: a non-zero value on a 6–9 erosion effect is
-/// not currently representable by the one-amount erosion policy and therefore fails closed.
+/// All raw effect fields from one <c>MNetherCodes</c> master row. Parameter two and three are
+/// deliberately retained rather than discarded: the native addition effects use the exposed
+/// first parameter, while any additional parameter makes that shape non-canonical and fails closed.
 /// </summary>
 internal readonly record struct NetherCodeErosionMasterInput(
     long CodeId,
@@ -103,10 +103,13 @@ internal sealed record NetherActiveCodeErosionProjection
 /// <summary>
 /// Builds a fail-closed erosion projection from live possession codes, their exact master rows,
 /// and every category-skill threshold for the current Nether. Effect types 1/2 are confirmed
-/// non-erosion inputs and stay in the fingerprint. Types 6–9 expose only enum identity in the
-/// current client; their p1/p2/p3 amount/sign/unit contract is not consumed by client code, so
-/// any active instance makes arithmetic projection unavailable. No code ID, including 30024 or
-/// 40024, has a special erosion meaning here.
+/// non-erosion inputs and stay in the fingerprint. The current native enum confines erosion
+/// identities to 6–9, while raw type 12 remains a generic effect model; type 12 is therefore an
+/// opaque non-erosion input here and retains every raw parameter in the fingerprint. The native
+/// enum and category-effect model directly identify types 6/7 as addition up/down and expose p1
+/// as Parameter1, so the canonical p1/0/0 shape maps to an integer addition modifier. Types 8/9
+/// remain unavailable because the current client does not expose their rate unit contract. No
+/// code ID, including 30024 or 40024, has a special erosion meaning here.
 /// </summary>
 internal sealed class NetherActiveCodeErosionProjectionMapper
 {
@@ -205,10 +208,11 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
 
             switch (master.EffectType)
             {
-                // Confirmed ordinary/party ability effects retain their raw values in the
-                // entry/hash, but do not alter battle erosion.
+                // Confirmed ordinary/party ability effects and the current client's opaque raw
+                // type 12 retain every raw value in the entry/hash, but are not erosion effects.
                 case 1:
                 case 2:
+                case 12:
                     break;
                 case 6:
                 case 7:
@@ -318,20 +322,64 @@ internal sealed class NetherActiveCodeErosionProjectionMapper
     )
     {
         effect = default;
-        error = effectType is >= 6 and <= 9
-            ? "service-authoritative-nether-code-erosion-effect:type="
-                + effectType
-                + ":source="
-                + sourceId
-                + ":p1="
-                + effectParameter1
-                + ":p2="
-                + effectParameter2
-                + ":p3="
-                + effectParameter3
-            : "unknown-nether-code-effect-type:" + effectType;
-        return false;
+        if (effectType is 8 or 9)
+        {
+            error = DescribeUnavailableEffect(
+                "service-authoritative-nether-code-erosion-rate",
+                sourceId,
+                effectType,
+                effectParameter1,
+                effectParameter2,
+                effectParameter3
+            );
+            return false;
+        }
+        if (effectType is not (6 or 7))
+        {
+            error = "unknown-nether-code-effect-type:" + effectType;
+            return false;
+        }
+        if (effectParameter1 is < 0 or > int.MaxValue
+            || effectParameter2 != 0
+            || effectParameter3 != 0)
+        {
+            error = DescribeUnavailableEffect(
+                "unsupported-nether-code-erosion-addition-shape",
+                sourceId,
+                effectType,
+                effectParameter1,
+                effectParameter2,
+                effectParameter3
+            );
+            return false;
+        }
+
+        NetherCodeEffectKind effectKind = effectType == 6
+            ? NetherCodeEffectKind.ErosionAdditionUp
+            : NetherCodeEffectKind.ErosionAdditionDown;
+        effect = new NetherCodeEffect(sourceId, effectKind, (int)effectParameter1);
+        error = string.Empty;
+        return true;
     }
+
+    private static string DescribeUnavailableEffect(
+        string reason,
+        long sourceId,
+        int effectType,
+        long effectParameter1,
+        long effectParameter2,
+        long effectParameter3
+    ) => reason
+        + ":type="
+        + effectType
+        + ":source="
+        + sourceId
+        + ":p1="
+        + effectParameter1
+        + ":p2="
+        + effectParameter2
+        + ":p3="
+        + effectParameter3;
 
     private static NetherActiveCodeErosionProjection Known(
         IReadOnlyList<NetherActiveCodeErosionEntry> entries,

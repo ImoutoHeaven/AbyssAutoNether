@@ -62,9 +62,12 @@ public class NetherRuntimeActiveCodeErosionExtractorTests
             activeNetherId: 1
         );
 
-        Assert.False(projection.ErosionProjectionKnown);
-        Assert.Empty(projection.ErosionEffects);
-        Assert.Contains("service-authoritative-nether-code-erosion-effect:type=7", projection.Detail);
+        Assert.True(projection.ErosionProjectionKnown, projection.Detail);
+        Assert.True(Assert.Single(projection.CategorySkillEntries).IsActive);
+        NetherCodeEffect effect = Assert.Single(projection.ErosionEffects);
+        Assert.Equal(30000, effect.CodeId);
+        Assert.Equal(NetherCodeEffectKind.ErosionAdditionDown, effect.EffectKind);
+        Assert.Equal(5, effect.Amount);
     }
 
     private sealed class FakePossessionCode
