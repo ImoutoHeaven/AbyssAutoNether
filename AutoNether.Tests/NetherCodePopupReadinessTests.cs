@@ -23,6 +23,7 @@ public sealed class NetherCodePopupReadinessTests
         Assert.Equal(NetherRuntimePopupResultKind.Invalid, runtimePopup.Kind);
         Assert.False(runtimePopup.IsSuccess);
         Assert.False(runtimePopup.IsPending);
+        Assert.False(runtimePopup.IsNativeContinuation);
         Assert.False(runtimePopup.IsDefinitelyAbsent);
     }
 

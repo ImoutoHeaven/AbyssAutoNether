@@ -252,9 +252,95 @@ public class NetherRuntimeFlowCoordinatorTests
         Assert.True(coordinator.HasPendingParent);
     }
 
+    [Fact]
+    public void Native_code_replace_continuation_polls_its_parent_without_redispatching_the_popup()
+    {
+        var driver = new FakeDriver();
+        var coordinator = new NetherRuntimeFlowCoordinator(driver);
+        var floor = new NetherPlannedAction(NetherActionKind.SelectFloor)
+        {
+            FloorId = 389,
+            FloorLevel = 83,
+        };
+
+        Assert.True(coordinator.BeginFloorParent(floor));
+        driver.PopupResultOverride = NetherRuntimePopupResult.NativeContinuation(
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                RuntimeGeneration = 86,
+                OwnerAction = NetherActionKind.SelectFloor,
+                OwnerGeneration = coordinator.Generation,
+                Sequence = 154,
+            },
+            "owned-code-list-native-replacement-continuation"
+        );
+        driver.ParentPoll = NetherNativeActionResult.Started(
+            "awaiting-native-code-replace-popup-task"
+        );
+
+        NetherRuntimeParentPollResult pending = coordinator.Poll(
+            _ => throw new Xunit.Sdk.XunitException("Replace(2) is native continuation, not a new CodeOffer dispatch")
+        );
+
+        Assert.Equal(NetherRuntimeParentPollKind.Pending, pending.Kind);
+        Assert.Equal("awaiting-native-code-replace-popup-task", pending.Detail);
+        Assert.Equal(1, driver.ParentPollCount);
+        Assert.True(coordinator.HasPendingParent);
+
+        driver.PopupResultOverride = NetherRuntimePopupResult.Failure("missing-owned-floor-popup");
+        driver.ParentPoll = NetherNativeActionResult.Completed("native-code-replacement-terminal");
+        NetherRuntimeParentPollResult completed = coordinator.Poll(
+            _ => throw new Xunit.Sdk.XunitException("native continuation must never redispatch")
+        );
+
+        Assert.Equal(NetherRuntimeParentPollKind.Completed, completed.Kind);
+        Assert.Equal(2, driver.ParentPollCount);
+        Assert.False(coordinator.HasPendingParent);
+    }
+
+    [Fact]
+    public void Malformed_native_continuation_fails_closed_without_dispatching_or_polling_parent()
+    {
+        var driver = new FakeDriver();
+        var coordinator = new NetherRuntimeFlowCoordinator(driver);
+        Assert.True(coordinator.BeginFloorParent(
+            new NetherPlannedAction(NetherActionKind.SelectFloor)
+            {
+                FloorId = 389,
+                FloorLevel = 83,
+            }
+        ));
+        driver.PopupResultOverride = NetherRuntimePopupResult.NativeContinuation(
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeTransform,
+                RuntimeGeneration = 86,
+                OwnerAction = NetherActionKind.SelectFloor,
+                OwnerGeneration = coordinator.Generation,
+                Sequence = 154,
+            },
+            "forged-native-continuation"
+        );
+        driver.ParentPoll = NetherNativeActionResult.Completed("must-not-poll-parent");
+
+        NetherRuntimeParentPollResult result = coordinator.Poll(
+            _ => throw new Xunit.Sdk.XunitException("malformed continuation must not dispatch")
+        );
+
+        Assert.Equal(NetherRuntimeParentPollKind.Faulted, result.Kind);
+        Assert.Equal(
+            "owned-popup-unavailable:native-continuation-owner-mismatch",
+            result.Detail
+        );
+        Assert.Equal(0, driver.ParentPollCount);
+        Assert.False(coordinator.HasPendingParent);
+    }
+
     private sealed class FakeDriver : INetherRuntimeParentDriver
     {
         public NetherRuntimePopupContext? Popup { get; set; }
+        public NetherRuntimePopupResult? PopupResultOverride { get; set; }
         public string PopupFailure { get; set; } = "missing-owned-floor-popup";
         public bool PopupFailureIsPending { get; set; }
         public NetherRuntimePopupContext PendingPopup { get; set; } = new()
@@ -266,18 +352,23 @@ public class NetherRuntimeFlowCoordinatorTests
             Sequence = 1,
         };
         public NetherNativeActionResult ParentPoll { get; set; } = NetherNativeActionResult.Started("pending");
+        public int ParentPollCount { get; private set; }
         public int DispatchCount { get; private set; }
 
-        public NetherRuntimePopupResult TryGetOwnedPopup(NetherPlannedAction parent) => Popup == null
+        public NetherRuntimePopupResult TryGetOwnedPopup(NetherPlannedAction parent) => PopupResultOverride ?? (Popup == null
             ? PopupFailureIsPending
                 ? NetherRuntimePopupResult.Pending(PendingPopup, PopupFailure)
                 : NetherRuntimePopupResult.Failure(PopupFailure)
             : NetherRuntimePopupResult.Success(Popup with
             {
                 RuntimeGeneration = Popup.RuntimeGeneration > 0 ? Popup.RuntimeGeneration : 1,
-            });
+            }));
 
-        public NetherNativeActionResult PollFloorParent() => ParentPoll;
+        public NetherNativeActionResult PollFloorParent()
+        {
+            ParentPollCount++;
+            return ParentPoll;
+        }
 
         public void ObserveDispatch() => DispatchCount++;
     }

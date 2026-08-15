@@ -71,6 +71,7 @@ internal enum NetherRuntimePopupResultKind
     Invalid,
     Success,
     Pending,
+    NativeContinuation,
     Failure,
 }
 
@@ -95,6 +96,13 @@ internal readonly record struct NetherRuntimePopupResult
 
     public bool IsPending => Kind == NetherRuntimePopupResultKind.Pending && Popup != null;
 
+    /// <summary>
+    /// A live owned popup that belongs to an already-dispatched native async continuation.  It
+    /// must not be dispatched as a new policy decision and must not block polling that parent.
+    /// </summary>
+    public bool IsNativeContinuation =>
+        Kind == NetherRuntimePopupResultKind.NativeContinuation && Popup != null;
+
     public bool IsDefinitelyAbsent => Kind == NetherRuntimePopupResultKind.Failure
         && Popup == null
         && Detail == "missing-active-native-popup";
@@ -113,6 +121,11 @@ internal readonly record struct NetherRuntimePopupResult
     /// </summary>
     public static NetherRuntimePopupResult Pending(NetherRuntimePopupContext popup, string detail) =>
         new(NetherRuntimePopupResultKind.Pending, popup, detail ?? string.Empty);
+
+    public static NetherRuntimePopupResult NativeContinuation(
+        NetherRuntimePopupContext popup,
+        string detail
+    ) => new(NetherRuntimePopupResultKind.NativeContinuation, popup, detail ?? string.Empty);
 }
 
 internal enum NetherPopupDispatchKind

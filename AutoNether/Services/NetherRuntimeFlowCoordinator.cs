@@ -98,7 +98,26 @@ internal sealed class NetherRuntimeFlowCoordinator
                 ? NetherRuntimeParentPollResult.Pending(popup.Detail + ":" + wait.Detail)
                 : Fail("owned-popup-unavailable:" + popup.Detail + ":" + wait.Detail);
         }
-        if (!popup.IsSuccess && popup.Detail != "missing-owned-floor-popup")
+        if (popup.IsNativeContinuation)
+        {
+            NetherRuntimePopupContext context = popup.Popup!;
+            if (context.Kind != NetherRuntimePopupKind.CodeOffer
+                || context.RuntimeGeneration <= 0
+                || context.OwnerAction != NetherActionKind.SelectFloor
+                || context.OwnerGeneration != _generation
+                || context.Sequence <= 0)
+            {
+                return Fail("owned-popup-unavailable:native-continuation-owner-mismatch");
+            }
+
+            // Replace(2) is opened inside the already-dispatched CodeOffer receive task.  It is
+            // neither another policy decision nor a readiness wait: allow the bridge's retained
+            // code-selection task to advance before the floor parent is observed.
+            _ownedPopupReadinessWait.ObserveReady();
+        }
+        if (!popup.IsSuccess
+            && !popup.IsNativeContinuation
+            && popup.Detail != "missing-owned-floor-popup")
             return Fail("owned-popup-unavailable:" + popup.Detail);
         if (popup.IsSuccess)
         {

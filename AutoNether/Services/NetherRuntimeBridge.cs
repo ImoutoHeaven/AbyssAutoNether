@@ -202,6 +202,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         new(maximumMissingPolls: 600);
     private readonly NetherContentAcquiredConfirmLease _contentAcquiredConfirmLease = new();
     private readonly NetherContentAcquiredConfirmLease _floorEventHintConfirmLease = new();
+    private readonly NetherTreasureConfirmLease _treasureConfirmLease = new();
     private readonly NetherCodeReceivedConfirmLease _codeReceivedConfirmLease = new();
     private readonly NetherCodeListInitializationTaskEvidence _codeListInitializationEvidence = new();
     private readonly NetherCodeListSelectionTransaction _codeReplacementSelectionTransaction = new();
@@ -247,6 +248,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private PopupRegistration? _floorEventHintPopup;
     private CheckpointControllerRegistration? _returnScrollController;
     private object? _nativeActionTask;
+    private object? _treasureSkipTask;
     private object? _codeKeepCancelTask;
     private object? _codeSelectionTask;
     private object? _codeTransformTask;
@@ -1512,6 +1514,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _floorEventSequenceTaskFlow.Reset();
             _contentAcquiredConfirmLease.Reset();
             _floorEventHintConfirmLease.Reset();
+            ClearTreasureConfirmationFlow();
             _floorEventHintPopup = null;
             if (!_floorEventSequenceTaskFlow.Begin())
             {
@@ -1705,9 +1708,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 DecisionEpoch = decisionEpoch,
                 HasRecoveredFloorEventTaskEvidence = hasRecoveredFloorEventTaskEvidence,
             };
-            return mapped.IsPending
-                ? NetherRuntimePopupResult.Pending(context, mapped.Detail)
-                : NetherRuntimePopupResult.Success(context);
+            return mapped.Kind switch
+            {
+                NetherRuntimePopupResultKind.Success =>
+                    NetherRuntimePopupResult.Success(context),
+                NetherRuntimePopupResultKind.Pending =>
+                    NetherRuntimePopupResult.Pending(context, mapped.Detail),
+                NetherRuntimePopupResultKind.NativeContinuation =>
+                    NetherRuntimePopupResult.NativeContinuation(context, mapped.Detail),
+                _ => NetherRuntimePopupResult.Failure(
+                    "invalid-popup-map-result-kind:" + mapped.Kind
+                ),
+            };
         }
         catch (Exception ex)
         {
@@ -2479,6 +2491,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
             if (_recoveredFloorEventSequenceTaskFlow.IsActive)
             {
+                NetherNativeActionResult treasureConfirm = ConfirmTreasurePopupIfNeeded(
+                    recovered: true
+                );
+                if (treasureConfirm.Kind != NetherNativeActionResultKind.Completed)
+                    return treasureConfirm;
+
                 NetherNativeActionResult contentConfirm = ConfirmContentAcquiredPopupIfNeeded(
                     recovered: true
                 );
@@ -2496,6 +2514,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 );
                 if (recovered.Kind != NetherNativeActionResultKind.Started)
                 {
+                    ClearTreasureConfirmationFlow();
                     _contentAcquiredConfirmLease.Reset();
                     _floorEventHintConfirmLease.Reset();
                 }
@@ -2525,6 +2544,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private NetherNativeActionResult PollFloorParentNativeFlow()
     {
+        NetherNativeActionResult treasureConfirm = ConfirmTreasurePopupIfNeeded(
+            recovered: false
+        );
+        if (treasureConfirm.Kind != NetherNativeActionResultKind.Completed)
+            return treasureConfirm;
+
         NetherNativeActionResult contentConfirm = ConfirmContentAcquiredPopupIfNeeded(
             recovered: false
         );
@@ -2569,6 +2594,222 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
 
         return PollFloorParentTask();
+    }
+
+    private NetherNativeActionResult ConfirmTreasurePopupIfNeeded(bool recovered)
+    {
+        if (!_treasureConfirmLease.TryGetOwner(out NetherTreasureConfirmOwner owner))
+            return NetherNativeActionResult.Completed("no-treasure-confirm");
+        if (!IsCurrentTreasureConfirmOwner(owner, recovered))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "treasure-confirm-owner-registration-lost"
+            );
+        }
+
+        object popup = owner.Popup!;
+        switch (_treasureConfirmLease.Stage)
+        {
+            case NetherTreasureConfirmStage.AwaitingSkipInvocation:
+            {
+                NetherNativeMethodDescriptor descriptor = new(
+                    "SkipOpenTreasureAnimationAsync",
+                    new[] { "Il2CppSystem.Threading.CancellationToken" },
+                    UniTaskTypeName
+                );
+                if (!TryResolveExactMethod(
+                        popup.GetType(),
+                        descriptor,
+                        InstanceFlags,
+                        out string error,
+                        out MethodInfo? method
+                    ))
+                {
+                    return NetherNativeActionResult.BindingUnavailable(error);
+                }
+                if (!_treasureConfirmLease.TryClaimSkip(owner))
+                {
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-skip-claim-rejected"
+                    );
+                }
+
+                try
+                {
+                    object? cancellationToken = CreateDefaultValue(
+                        method!.GetParameters()[0].ParameterType
+                    );
+                    _treasureSkipTask = method.Invoke(popup, new[] { cancellationToken });
+                    if (_treasureSkipTask == null)
+                    {
+                        return NetherNativeActionResult.UnknownOutcome(
+                            "native-treasure-skip-missing-task-after-invoke"
+                        );
+                    }
+                    LogTreasureConfirmation(owner, recovered, "skip-invoked", "Started");
+                    return NetherNativeActionResult.Started(
+                        "native-treasure-skip-animation-task-started"
+                    );
+                }
+                catch (TargetInvocationException ex)
+                {
+                    return NetherNativeActionResult.UnknownOutcome(
+                        FormatInvocationException("treasure-skip-animation", ex)
+                    );
+                }
+                catch (Exception ex)
+                {
+                    return NetherNativeActionResult.UnknownOutcome(
+                        "native-treasure-skip-animation-exception:"
+                            + ex.GetType().Name + ":" + ex.Message
+                    );
+                }
+            }
+            case NetherTreasureConfirmStage.AwaitingSkipTask:
+            {
+                if (_treasureSkipTask == null)
+                {
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-missing-skip-task"
+                    );
+                }
+                NetherNativeActionResult result = PollResultTask(_treasureSkipTask);
+                if (result.Kind == NetherNativeActionResultKind.Started)
+                    return result;
+                _treasureSkipTask = null;
+                if (result.Kind != NetherNativeActionResultKind.Completed)
+                    return result;
+                if (!_treasureConfirmLease.ObserveSkipTaskCompleted(owner))
+                {
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-skip-completion-rejected"
+                    );
+                }
+                LogTreasureConfirmation(owner, recovered, "skip-completed", "Started");
+                return NetherNativeActionResult.Started(
+                    "native-treasure-skip-completed-awaiting-controller-resume"
+                );
+            }
+            case NetherTreasureConfirmStage.AwaitingResumePump:
+                if (!_treasureConfirmLease.AdvanceResumePump(owner))
+                {
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-resume-pump-rejected"
+                    );
+                }
+                // The packaged controller subscribes to SkipAndConfirmButton only after its
+                // animation await resumes. Return for a full pump before emitting that tap.
+                LogTreasureConfirmation(owner, recovered, "controller-resume-pump", "Started");
+                return NetherNativeActionResult.Started(
+                    "native-treasure-controller-resume-pump"
+                );
+            case NetherTreasureConfirmStage.AwaitingConfirmTap:
+            {
+                if (!TryReadMember(popup, "SkipAndConfirmButton", out object? button)
+                    || button == null)
+                {
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-missing-skip-and-confirm-button"
+                    );
+                }
+                NetherNativeMethodDescriptor descriptor = new(
+                    "OnSubmit",
+                    new[] { "UnityEngine.EventSystems.BaseEventData" },
+                    "System.Void"
+                );
+                if (!TryResolveExactMethod(
+                        button.GetType(),
+                        descriptor,
+                        InstanceFlags,
+                        out string error,
+                        out MethodInfo? method
+                    ))
+                {
+                    return NetherNativeActionResult.BindingUnavailable(error);
+                }
+                if (!_treasureConfirmLease.TryClaimConfirm(owner))
+                {
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-tap-claim-rejected"
+                    );
+                }
+
+                try
+                {
+                    object? eventData = CreateDefaultValue(method!.GetParameters()[0].ParameterType);
+                    method.Invoke(button, new[] { eventData });
+                    LogTreasureConfirmation(owner, recovered, "confirm-tap-invoked", "Started");
+                    return NetherNativeActionResult.Started(
+                        "native-treasure-confirm-tap-invoked"
+                    );
+                }
+                catch (TargetInvocationException ex)
+                {
+                    return NetherNativeActionResult.UnknownOutcome(
+                        FormatInvocationException("treasure-confirm-tap", ex)
+                    );
+                }
+                catch (Exception ex)
+                {
+                    return NetherNativeActionResult.UnknownOutcome(
+                        "native-treasure-confirm-tap-exception:"
+                            + ex.GetType().Name + ":" + ex.Message
+                    );
+                }
+            }
+            case NetherTreasureConfirmStage.Completed:
+                return NetherNativeActionResult.Completed("treasure-confirm-tap-completed");
+            default:
+                return NetherNativeActionResult.BindingUnavailable(
+                    "invalid-treasure-confirm-stage:" + _treasureConfirmLease.Stage
+                );
+        }
+    }
+
+    private bool IsCurrentTreasureConfirmOwner(
+        NetherTreasureConfirmOwner owner,
+        bool recovered
+    )
+    {
+        if (_treasurePopup is not PopupRegistration registration
+            || !registration.IsLive
+            || !ReferenceEquals(registration.Popup, owner.Popup)
+            || registration.RuntimeGeneration != owner.RuntimeGeneration
+            || registration.OwnerAction != owner.OwnerAction
+            || registration.OwnerGeneration != owner.OwnerGeneration
+            || registration.Sequence != owner.Sequence
+            || owner.RuntimeGeneration != _runtimeGeneration)
+        {
+            return false;
+        }
+
+        return recovered
+            ? owner.OwnerAction == NetherActionKind.None
+                && owner.OwnerGeneration == 0
+                && _floorParentAction == null
+                && _recoveredFloorEventSequenceTaskFlow.IsActive
+            : owner.OwnerAction == NetherActionKind.SelectFloor
+                && owner.OwnerGeneration == _floorParentGeneration
+                && _floorParentAction?.Kind == NetherActionKind.SelectFloor;
+    }
+
+    private static void LogTreasureConfirmation(
+        NetherTreasureConfirmOwner owner,
+        bool recovered,
+        string stage,
+        string outcome
+    )
+    {
+        NetherAutoClimbController.LogDiagnostic(
+            "runtime-lifecycle",
+            new("action", "treasure-confirm"),
+            new("stage", stage),
+            new("mode", recovered ? "recovered" : "owned"),
+            new("sequence", owner.Sequence.ToString()),
+            new("runtimeGeneration", owner.RuntimeGeneration.ToString()),
+            new("ownerGeneration", owner.OwnerGeneration.ToString()),
+            new("outcome", outcome)
+        );
     }
 
     private NetherNativeActionResult ConfirmContentAcquiredPopupIfNeeded(bool recovered)
@@ -3211,6 +3452,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _recoveredFloorEventSequenceTaskFlow.Reset();
             _contentAcquiredConfirmLease.Reset();
             _floorEventHintConfirmLease.Reset();
+            ClearTreasureConfirmationFlow();
             _popupOwnership.Clear();
             _eventPopup = null;
             _recoverPopup = null;
@@ -3296,6 +3538,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _recoveredFloorEventSequenceTaskFlow.Reset();
                 _contentAcquiredConfirmLease.Reset();
                 _floorEventHintConfirmLease.Reset();
+                ClearTreasureConfirmationFlow();
                 _floorEventHintPopup = null;
             }
             _floorSelectionController = controller;
@@ -3348,6 +3591,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     /// </summary>
     private void ClearRuntimePopupRegistrationsForControllerReplacementCore()
     {
+        ClearTreasureConfirmationFlow();
         _popupOwnership.Clear();
         _eventPopup = null;
         _recoverPopup = null;
@@ -3404,6 +3648,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _recoveredFloorEventSequenceTaskFlow.Reset();
                 _contentAcquiredConfirmLease.Reset();
                 _floorEventHintConfirmLease.Reset();
+                ClearTreasureConfirmationFlow();
                 // Let the per-Continue evidence decide whether this exact owner termination is
                 // still relevant.  The native parent can become terminal before Unity destroys
                 // the old FloorSelection owner.
@@ -3875,6 +4120,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _recoveredFloorEventTaskLease.InvalidatePopup(popup);
             _contentAcquiredConfirmLease.InvalidatePopup(popup);
             _floorEventHintConfirmLease.InvalidatePopup(popup);
+            if (_treasureConfirmLease.InvalidatePopup(popup))
+                _treasureSkipTask = null;
             _codeReceivedConfirmLease.InvalidatePopup(popup);
             if (_codeListInitializationEvidence.InvalidatePopup(popup))
                 _codeListInitializationTaskWait.Clear();
@@ -4007,6 +4254,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _floorEventSequenceTaskFlow.Reset();
         _contentAcquiredConfirmLease.Reset();
         _floorEventHintConfirmLease.Reset();
+        ClearTreasureConfirmationFlow();
         ResetOwnedPopupStages();
         ClearCodeKeepCancelFlow();
         ClearCodeSelectionFlow();
@@ -4441,6 +4689,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 {
                     _contentAcquiredConfirmLease.Reset();
                     _floorEventHintConfirmLease.Reset();
+                    ClearTreasureConfirmationFlow();
                 }
                 mode = "recovered-candidate";
                 detail = accepted
@@ -5038,6 +5287,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         );
     }
 
+    private void ClearTreasureConfirmationFlow()
+    {
+        _treasureSkipTask = null;
+        _treasureConfirmLease.Reset();
+    }
+
     private void ClearCodeSelectionFlow()
     {
         _codeSelectionTask = null;
@@ -5141,6 +5396,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return NetherNativeActionResult.BindingUnavailable(terminalError);
 
         bool recoveredSequence = false;
+        bool treasureSequence = false;
         lock (_gate)
         {
             if (_floorParentAction != null)
@@ -5167,6 +5423,27 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 }
                 recoveredSequence = true;
             }
+
+            if (selected.Kind == EventFlowKind.Treasure)
+            {
+                var treasureOwner = new NetherTreasureConfirmOwner(
+                    registration.Popup,
+                    registration.OwnerAction,
+                    registration.OwnerGeneration,
+                    registration.RuntimeGeneration,
+                    registration.Sequence
+                );
+                if (!_treasureConfirmLease.Begin(treasureOwner))
+                {
+                    if (recoveredSequence)
+                        _recoveredFloorEventSequenceTaskFlow.Reset();
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-owner-already-active-or-invalid"
+                    );
+                }
+                _treasureSkipTask = null;
+                treasureSequence = true;
+            }
         }
 
         try
@@ -5188,19 +5465,29 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
         catch (TargetInvocationException ex)
         {
-            if (recoveredSequence)
+            if (recoveredSequence || treasureSequence)
             {
                 lock (_gate)
-                    _recoveredFloorEventSequenceTaskFlow.Reset();
+                {
+                    if (treasureSequence)
+                        ClearTreasureConfirmationFlow();
+                    if (recoveredSequence)
+                        _recoveredFloorEventSequenceTaskFlow.Reset();
+                }
             }
             return NetherNativeActionResult.UnknownOutcome(FormatInvocationException("select-event-option", ex));
         }
         catch (Exception ex)
         {
-            if (recoveredSequence)
+            if (recoveredSequence || treasureSequence)
             {
                 lock (_gate)
-                    _recoveredFloorEventSequenceTaskFlow.Reset();
+                {
+                    if (treasureSequence)
+                        ClearTreasureConfirmationFlow();
+                    if (recoveredSequence)
+                        _recoveredFloorEventSequenceTaskFlow.Reset();
+                }
             }
             return NetherNativeActionResult.UnknownOutcome("select-event-option-exception:" + ex.GetType().Name + ":" + ex.Message);
         }
@@ -7937,14 +8224,24 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return NetherRuntimePopupResult.Failure("missing-native-code-list-popup-type");
 
         // Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupType:
-        // Normal=0, Change=1, Replace=2.  Only Change is a separately dispatchable
-        // target_type=7 stage; Replace remains internal to the CodeOffer Receive task.
-        return popupType == 1
-            ? NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
+        // Normal=0, Change=1, Replace=2. Change is the separately dispatchable target_type=7
+        // stage. Replace is a legal popup inside the already-dispatched CodeOffer Receive task:
+        // expose it as a native continuation so RuntimeFlow polls that retained task instead of
+        // faulting or redispatching the offer.
+        return popupType switch
+        {
+            1 => NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
             {
                 Kind = NetherRuntimePopupKind.CodeTransform,
-            })
-            : NetherRuntimePopupResult.Failure("owned-code-list-internal-popup-type:" + popupType);
+            }),
+            2 => NetherRuntimePopupResult.NativeContinuation(
+                new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.CodeOffer },
+                "owned-code-list-native-replacement-continuation"
+            ),
+            _ => NetherRuntimePopupResult.Failure(
+                "owned-code-list-internal-popup-type:" + popupType
+            ),
+        };
     }
 
     private static bool TryReadCodeListPopupType(object controller, out int popupType)
