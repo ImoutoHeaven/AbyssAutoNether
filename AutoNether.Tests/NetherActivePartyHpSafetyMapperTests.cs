@@ -1,5 +1,7 @@
 #nullable enable
 
+using System;
+using System.Collections.Generic;
 using AutoNether.Services;
 using Xunit;
 
@@ -10,7 +12,7 @@ public class NetherActivePartyHpSafetyMapperTests
     [Theory]
     [InlineData(0.299d, 299)]
     [InlineData(0.300d, 300)]
-    public void AuthoritativeRatio_UsesCheckedFloorPermille(double hpRatio, int expectedPermille)
+    public void AuthoritativeRatio_UsesCanonicalCheckedPermilleQuantization(double hpRatio, int expectedPermille)
     {
         NetherActivePartyHpSafety safety = Map(Member(1, hpRatio));
 
@@ -32,7 +34,7 @@ public class NetherActivePartyHpSafetyMapperTests
     }
 
     [Fact]
-    public void DeadMember_IsAnExplicitZeroPermille()
+    public void DeadRosterMember_IsExcludedFromTheCurrentLivingMinimum()
     {
         NetherActivePartyHpSafety safety = Map(
             Member(1, 0.800d),
@@ -40,7 +42,39 @@ public class NetherActivePartyHpSafetyMapperTests
         );
 
         Assert.True(safety.IsKnown);
-        Assert.Equal(0, safety.MinimumHpPermille);
+        Assert.Equal(800, safety.MinimumHpPermille);
+    }
+
+    [Fact]
+    public void PartyWithNoLivingMember_IsUnknown()
+    {
+        NetherActivePartyHpSafety safety = Map(
+            Member(1, 0d, isAlive: false),
+            Member(2, 0d, isAlive: false)
+        );
+
+        Assert.False(safety.IsKnown);
+        Assert.Null(safety.MinimumHpPermille);
+        Assert.Contains("living", safety.Detail);
+    }
+
+    [Fact]
+    public void LivingRows_AreCharacterIdSortedAndImmutable()
+    {
+        NetherActivePartyHpSafety safety = Map(
+            Member(20, 0.800d),
+            Member(30, 0d, isAlive: false),
+            Member(10, 0.500d)
+        );
+
+        IList<NetherActiveLivingMemberHp> living =
+            Assert.IsAssignableFrom<IList<NetherActiveLivingMemberHp>>(safety.LivingMembers);
+        Assert.Equal(10, living[0].CharacterId);
+        Assert.Equal(500, living[0].HpPermille);
+        Assert.Equal(20, living[1].CharacterId);
+        Assert.Equal(800, living[1].HpPermille);
+        Assert.True(living.IsReadOnly);
+        Assert.Throws<NotSupportedException>(() => living.Add(new NetherActiveLivingMemberHp(40, 900)));
     }
 
     [Fact]

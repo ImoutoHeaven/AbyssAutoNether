@@ -1804,6 +1804,17 @@ internal static class NetherAutoClimbController
             return;
         }
 
+        NetherRuntimeStrategyEvidenceResult strategyEvidence =
+            _bridge.TryCaptureStrategyEvidence(snapshot, settings);
+        if (!strategyEvidence.IsSuccess)
+        {
+            FailClosed(
+                NetherPauseReason.BindingUnavailable,
+                "strategy-evidence-boundary:" + strategyEvidence.Detail
+            );
+            return;
+        }
+
         if (_bridge.HasRecoveredCodeOffer)
         {
             ActivePopupReadiness.Clear();
@@ -1898,6 +1909,18 @@ internal static class NetherAutoClimbController
         bool pauseBeforeNewRoute = checkpoint.Kind == NetherCheckpointDecisionKind.PauseAtNonCheckpointTarget;
         switch (checkpoint.Kind)
         {
+            case NetherCheckpointDecisionKind.StartRun:
+                ExecuteNativeAction(
+                    snapshot,
+                    new NetherPlannedAction(NetherActionKind.StartRun)
+                    {
+                        FloorLevel = checkpoint.StartFloorLevel,
+                        ExpectedBeforeStatus = NetherSessionStatus.NotPlayed,
+                        ExpectedAfterStatus = NetherSessionStatus.Play,
+                    },
+                    "not-played-start"
+                );
+                return;
             case NetherCheckpointDecisionKind.Pause:
                 FailClosed(checkpoint.PauseReason, checkpoint.Detail);
                 return;
@@ -2808,6 +2831,9 @@ internal static class NetherAutoClimbController
     private static NetherAutoClimbSettings BuildSettings() => new()
     {
         MaxDepth = Config.NetherAutoClimbMaxDepth.Value,
+        StrategyMode = Config.NetherAutoClimbStrategyMode.Value,
+        ResearchPrimaryFamily = Config.NetherAutoClimbResearchPrimaryFamily.Value,
+        ResearchSecondaryFamily = Config.NetherAutoClimbResearchSecondaryFamily.Value,
         SoftErosionLimit = Config.NetherAutoClimbSoftErosionLimit.Value,
         MinimumCharacterHpPermille = Config.NetherAutoClimbMinimumCharacterHpPermille.Value,
         CombatLane = Config.NetherAutoClimbCombatLane.Value,

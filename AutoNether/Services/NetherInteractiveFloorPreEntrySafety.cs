@@ -47,6 +47,45 @@ internal readonly record struct NetherFloorEventPartMasterRow(
     public bool HasRequiredFields { get; init; } = true;
 }
 
+internal enum NetherInteractivePartialDeathObjectiveKind
+{
+    Unknown = 0,
+    HpPaidEventKeyForRank5Treasure,
+    TreasureHpPayment,
+}
+
+/// <summary>
+/// Prevalidated route/objective proof supplied by the later route-strategy tickets.  The current
+/// production capture supplies none, so an option shape alone can never authorize a character
+/// death.  Exact Event/part IDs prevent proof from being reused for another popup option.
+/// </summary>
+internal sealed record NetherInteractivePartialDeathEligibility(
+    NetherInteractivePartialDeathObjectiveKind Kind,
+    long EventId,
+    long EventPartId,
+    long ObjectiveNodeId
+)
+{
+    public bool IsKnown { get; init; }
+    public bool ObjectiveReachable { get; init; }
+    public int ExactTreasureRank { get; init; }
+    public bool IsOnlyTerminalReachingRoute { get; init; }
+    public bool NoBetterAffordableCurrencyKeySource { get; init; }
+    public string UnknownReason { get; init; } = string.Empty;
+
+    public bool AllowsHpPaidEventKey => IsKnown
+        && Kind == NetherInteractivePartialDeathObjectiveKind.HpPaidEventKeyForRank5Treasure
+        && EventId > 0 && EventPartId > 0 && ObjectiveNodeId > 0
+        && ObjectiveReachable && ExactTreasureRank == 5
+        && NoBetterAffordableCurrencyKeySource;
+
+    public bool AllowsTreasureHpPayment => IsKnown
+        && Kind == NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment
+        && EventId > 0 && EventPartId > 0 && ObjectiveNodeId > 0
+        && ObjectiveReachable
+        && (ExactTreasureRank == 5 || IsOnlyTerminalReachingRoute);
+}
+
 /// <summary>
 /// Complete authoritative input for pre-entry proof of an interactive floor.  Nullable resource
 /// values mean the runtime failed to read them; they are never substituted with zero.
@@ -74,6 +113,8 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyInput(
     /// <summary>Current authoritative portfolio used to prove that target_type=7 has a removable code.</summary>
     public IReadOnlyList<NetherCodeState> CurrentCodes { get; init; } = Array.Empty<NetherCodeState>();
     public int CodeCapacity { get; init; }
+    public IReadOnlyList<NetherInteractivePartialDeathEligibility> PartialDeathEligibility { get; init; } =
+        Array.Empty<NetherInteractivePartialDeathEligibility>();
 }
 
 /// <summary>
@@ -85,7 +126,10 @@ internal sealed record NetherInteractiveOptionProjection(
     int ErosionDelta,
     int HpDelta,
     IReadOnlyList<NetherEffect> ExpectedEffects
-);
+)
+{
+    public bool AllowsPartialActiveDeaths { get; init; }
+}
 
 /// <summary>
 /// Projection of the exact event row already represented by the server floor model. The route
@@ -154,10 +198,10 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
 
         return input.FloorKind switch
         {
-            NetherFloorNodeType.Event => EvaluatePossibleEventRows(input, snapshot!, isRecovery: false),
-            NetherFloorNodeType.Recovery => EvaluatePossibleEventRows(input, snapshot!, isRecovery: true),
+            NetherFloorNodeType.Event => EvaluatePossibleEventRows(input, snapshot!),
+            NetherFloorNodeType.Recovery => EvaluatePossibleEventRows(input, snapshot!),
             NetherFloorNodeType.Shop => EvaluateShopOff(input),
-            NetherFloorNodeType.Treasure => EvaluateTreasureKeyOnly(input, snapshot!),
+            NetherFloorNodeType.Treasure => EvaluatePossibleEventRows(input, snapshot!),
             _ => NetherInteractiveFloorPreEntrySafetyResult.Pause(
                 NetherPauseReason.UnknownFloor,
                 "unsupported-interactive-floor-kind:" + ((int)input.FloorKind).ToString(CultureInfo.InvariantCulture)
@@ -181,7 +225,8 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         if (!input.CurrentErosion.HasValue
             || !input.CurrentNetherGold.HasValue
             || !input.CurrentTreasureKeys.HasValue
-            || input.ActiveHpPermille == null)
+            || input.ActiveHpPermille == null
+            || input.PartialDeathEligibility == null)
         {
             failure = Unknown("missing-interactive-authoritative-resource");
             return false;
@@ -241,8 +286,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
 
     private NetherInteractiveFloorPreEntrySafetyResult EvaluatePossibleEventRows(
         NetherInteractiveFloorPreEntrySafetyInput input,
-        NetherSnapshot snapshot,
-        bool isRecovery
+        NetherSnapshot snapshot
     )
     {
         if (!TryIndexEventMasters(
@@ -264,13 +308,19 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         int worstHp = int.MaxValue;
         foreach (NetherFloorEventMasterRow row in resolvedRows!)
         {
-            if (!TryBuildOptions(row, parts!, out IReadOnlyList<NetherEventOption>? options, out string optionError))
+            if (!TryBuildOptions(
+                    row,
+                    parts!,
+                    input.PartialDeathEligibility,
+                    out IReadOnlyList<NetherEventOption>? options,
+                    out string optionError
+                ))
                 return Unknown("event-row-" + row.EventId.ToString(CultureInfo.InvariantCulture) + ":" + optionError);
             if (!TrySelectSafeOption(
                     snapshot,
                     options!,
                     input.Settings!,
-                    isRecovery,
+                    input.FloorKind,
                     out int optionNumber,
                     out NetherInteractiveOptionProjection projection,
                     out NetherPauseReason rejection,
@@ -392,6 +442,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
     private static bool TryBuildOptions(
         NetherFloorEventMasterRow row,
         IReadOnlyDictionary<long, NetherFloorEventPartMasterRow> parts,
+        IReadOnlyList<NetherInteractivePartialDeathEligibility> partialDeathEligibility,
         out IReadOnlyList<NetherEventOption>? options,
         out string error
     )
@@ -434,7 +485,23 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 error = "event-part-" + id.ToString(CultureInfo.InvariantCulture) + ":" + partError;
                 return false;
             }
-            mapped.Add(new NetherEventOption(index + 1, effects!));
+            NetherInteractivePartialDeathEligibility[] matchingEligibility = partialDeathEligibility
+                .Where(proof => proof != null
+                    && proof.EventId == row.EventId
+                    && proof.EventPartId == part.PartId)
+                .ToArray();
+            if (matchingEligibility.Length > 1)
+            {
+                error = "ambiguous-partial-death-eligibility:" + part.PartId;
+                return false;
+            }
+            NetherInteractivePartialDeathEligibility? eligibility = matchingEligibility.FirstOrDefault();
+            mapped.Add(new NetherEventOption(index + 1, effects!)
+            {
+                EventId = row.EventId,
+                EventPartId = part.PartId,
+                PartialDeathEligibility = eligibility,
+            });
         }
         if (mapped.Count == 0)
         {
@@ -542,7 +609,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
-        bool isRecovery,
+        NetherFloorNodeType floorKind,
         out int selectedOptionNumber,
         out NetherInteractiveOptionProjection selectedProjection,
         out NetherPauseReason rejection,
@@ -556,9 +623,12 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         var safeOptions = new List<NetherEventOption>();
         foreach (NetherEventOption option in options)
         {
-            NetherEventDecision decision = isRecovery
-                ? _eventPolicy.DecideRecovery(snapshot, [option], settings)
-                : _eventPolicy.DecideEvent(snapshot, [option], settings);
+            NetherEventDecision decision = DecideInteractiveOption(
+                snapshot,
+                [option],
+                settings,
+                floorKind
+            );
             if (decision.Kind != NetherEventDecisionKind.Select)
             {
                 CaptureMoreSpecificRejection(decision, ref rejection, ref detail);
@@ -570,7 +640,13 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 // safety.  It is not an exit unless a non-battle option from this same row exists.
                 continue;
             }
-            if (!HasSafeHpFloor(snapshot, decision.HpDelta, settings.MinimumCharacterHpPermille))
+            NetherRouteHpRule hpRule = MapOptionHpRule(floorKind, decision);
+            if (!HasSafeHpFloor(
+                    snapshot,
+                    decision.HpDelta,
+                    settings.MinimumCharacterHpPermille,
+                    hpRule
+                ))
             {
                 rejection = NetherPauseReason.UnsafeHp;
                 detail = "event-option-hp-below-minimum";
@@ -582,9 +658,12 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         if (safeOptions.Count == 0)
             return false;
 
-        NetherEventDecision selected = isRecovery
-            ? _eventPolicy.DecideRecovery(snapshot, safeOptions, settings)
-            : _eventPolicy.DecideEvent(snapshot, safeOptions, settings);
+        NetherEventDecision selected = DecideInteractiveOption(
+            snapshot,
+            safeOptions,
+            settings,
+            floorKind
+        );
         if (selected.Kind != NetherEventDecisionKind.Select || selected.StartsBattleAfterSelection)
         {
             rejection = selected.Kind == NetherEventDecisionKind.Pause ? selected.PauseReason : NetherPauseReason.NoSafeRoute;
@@ -599,7 +678,10 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 checked(selected.ProjectedErosion - snapshot.ErosionPoint),
                 selected.HpDelta,
                 selected.ExpectedEffects.ToArray()
-            );
+            )
+            {
+                AllowsPartialActiveDeaths = selected.AllowsPartialActiveDeaths,
+            };
         }
         catch (OverflowException)
         {
@@ -610,15 +692,66 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         return true;
     }
 
-    private static bool HasSafeHpFloor(NetherSnapshot snapshot, int hpDelta, int minimumHpPermille)
+    private NetherEventDecision DecideInteractiveOption(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        NetherFloorNodeType floorKind
+    ) => floorKind switch
+    {
+        NetherFloorNodeType.Event => _eventPolicy.DecideEvent(snapshot, options, settings),
+        NetherFloorNodeType.Recovery => _eventPolicy.DecideRecovery(snapshot, options, settings),
+        NetherFloorNodeType.Treasure => _eventPolicy.DecideTreasure(snapshot, options, settings),
+        _ => new NetherEventDecision
+        {
+            Kind = NetherEventDecisionKind.Pause,
+            PauseReason = NetherPauseReason.UnknownFloor,
+            Detail = "unsupported-interactive-option-floor-kind",
+        },
+    };
+
+    private static NetherRouteHpRule MapOptionHpRule(
+        NetherFloorNodeType floorKind,
+        NetherEventDecision decision
+    )
+    {
+        var projection = new NetherInteractiveOptionProjection(
+            decision.OptionNumber,
+            decision.ExpectedErosionDelta,
+            decision.HpDelta,
+            decision.ExpectedEffects
+        )
+        {
+            AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
+        };
+        return NetherRouteHpRuleMapper.Map(
+            floorKind,
+            [projection],
+            new NetherInteractiveWorstCaseProjection(decision.ExpectedErosionDelta, decision.HpDelta)
+        );
+    }
+
+    private static bool HasSafeHpFloor(
+        NetherSnapshot snapshot,
+        int hpDelta,
+        int minimumHpPermille,
+        NetherRouteHpRule hpRule
+    )
     {
         if (hpDelta >= 0)
             return true;
         try
         {
+            if (hpRule is NetherRouteHpRule.TreasureGroupSurvival
+                or NetherRouteHpRule.HpPaidKeyGroupSurvival)
+            {
+                return snapshot.Characters.Any(character =>
+                    character.IsActive && checked(character.HpPermille + hpDelta) > 0
+                );
+            }
             foreach (NetherCharacterState character in snapshot.Characters)
             {
-                if (character.IsActive && checked(character.HpPermille + hpDelta) < minimumHpPermille)
+                if (character.IsActive && checked(character.HpPermille + hpDelta) <= 0)
                     return false;
             }
             return true;
@@ -667,28 +800,6 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             return NetherInteractiveFloorPreEntrySafetyResult.Pause(
                 NetherPauseReason.InvalidConfiguration,
                 "interactive-shop-mode-invalid"
-            );
-        }
-        return NetherInteractiveFloorPreEntrySafetyResult.SafeNeutral();
-    }
-
-    private static NetherInteractiveFloorPreEntrySafetyResult EvaluateTreasureKeyOnly(
-        NetherInteractiveFloorPreEntrySafetyInput input,
-        NetherSnapshot snapshot
-    )
-    {
-        if (input.Settings!.TreasureMode != NetherTreasureMode.KeyOnly)
-        {
-            return NetherInteractiveFloorPreEntrySafetyResult.Pause(
-                NetherPauseReason.NoSafeRoute,
-                "interactive-treasure-mode-not-key-only"
-            );
-        }
-        if (snapshot.TreasureKeyCount < 1)
-        {
-            return NetherInteractiveFloorPreEntrySafetyResult.Pause(
-                NetherPauseReason.NoSafeRoute,
-                "interactive-treasure-key-unavailable"
             );
         }
         return NetherInteractiveFloorPreEntrySafetyResult.SafeNeutral();

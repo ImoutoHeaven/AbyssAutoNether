@@ -16,6 +16,12 @@ internal readonly record struct NetherActiveBattleMemberHp(
     bool IsAlive
 );
 
+/// <summary>One exact current-living row after checked native ratio conversion.</summary>
+internal readonly record struct NetherActiveLivingMemberHp(
+    long CharacterId,
+    int HpPermille
+);
+
 /// <summary>
 /// The lowest authoritative party HP fraction, or an explicit unknown result.  A nullable
 /// value prevents callers from silently treating an unavailable health contract as full health.
@@ -24,13 +30,56 @@ internal readonly record struct NetherActivePartyHpSafety(
     bool IsKnown,
     int? MinimumHpPermille,
     string Detail
-);
+)
+{
+    /// <summary>
+    /// Deterministically CharacterId-sorted immutable current-living rows.  Aggregate minimum HP
+    /// is insufficient authority because a different surviving roster can have the same value.
+    /// </summary>
+    public IReadOnlyList<NetherActiveLivingMemberHp>? LivingMembers { get; init; } =
+        Array.Empty<NetherActiveLivingMemberHp>();
+}
 
 /// <summary>
-/// Converts every live party character's authoritative HP ratio to the strict lowest permille
-/// used by the battle route gate.  Any incomplete, duplicate, non-finite, or out-of-range
-/// observation is unsafe.  A non-alive member is conservatively zero after its ratio has still
-/// been validated, so a stale contradictory model cannot conceal malformed raw input.
+/// Canonical conversion for native <c>System.Single HpRatio</c>. The game/server surface is
+/// permille-shaped but binary Single values such as <c>0.299f</c> are not exact in Double. Round
+/// midpoint away from zero, matching the authoritative snapshot convention, so every capture
+/// path reconstructs the same integer without flooring a representation artifact.
+/// </summary>
+internal static class NetherHpRatioPermilleQuantizer
+{
+    public static bool TryQuantize(double hpRatio, out int hpPermille)
+    {
+        hpPermille = 0;
+        if (double.IsNaN(hpRatio)
+            || double.IsInfinity(hpRatio)
+            || hpRatio is < 0d or > 1d)
+        {
+            return false;
+        }
+
+        try
+        {
+            hpPermille = checked((int)Math.Round(
+                checked(hpRatio * 1000d),
+                MidpointRounding.AwayFromZero
+            ));
+            return hpPermille is >= 0 and <= 1000;
+        }
+        catch (OverflowException)
+        {
+            hpPermille = 0;
+            return false;
+        }
+    }
+}
+
+/// <summary>
+/// Converts the current living party characters' authoritative HP ratios to the strict lowest
+/// permille used by the battle route gate.  The native roster retains dead members with
+/// <c>IsAlive=false</c>, so their zero HP is validated but excluded from the current-living
+/// minimum. Any incomplete, duplicate, non-finite, out-of-range, or all-dead observation is
+/// unsafe.
 /// </summary>
 internal sealed class NetherActivePartyHpSafetyMapper
 {
@@ -40,6 +89,7 @@ internal sealed class NetherActivePartyHpSafetyMapper
             return Unknown("empty-active-party-character-models");
 
         var characterIds = new HashSet<long>();
+        var livingMembers = new List<NetherActiveLivingMemberHp>();
         int minimumPermille = 1000;
 
         foreach (NetherActiveBattleMemberHp member in members)
@@ -53,23 +103,28 @@ internal sealed class NetherActivePartyHpSafetyMapper
             if (member.HpRatio is < 0d or > 1d)
                 return Unknown("out-of-range-nether-party-hp-ratio:" + member.CharacterId);
 
-            try
+            if (!NetherHpRatioPermilleQuantizer.TryQuantize(
+                    member.HpRatio,
+                    out int permille
+                ))
             {
-                // Floor conversion is intentional: the server ratio is permille-shaped and a
-                // fractional presentation value must never round a member up over the safety
-                // threshold.
-                int permille = checked((int)Math.Floor(checked(member.HpRatio * 1000d)));
-                if (permille is < 0 or > 1000)
-                    return Unknown("invalid-nether-party-hp-permille:" + member.CharacterId);
-                minimumPermille = Math.Min(minimumPermille, member.IsAlive ? permille : 0);
+                return Unknown("invalid-nether-party-hp-permille:" + member.CharacterId);
             }
-            catch (OverflowException)
+            if (member.IsAlive)
             {
-                return Unknown("nether-party-hp-permille-overflow:" + member.CharacterId);
+                livingMembers.Add(new NetherActiveLivingMemberHp(member.CharacterId, permille));
+                minimumPermille = Math.Min(minimumPermille, permille);
             }
         }
 
-        return new NetherActivePartyHpSafety(true, minimumPermille, string.Empty);
+        if (livingMembers.Count == 0)
+            return Unknown("empty-living-nether-party");
+
+        livingMembers.Sort(static (left, right) => left.CharacterId.CompareTo(right.CharacterId));
+        return new NetherActivePartyHpSafety(true, minimumPermille, string.Empty)
+        {
+            LivingMembers = Array.AsReadOnly(livingMembers.ToArray()),
+        };
     }
 
     internal static NetherActivePartyHpSafety Unknown(string detail) => new(

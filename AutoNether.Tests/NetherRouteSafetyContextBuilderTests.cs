@@ -31,18 +31,19 @@ public class NetherRouteSafetyContextBuilderTests
     {
         NetherRouteSafetyFloorInput[] floors =
         [
-            Floor(1, 1, NetherFloorNodeType.Recovery, currentErosion: 80),
-            Floor(2, 2, NetherFloorNodeType.Battle, currentErosion: 80, maximum: 5, previous: new long[] { 1 }),
-            Floor(3, 2, NetherFloorNodeType.Battle, currentErosion: 80, maximum: 5, previous: new long[] { 1 }),
-            Floor(4, 3, NetherFloorNodeType.Boss, currentErosion: 80, maximum: 15, previous: new long[] { 2 }),
-            Floor(5, 3, NetherFloorNodeType.Boss, currentErosion: 80, maximum: 5, previous: new long[] { 3 }),
+            Floor(1, 1, NetherFloorNodeType.Recovery, currentErosion: 60),
+            Floor(2, 2, NetherFloorNodeType.Battle, currentErosion: 60, maximum: 5, previous: new long[] { 1 }),
+            Floor(3, 2, NetherFloorNodeType.Battle, currentErosion: 60, maximum: 5, previous: new long[] { 1 }),
+            Floor(4, 3, NetherFloorNodeType.Boss, currentErosion: 60, maximum: 15, previous: new long[] { 2 }),
+            Floor(5, 3, NetherFloorNodeType.Boss, currentErosion: 60, maximum: 5, previous: new long[] { 3 }),
         ];
         NetherRouteSafetyContext context = Build(floors, terminals: new HashSet<long> { 4, 5 });
 
-        NetherRoutePlan plan = new NetherRoutePlanner().Plan(Snapshot(1, 80, floors), context);
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(Snapshot(1, 60, floors), context);
 
-        Assert.Equal(20, context.MinimumWorstCaseErosionToTerminal[2]);
+        Assert.Equal(int.MaxValue, context.MinimumWorstCaseErosionToTerminal[2]);
         Assert.Equal(10, context.MinimumWorstCaseErosionToTerminal[3]);
+        Assert.Equal("route-finishes-above-70", context.HorizonRejection(2));
         Assert.Equal(3, Assert.IsType<NetherFloorNode>(plan.SelectedNode).FloorId);
     }
 

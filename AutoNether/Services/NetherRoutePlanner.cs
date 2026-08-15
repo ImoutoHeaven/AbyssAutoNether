@@ -18,6 +18,10 @@ internal sealed record NetherRouteSafetyContext
     public IReadOnlyDictionary<long, int> ProjectedErosionDeltaByFloorId { get; init; } = new Dictionary<long, int>();
     public IReadOnlyDictionary<long, int> ProjectedHpDeltaByFloorId { get; init; } = new Dictionary<long, int>();
     public IReadOnlyDictionary<long, string> UnknownDetailByFloorId { get; init; } = new Dictionary<long, string>();
+    public IReadOnlyDictionary<long, int> PeakErosionByFloorId { get; init; } = new Dictionary<long, int>();
+    public IReadOnlyDictionary<long, int> MinimumActiveCharacterHpPermilleByFloorId { get; init; } = new Dictionary<long, int>();
+    public IReadOnlyDictionary<long, string> HorizonRejectionByFloorId { get; init; } = new Dictionary<long, string>();
+    public IReadOnlyDictionary<long, bool> RequiresUserPauseByFloorId { get; init; } = new Dictionary<long, bool>();
 
     public bool IsHpSafe(long floorId) => !HpSafeByFloorId.TryGetValue(floorId, out bool safe) || safe;
     public bool IsKnown(long floorId) => !KnownNodeByFloorId.TryGetValue(floorId, out bool known) || known;
@@ -29,6 +33,18 @@ internal sealed record NetherRouteSafetyContext
     public string UnknownDetail(long floorId) => UnknownDetailByFloorId.TryGetValue(floorId, out string? value)
         ? value
         : "missing-context-entry";
+    public int PeakErosion(long floorId) => PeakErosionByFloorId.TryGetValue(floorId, out int value)
+        ? value
+        : int.MaxValue;
+    public int MinimumActiveCharacterHpPermille(long floorId) =>
+        MinimumActiveCharacterHpPermilleByFloorId.TryGetValue(floorId, out int value)
+            ? value
+            : int.MinValue;
+    public string HorizonRejection(long floorId) => HorizonRejectionByFloorId.TryGetValue(floorId, out string? value)
+        ? value
+        : "missing-horizon-evidence";
+    public bool RequiresUserPause(long floorId) =>
+        RequiresUserPauseByFloorId.TryGetValue(floorId, out bool value) && value;
 
     public string DiagnosticDetail(long floorId)
     {

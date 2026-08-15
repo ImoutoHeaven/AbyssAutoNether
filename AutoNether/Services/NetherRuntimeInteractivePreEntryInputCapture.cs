@@ -28,6 +28,8 @@ internal sealed record NetherRuntimeInteractivePreEntryCaptureRequest(
 {
     public IReadOnlyList<NetherCodeState> CurrentCodes { get; init; } = Array.Empty<NetherCodeState>();
     public int CodeCapacity { get; init; }
+    public IReadOnlyList<NetherInteractivePartialDeathEligibility> PartialDeathEligibility { get; init; } =
+        Array.Empty<NetherInteractivePartialDeathEligibility>();
 }
 
 /// <summary>
@@ -121,6 +123,8 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
             CanCloseShop = request.CanCloseShop,
             CurrentCodes = request.CurrentCodes ?? Array.Empty<NetherCodeState>(),
             CodeCapacity = request.CodeCapacity,
+            PartialDeathEligibility = request.PartialDeathEligibility
+                ?? Array.Empty<NetherInteractivePartialDeathEligibility>(),
         };
         return new NetherRuntimeInteractivePreEntryCaptureResult
         {

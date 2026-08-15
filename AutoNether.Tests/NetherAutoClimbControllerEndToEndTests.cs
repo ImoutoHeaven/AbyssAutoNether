@@ -18,6 +18,115 @@ public sealed class NetherControllerRuntimeCollection
 [Collection("nether-controller-runtime")]
 public class NetherAutoClimbControllerEndToEndTests
 {
+    [Theory]
+    [InlineData((int)NetherStrategyMode.Research, 95, 80, 0)]
+    [InlineData((int)NetherStrategyMode.Equipment, 95, 80, 80)]
+    public void Production_controller_starts_not_played_run_from_mode_derived_native_floor(
+        int rawMode,
+        int configuredTarget,
+        int recoveryFloor,
+        int expectedStartFloor
+    )
+    {
+        // Fresh Project.dll/CPP2IL evidence: FloorSelection.SubViewController
+        // <CreateNetherModelAsync>d__38 owns the NotPlayed start and invokes
+        // NetherApiDataStore.RequestNetherStartAsync(1, 1, 0, ct). The party controller's
+        // TransitionNetherFloorSelectionSceneAsync flow exposes the same native mutation with
+        // an explicit startFloorLevel input; policy must feed that input instead of pausing.
+        int previousTarget = Config.NetherAutoClimbMaxDepth.Value;
+        NetherStrategyMode previousMode = Config.NetherAutoClimbStrategyMode.Value;
+        NetherCodeFamily previousPrimary = Config.NetherAutoClimbResearchPrimaryFamily.Value;
+        var bridge = new ScriptedRuntimeBridge();
+        bridge.CurrentSnapshot = bridge.PlayBeforeInteractive with
+        {
+            Status = NetherSessionStatus.NotPlayed,
+            CurrentFloorId = 0,
+            FloorLevel = 0,
+            FloorIndex = 0,
+            RecoveryFloorLevel = recoveryFloor,
+            MapHash = "not-played-start-boundary",
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+        Config.NetherAutoClimbMaxDepth.Value = configuredTarget;
+        Config.NetherAutoClimbStrategyMode.Value = (NetherStrategyMode)rawMode;
+        Config.NetherAutoClimbResearchPrimaryFamily.Value = NetherCodeFamily.Safe;
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            NetherPlannedAction started = Assert.Single(bridge.NativeActions);
+            Assert.Equal(NetherActionKind.StartRun, started.Kind);
+            Assert.Equal(expectedStartFloor, started.FloorLevel);
+            Assert.Equal(NetherSessionStatus.NotPlayed, started.ExpectedBeforeStatus);
+            Assert.Equal(NetherSessionStatus.Play, started.ExpectedAfterStatus);
+            Assert.Equal(NetherAutoClimbPhase.ExecutingNativeAction, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+            Config.NetherAutoClimbMaxDepth.Value = previousTarget;
+            Config.NetherAutoClimbStrategyMode.Value = previousMode;
+            Config.NetherAutoClimbResearchPrimaryFamily.Value = previousPrimary;
+        }
+    }
+
+    [Fact]
+    public void Production_controller_consumes_live_floor_seventy_checkpoint_when_boss_rows_are_non_decimal()
+    {
+        int previousTarget = Config.NetherAutoClimbMaxDepth.Value;
+        NetherStrategyMode previousMode = Config.NetherAutoClimbStrategyMode.Value;
+        var bridge = new ScriptedRuntimeBridge();
+        bridge.CurrentSnapshot = bridge.PlayBeforeInteractive with
+        {
+            Status = NetherSessionStatus.NotPlayed,
+            CurrentFloorId = 0,
+            FloorLevel = 0,
+            FloorIndex = 0,
+            RecoveryFloorLevel = 70,
+            MasterMaxFloorLevel = 75,
+            AuthoritativeBossFloorLevels = new[] { 15, 30, 45, 60, 75 },
+            MapHash = "not-played-non-decimal-bosses",
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+        Config.NetherAutoClimbMaxDepth.Value = 75;
+        Config.NetherAutoClimbStrategyMode.Value = NetherStrategyMode.Equipment;
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            NetherPlannedAction started = Assert.Single(bridge.NativeActions);
+            Assert.Equal(NetherActionKind.StartRun, started.Kind);
+            Assert.Equal(70, started.FloorLevel);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+            Config.NetherAutoClimbMaxDepth.Value = previousTarget;
+            Config.NetherAutoClimbStrategyMode.Value = previousMode;
+        }
+    }
+
     [Fact]
     public void Production_controller_does_not_plan_until_current_floor_scene_has_entered()
     {
@@ -1361,7 +1470,7 @@ public class NetherAutoClimbControllerEndToEndTests
             NetherAutoClimbController.Toggle(); // user explicitly re-enables after recovery
             NetherAutoClimbController.Update();
 
-            Assert.Single(bridge.Invocations.Where(action => action == NetherActionKind.SelectFloor));
+            Assert.Single(bridge.Invocations, action => action == NetherActionKind.SelectFloor);
         }
         finally
         {
@@ -1484,7 +1593,7 @@ public class NetherAutoClimbControllerEndToEndTests
             Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
             Assert.Equal(1, bridge.GetOnlyBeginCount);
             Assert.Equal(1, bridge.GetOnlyPollCount);
-            Assert.Single(bridge.Invocations.Where(action => action == NetherActionKind.SelectFloor));
+            Assert.Single(bridge.Invocations, action => action == NetherActionKind.SelectFloor);
             Assert.Single(bridge.OwnedPopupActions);
         }
         finally
@@ -2578,7 +2687,7 @@ public class NetherAutoClimbControllerEndToEndTests
             Assert.Contains("scripted-code-transform-fault", NetherAutoClimbController.PauseDetail);
             Assert.Equal(0, bridge.GetOnlyBeginCount);
             Assert.Equal(0, bridge.GetOnlyPollCount);
-            Assert.Single(bridge.OwnedPopupActions.Where(action => action.Kind == NetherActionKind.TransformCode));
+            Assert.Single(bridge.OwnedPopupActions, action => action.Kind == NetherActionKind.TransformCode);
             Assert.Equal(1, bridge.CodeTransformInvokeCount);
             Assert.Equal(1, bridge.CodeTransformConfirmCount);
             Assert.Equal(1, bridge.CodeTransformCompleteCount);
@@ -3327,7 +3436,18 @@ public class NetherAutoClimbControllerEndToEndTests
                 Kind = NetherRuntimePopupKind.Treasure,
                 Options = new[] { new NetherEventOption(1, new[] { new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1) }) },
             },
-            null,
+            new NetherFloorEventPartMasterRow(
+                1001,
+                (int)NetherEffectKind.TreasureKeyUsed,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ),
             after,
             NetherActionKind.SelectEventOption
         );
@@ -3457,7 +3577,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
                 Assert.Equal(0, bridge.ShopCloseInvokeCount);
                 Assert.Equal(0, bridge.GetOnlyBeginCount);
-                Assert.Single(bridge.OwnedPopupActions.Where(action => action.Kind == NetherActionKind.BuyShopItem));
+                Assert.Single(bridge.OwnedPopupActions, action => action.Kind == NetherActionKind.BuyShopItem);
             }
             finally
             {
@@ -3527,7 +3647,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 NetherAutoClimbController.Toggle();
                 Pump(3); // SelectFloor -> Buy child -> observed child pending.
 
-                Assert.Single(bridge.OwnedPopupActions.Where(action => action.Kind == NetherActionKind.BuyShopItem));
+                Assert.Single(bridge.OwnedPopupActions, action => action.Kind == NetherActionKind.BuyShopItem);
                 Assert.Equal(0, bridge.ShopCloseInvokeCount);
 
                 NetherAutoClimbController.Toggle(); // off: preserve the already-sent Buy.
@@ -3546,7 +3666,7 @@ public class NetherAutoClimbControllerEndToEndTests
 
                 Assert.False(NetherAutoClimbController.IsEnabled);
                 Assert.Equal(NetherAutoClimbPhase.Disabled, NetherAutoClimbController.Phase);
-                Assert.Single(bridge.OwnedPopupActions.Where(action => action.Kind == NetherActionKind.BuyShopItem));
+                Assert.Single(bridge.OwnedPopupActions, action => action.Kind == NetherActionKind.BuyShopItem);
                 Assert.Equal(1, bridge.ShopCloseInvokeCount);
                 Assert.Equal(1, bridge.FloorParentTerminalCount);
                 Assert.Equal(1, bridge.GetOnlyBeginCount);
@@ -4076,6 +4196,7 @@ public class NetherAutoClimbControllerEndToEndTests
             },
             ActiveCodeErosion = codeProjection,
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(codeProjection),
+            BindRouteSafetyHpToCurrentSnapshot = true,
             InteractivePreEntryFactory = (snapshot, settings) =>
                 ScriptedRuntimeBridge.OwnedInteractivePreEntry(snapshot, settings, kind, eventPart),
         };
@@ -4090,7 +4211,7 @@ public class NetherAutoClimbControllerEndToEndTests
             Pump(expectedChild == NetherActionKind.BuyShopItem ? 8 : 5);
 
             Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
-            Assert.Single(bridge.Invocations.Where(action => action == NetherActionKind.SelectFloor));
+            Assert.Single(bridge.Invocations, action => action == NetherActionKind.SelectFloor);
             NetherPlannedAction child = Assert.Single(bridge.OwnedPopupActions);
             Assert.Equal(expectedChild, child.Kind);
             Assert.Equal(1, bridge.GetOnlyBeginCount);
@@ -4206,6 +4327,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherSnapshot? OwnedPopupAfterSnapshot { get; set; }
         public NetherSnapshot? CodeReloadAfterSnapshot { get; set; }
         public NetherRuntimeRouteSafetyData? RouteSafetyOverride { get; set; }
+        public bool BindRouteSafetyHpToCurrentSnapshot { get; set; }
         public NetherActiveCodeErosionProjection ActiveCodeErosion { get; set; } =
             KnownEmptyCodeProjection();
         public Func<NetherSnapshot, NetherAutoClimbSettings, NetherRuntimeInteractivePreEntryInputsResult>? InteractivePreEntryFactory { get; set; }
@@ -4217,6 +4339,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherRuntimeCodeCandidatesResult ReloadCodeCandidates { get; set; } =
             NetherRuntimeCodeCandidatesResult.Failure("e2e-no-reloaded-code-popup");
         public List<NetherActionKind> Invocations { get; } = new();
+        public List<NetherPlannedAction> NativeActions { get; } = new();
         public List<NetherPlannedAction> OwnedPopupActions { get; } = new();
         public int BeginFloorParentCount { get; private set; }
         public int OwnedPopupInvokeCount { get; private set; }
@@ -4328,16 +4451,53 @@ public class NetherAutoClimbControllerEndToEndTests
 
         public NetherRuntimeSnapshotResult TryCaptureSnapshot() => NetherRuntimeSnapshotResult.Success(CurrentSnapshot);
 
-        public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors) => RouteSafetyOverride ?? new()
+        public NetherRuntimeStrategyEvidenceResult TryCaptureStrategyEvidence(
+            NetherSnapshot snapshot,
+            NetherAutoClimbSettings settings
+        )
         {
-            FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+            NetherStrategyEvidenceMapResult mapped = NetherStrategyEvidenceMapper.Map(
+                new NetherStrategyEvidenceMapRequest(
+                    new NetherStrategyEvidenceIdentity(
+                        CurrentRuntimeGeneration,
+                        CurrentRuntimeGeneration,
+                        CurrentRuntimeGeneration,
+                        snapshot.Fingerprint
+                    ),
+                    snapshot
+                )
+            );
+            return mapped.IsMapped
+                ? NetherRuntimeStrategyEvidenceResult.Success(mapped.Package!)
+                : NetherRuntimeStrategyEvidenceResult.Failure(mapped.Detail);
+        }
+
+        public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors)
+        {
+            NetherRuntimeRouteSafetyData captured = RouteSafetyOverride ?? new()
             {
-                [2] = new NetherFloorMasterBounds(2, 0, 0, IsKnown: true, Detail: string.Empty),
-                [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
-            },
-            ActivePartyHp = new NetherActivePartyHpSafety(true, 1000, string.Empty),
-            ActiveCodeErosion = ActiveCodeErosion,
-        };
+                FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+                {
+                    [2] = new NetherFloorMasterBounds(2, 0, 0, IsKnown: true, Detail: string.Empty),
+                    [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
+                },
+                ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 1000),
+                ActiveCodeErosion = ActiveCodeErosion,
+            };
+            if (!BindRouteSafetyHpToCurrentSnapshot)
+                return captured;
+
+            int[] activeHp = CurrentSnapshot.Characters
+                .Where(character => character.IsActive)
+                .Select(character => character.HpPermille)
+                .ToArray();
+            return captured with
+            {
+                ActivePartyHp = activeHp.Length == 0
+                    ? new NetherActivePartyHpSafety(false, null, "scripted-active-party-empty")
+                    : NetherRouteSafetyHpTestEvidence.FromStates(CurrentSnapshot.Characters),
+            };
+        }
 
         public NetherRuntimeInteractivePreEntryInputsResult TryCaptureInteractivePreEntryInputs(
             NetherSnapshot snapshot,
@@ -4566,9 +4726,14 @@ public class NetherAutoClimbControllerEndToEndTests
 
         public NetherNativeActionResult Invoke(NetherPlannedAction action)
         {
+            NativeActions.Add(action);
             Invocations.Add(action.Kind);
             switch (action.Kind)
             {
+                case NetherActionKind.StartRun:
+                    return NetherNativeActionResult.Started(
+                        "native-run-start-floor:" + action.FloorLevel
+                    );
                 case NetherActionKind.SelectEventOption:
                     // Keep the old object visible to the fake native layer.  The production
                     // Controller must follow authoritative Play state rather than replay it.
@@ -4985,6 +5150,7 @@ public class NetherAutoClimbControllerEndToEndTests
             FloorIndex = floorId == 1 ? 1 : 2,
             MaxFloorLevel = 130,
             MasterMaxFloorLevel = 130,
+            AuthoritativeBossFloorLevels = new[] { 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130 },
             ContinuanceFloorLevel = 10,
             ErosionPoint = 20,
             TicketCount = 2,
@@ -5012,7 +5178,7 @@ public class NetherAutoClimbControllerEndToEndTests
             {
                 [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
             },
-            ActivePartyHp = new NetherActivePartyHpSafety(true, 500, string.Empty),
+            ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 500),
             ActiveCodeErosion = activeCodeErosion ?? KnownEmptyCodeProjection(),
         };
 
@@ -5086,6 +5252,7 @@ public class NetherAutoClimbControllerEndToEndTests
             FloorIndex = floorId == 1 ? 1 : 2,
             MaxFloorLevel = 130,
             MasterMaxFloorLevel = 130,
+            AuthoritativeBossFloorLevels = new[] { 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130 },
             ContinuanceFloorLevel = 10,
             ErosionPoint = 20,
             TicketCount = 2,
@@ -5114,7 +5281,9 @@ public class NetherAutoClimbControllerEndToEndTests
         {
             IReadOnlyList<NetherFloorEventMasterRow>? eventRows = null;
             IReadOnlyList<NetherFloorEventPartMasterRow>? parts = null;
-            if (kind is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery)
+            if (kind is NetherFloorNodeType.Event
+                or NetherFloorNodeType.Recovery
+                or NetherFloorNodeType.Treasure)
             {
                 if (eventPart is not NetherFloorEventPartMasterRow part)
                     return NetherRuntimeInteractivePreEntryInputsResult.Failure("missing-e2e-event-part");
@@ -5168,6 +5337,7 @@ public class NetherAutoClimbControllerEndToEndTests
             FloorIndex = floorLevel,
             MaxFloorLevel = 130,
             MasterMaxFloorLevel = 130,
+            AuthoritativeBossFloorLevels = new[] { 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130 },
             ContinuanceFloorLevel = 10,
             ErosionPoint = 10,
             TicketCount = tickets,

@@ -27,6 +27,8 @@
     <Compile Include="..\AutoNether\Services\NetherErosionPolicy.cs" Link="NetherErosionPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherErosionPolicy.cs')" />
     <Compile Include="..\AutoNether\Services\NetherFloorSafetyEvaluator.cs" Link="NetherFloorSafetyEvaluator.cs" Condition="Exists('..\AutoNether\Services\NetherFloorSafetyEvaluator.cs')" />
     <Compile Include="..\AutoNether\Services\NetherRouteSafetyContextBuilder.cs" Link="NetherRouteSafetyContextBuilder.cs" Condition="Exists('..\AutoNether\Services\NetherRouteSafetyContextBuilder.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherRouteHorizonSafetyPolicy.cs" Link="NetherRouteHorizonSafetyPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherRouteHorizonSafetyPolicy.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherRouteHpRuleMapper.cs" Link="NetherRouteHpRuleMapper.cs" Condition="Exists('..\AutoNether\Services\NetherRouteHpRuleMapper.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleRouteProjectionBuilder.cs" Link="NetherBattleRouteProjectionBuilder.cs" Condition="Exists('..\AutoNether\Services\NetherBattleRouteProjectionBuilder.cs')" />
     <Compile Include="..\AutoNether\Services\NetherFloorMasterBoundsMapper.cs" Link="NetherFloorMasterBoundsMapper.cs" Condition="Exists('..\AutoNether\Services\NetherFloorMasterBoundsMapper.cs')" />
     <Compile Include="..\AutoNether\Services\NetherActivePartyHpSafetyMapper.cs" Link="NetherActivePartyHpSafetyMapper.cs" Condition="Exists('..\AutoNether\Services\NetherActivePartyHpSafetyMapper.cs')" />
@@ -69,6 +71,13 @@
     <Compile Include="..\AutoNether\Services\NetherEventPolicy.cs" Link="NetherEventPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherEventPolicy.cs')" />
     <Compile Include="..\AutoNether\Services\NetherShopContentMapper.cs" Link="NetherShopContentMapper.cs" Condition="Exists('..\AutoNether\Services\NetherShopContentMapper.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCheckpointPolicy.cs" Link="NetherCheckpointPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointPolicy.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherRunBoundaryPolicy.cs" Link="NetherRunBoundaryPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherRunBoundaryPolicy.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherRunBoundaryMasterMapper.cs" Link="NetherRunBoundaryMasterMapper.cs" Condition="Exists('..\AutoNether\Services\NetherRunBoundaryMasterMapper.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherStartRunNativeBinding.cs" Link="NetherStartRunNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherStartRunNativeBinding.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherStrategyEvidence.cs" Link="NetherStrategyEvidence.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyEvidence.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherStrategyVisibleEvidenceMapper.cs" Link="NetherStrategyVisibleEvidenceMapper.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyVisibleEvidenceMapper.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherStrategyVisibleEvidenceAssembler.cs" Link="NetherStrategyVisibleEvidenceAssembler.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyVisibleEvidenceAssembler.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherStrategyEvidenceProductionGate.cs" Link="NetherStrategyEvidenceProductionGate.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyEvidenceProductionGate.cs')" />
     <Compile Include="..\AutoNether\Services\NetherReturnItemPolicy.cs" Link="NetherReturnItemPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherReturnItemPolicy.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleSettingsLeaseState.cs" Link="NetherBattleSettingsLeaseState.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLeaseState.cs')" />
     <Compile Include="..\AutoNether\Services\NetherBattleSettingsLease.cs" Link="NetherBattleSettingsLease.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLease.cs')" />

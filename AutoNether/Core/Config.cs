@@ -6,6 +6,9 @@ namespace AutoNether;
 public static class Config
 {
     internal static ConfigEntry<int> NetherAutoClimbMaxDepth { get; private set; } = null!;
+    internal static ConfigEntry<NetherStrategyMode> NetherAutoClimbStrategyMode { get; private set; } = null!;
+    internal static ConfigEntry<NetherCodeFamily> NetherAutoClimbResearchPrimaryFamily { get; private set; } = null!;
+    internal static ConfigEntry<NetherCodeFamily> NetherAutoClimbResearchSecondaryFamily { get; private set; } = null!;
     internal static ConfigEntry<int> NetherAutoClimbSoftErosionLimit { get; private set; } = null!;
     internal static ConfigEntry<int> NetherAutoClimbMinimumCharacterHpPermille { get; private set; } = null!;
     internal static ConfigEntry<NetherCombatLane> NetherAutoClimbCombatLane { get; private set; } = null!;
@@ -22,6 +25,24 @@ public static class Config
             "MaximumDepth",
             130,
             "Maximum floor to climb. The effective limit is also bounded by server/master-data limits."
+        );
+        NetherAutoClimbStrategyMode = Plugin.ConfigFile.Bind(
+            "AutoNether",
+            "StrategyMode",
+            NetherStrategyMode.Equipment,
+            "Explicit strategy mode. Equipment is the default; Research must be selected by the user and is never auto-detected."
+        );
+        NetherAutoClimbResearchPrimaryFamily = Plugin.ConfigFile.Bind(
+            "AutoNether",
+            "ResearchPrimaryFamily",
+            NetherCodeFamily.Unknown,
+            "Primary Rush, Impact, Safe, or Risk family for Research mode. Required when StrategyMode is Research."
+        );
+        NetherAutoClimbResearchSecondaryFamily = Plugin.ConfigFile.Bind(
+            "AutoNether",
+            "ResearchSecondaryFamily",
+            NetherCodeFamily.Unknown,
+            "Optional secondary family for Research mode. Unknown disables it; opposed family pairs are rejected."
         );
         NetherAutoClimbSoftErosionLimit = Plugin.ConfigFile.Bind(
             "AutoNether",
@@ -51,7 +72,7 @@ public static class Config
             "AutoNether",
             "TreasureMode",
             NetherTreasureMode.KeyOnly,
-            "Treasure strategy. KeyOnly accepts only a verified one-key native option; Off pauses safely."
+            "Treasure strategy. KeyOnly prefers a verified one-key option and, without a key, permits only an exact HP option that leaves at least one character alive; Off pauses safely."
         );
         NetherAutoClimbShopMode = Plugin.ConfigFile.Bind(
             "AutoNether",

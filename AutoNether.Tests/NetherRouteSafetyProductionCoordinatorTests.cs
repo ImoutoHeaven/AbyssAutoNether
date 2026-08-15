@@ -41,7 +41,13 @@ public class NetherRouteSafetyProductionCoordinatorTests
             }
         );
 
-        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.True(
+            plan.Route.HasSelection,
+            plan.Route.PauseReason + ":" + plan.Route.PauseDetail + ":"
+                + string.Join("|", plan.Route.Audit.Select(item =>
+                    item.FloorId + ":" + item.Reason + ":" + item.Detail + ":"
+                        + plan.Context.HorizonRejection(item.FloorId)))
+        );
         Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).FloorId);
         NetherBattleProjectionPayload payload = plan.BattleProjectionByFloorId[2];
         Assert.Equal(5, payload.FloorMinimumErosion);
@@ -107,8 +113,9 @@ public class NetherRouteSafetyProductionCoordinatorTests
     [InlineData(300, true)]
     public void NecessaryBoss_UsesHpBoundaryThroughTheProductionCoordinator(int hpPermille, bool expectedSelection)
     {
-        NetherSnapshot snapshot = Snapshot(
+        NetherSnapshot snapshot = SnapshotWithHp(
             erosion: 20,
+            hpPermille: hpPermille,
             Floor(1, 1, NetherFloorNodeType.Recovery),
             Floor(2, 2, NetherFloorNodeType.Boss, 1)
         );
@@ -146,6 +153,189 @@ public class NetherRouteSafetyProductionCoordinatorTests
         Assert.Contains("bounds:missing-runtime-node", UnknownCandidateDetail(missingMaster));
         Assert.Contains("codes:unknown", UnknownCandidateDetail(unknownCode));
         Assert.Contains("hp:unknown", UnknownCandidateDetail(unknownHp));
+    }
+
+    [Fact]
+    public void Production_does_not_certify_a_later_combat_from_the_preceding_battles_stale_hp()
+    {
+        // Fresh GameAssembly 573fa800...1fb / Project.dll 53806a5b...1300:
+        // NetherClearBattleResponseEntity.t_nether_characters is the post-battle authority,
+        // and each NetherCharacterEntity carries current_hp_ratio.  Until that response has
+        // produced a fresh snapshot, the Boss after this Battle has no exact pre-entry HP.
+        NetherProductionRouteSafetyPlan plan = Plan(hpPermille: 500);
+
+        Assert.True(
+            plan.Route.HasSelection,
+            plan.Route.PauseReason + ":" + plan.Route.PauseDetail + ":"
+                + string.Join("|", plan.Route.Audit.Select(item =>
+                    item.FloorId + ":" + item.Reason + ":" + item.Detail + ":"
+                        + plan.Context.HorizonRejection(item.FloorId)))
+        );
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
+        Assert.Equal(int.MinValue, plan.Context.ProjectedHpDelta(2));
+        Assert.DoesNotContain(3, plan.BattleProjectionByFloorId.Keys);
+        Assert.False(plan.Context.IsHardSafe(3));
+        Assert.Equal("combat-preentry-hp-unavailable:3", plan.Context.HorizonRejection(3));
+        Assert.True(plan.Context.RequiresUserPause(3));
+    }
+
+    [Fact]
+    public void Fresh_post_treasure_partial_party_snapshot_replans_from_current_living_survivors()
+    {
+        // Fresh Project.dll 53806a5b...1300 exposes exact MCharacterId, HpRatio, and IsAlive on
+        // NetherPartyCharacterModel.  A dead roster member remains present but IsAlive=false;
+        // the authoritative current-party HP contract is therefore the surviving set only.
+        NetherSnapshot snapshot = Snapshot(
+            erosion: 40,
+            Floor(1, 1, NetherFloorNodeType.Treasure),
+            Floor(2, 2, NetherFloorNodeType.Battle, 1),
+            Floor(3, 3, NetherFloorNodeType.Boss, 2, previous: new long[] { 2 })
+        ) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(10, 0, IsActive: false),
+                new NetherCharacterState(20, 500, IsActive: true),
+            },
+        };
+        NetherActivePartyHpSafety runtimeHp = new NetherRuntimeActivePartyHpExtractor().Extract(
+            new FakeNetherModel(
+                new FakePartyModel(
+                    new FakePartyCharacter(10, 0d, isAlive: false),
+                    new FakePartyCharacter(20, 0.500d, isAlive: true)
+                )
+            )
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            Settings(),
+            Runtime(hp: runtimeHp)
+        );
+
+        Assert.True(
+            plan.Route.HasSelection,
+            plan.Route.PauseReason + ":" + plan.Route.PauseDetail
+        );
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
+        Assert.True(plan.BattleProjectionByFloorId.ContainsKey(2));
+    }
+
+    [Fact]
+    public void Fresh_post_treasure_snapshot_with_no_living_member_remains_fail_closed()
+    {
+        NetherSnapshot snapshot = Snapshot(
+            erosion: 40,
+            Floor(1, 1, NetherFloorNodeType.Treasure),
+            Floor(2, 2, NetherFloorNodeType.Battle, 1),
+            Floor(3, 3, NetherFloorNodeType.Boss, 2, previous: new long[] { 2 })
+        ) with
+        {
+            Characters = new[] { new NetherCharacterState(10, 0, IsActive: false) },
+        };
+        NetherActivePartyHpSafety runtimeHp = RuntimeHp(
+            new FakePartyCharacter(10, 0d, isAlive: false)
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            Settings(),
+            Runtime(hp: runtimeHp)
+        );
+
+        Assert.False(plan.Route.HasSelection);
+    }
+
+    [Fact]
+    public void Fresh_post_treasure_survivor_hp_mismatch_remains_fail_closed()
+    {
+        NetherSnapshot snapshot = Snapshot(
+            erosion: 40,
+            Floor(1, 1, NetherFloorNodeType.Treasure),
+            Floor(2, 2, NetherFloorNodeType.Battle, 1),
+            Floor(3, 3, NetherFloorNodeType.Boss, 2, previous: new long[] { 2 })
+        ) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(10, 0, IsActive: false),
+                new NetherCharacterState(20, 500, IsActive: true),
+            },
+        };
+        NetherActivePartyHpSafety runtimeHp = RuntimeHp(
+            new FakePartyCharacter(10, 0d, isAlive: false),
+            new FakePartyCharacter(20, 0.499d, isAlive: true)
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            Settings(),
+            Runtime(hp: runtimeHp)
+        );
+
+        Assert.False(plan.Route.HasSelection);
+    }
+
+    [Fact]
+    public void Equal_minimum_hp_from_a_different_living_character_set_remains_fail_closed()
+    {
+        // Fresh Project.dll 53806a5b...1300 exposes MCharacterId beside HpRatio/IsAlive.
+        // Equal aggregate HP cannot authorize a replan when the authoritative living identity
+        // changed between the snapshot and runtime capture.
+        NetherSnapshot snapshot = Snapshot(
+            erosion: 40,
+            Floor(1, 1, NetherFloorNodeType.Treasure),
+            Floor(2, 2, NetherFloorNodeType.Battle, 1),
+            Floor(3, 3, NetherFloorNodeType.Boss, 2, previous: new long[] { 2 })
+        ) with
+        {
+            Characters = new[] { new NetherCharacterState(20, 500, IsActive: true) },
+        };
+        NetherActivePartyHpSafety runtimeHp = RuntimeHp(
+            new FakePartyCharacter(10, 0.500d, isAlive: true)
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            Settings(),
+            Runtime(hp: runtimeHp)
+        );
+
+        Assert.False(plan.Route.HasSelection);
+    }
+
+    [Fact]
+    public void Native_single_ratio_quantizes_identically_for_snapshot_and_runtime_replan()
+    {
+        // Fresh Project.dll 53806a5b...1300 declares NetherPartyCharacterModel.HpRatio as
+        // System.Single. The server-shaped 0.299f value must remain 299 permille on both capture
+        // paths instead of becoming 298 on one path through binary-float flooring.
+        NetherSnapshot snapshot = Snapshot(
+            erosion: 40,
+            Floor(1, 1, NetherFloorNodeType.Treasure),
+            Floor(2, 2, NetherFloorNodeType.Battle, 1),
+            Floor(3, 3, NetherFloorNodeType.Boss, 2, previous: new long[] { 2 })
+        ) with
+        {
+            Characters = new[] { new NetherCharacterState(20, 299, IsActive: true) },
+        };
+        NetherActivePartyHpSafety runtimeHp = RuntimeHp(
+            new FakeNativeFloatPartyCharacter(20, 0.299f, isAlive: true)
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            Settings(minimumCharacterHpPermille: 1),
+            Runtime(hp: runtimeHp)
+        );
+
+        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
     }
 
     [Fact]
@@ -214,7 +404,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
     }
 
     [Fact]
-    public void NecessaryBoss_CanUseHeadroomBelowTheHundredHardStop()
+    public void NecessaryBoss_AboveSeventyWithoutConfirmedRecovery_PausesBeforeMutation()
     {
         NetherSnapshot snapshot = Snapshot(
             erosion: 94,
@@ -231,8 +421,9 @@ public class NetherRouteSafetyProductionCoordinatorTests
             )
         );
 
-        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).FloorId);
-        Assert.Equal(99, plan.BattleProjectionByFloorId[2].ProjectedMaximumErosion);
+        Assert.False(plan.Route.HasSelection);
+        Assert.Equal("erosion-70-without-confirmed-recovery", plan.Context.HorizonRejection(2));
+        Assert.True(plan.Context.RequiresUserPause(2));
     }
 
     [Fact]
@@ -337,8 +528,9 @@ public class NetherRouteSafetyProductionCoordinatorTests
         IReadOnlyDictionary<long, NetherFloorMasterBounds>? bounds = null,
         NetherActiveCodeErosionProjection? code = null
     ) => new NetherRouteSafetyProductionCoordinator().Plan(
-        Snapshot(
+        SnapshotWithHp(
             erosion,
+            hpPermille,
             Floor(1, 1, NetherFloorNodeType.Recovery),
             Floor(2, 2, NetherFloorNodeType.Battle, 1),
             Floor(3, 3, NetherFloorNodeType.Boss, 2, previous: new long[] { 2 })
@@ -349,7 +541,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
     );
 
     private static string UnknownCandidateDetail(NetherProductionRouteSafetyPlan plan) =>
-        Assert.Single(plan.Route.Audit.Where(audit => audit.Reason == "unknown-node")).Detail;
+        Assert.Single(plan.Route.Audit, audit => audit.Reason == "unknown-node").Detail;
 
     private static NetherRuntimeRouteSafetyData Runtime(
         int hpPermille = 500,
@@ -363,7 +555,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             [2] = Bounds(2, 0, 0),
             [3] = Bounds(3, 0, 0),
         },
-        ActivePartyHp = hp ?? new NetherActivePartyHpSafety(true, hpPermille, string.Empty),
+        ActivePartyHp = hp ?? NetherRouteSafetyHpTestEvidence.Single(1, hpPermille),
         ActiveCodeErosion = code ?? new NetherActiveCodeErosionProjection
         {
             ErosionProjectionKnown = true,
@@ -375,20 +567,30 @@ public class NetherRouteSafetyProductionCoordinatorTests
     private static NetherFloorMasterBounds Bounds(long floorId, int min, int max) =>
         new(floorId, min, max, IsKnown: true, Detail: string.Empty);
 
-    private static NetherAutoClimbSettings Settings() => new()
+    private static NetherAutoClimbSettings Settings(
+        int minimumCharacterHpPermille = 300
+    ) => new()
     {
         MaxDepth = 130,
         SoftErosionLimit = 90,
-        MinimumCharacterHpPermille = 300,
+        MinimumCharacterHpPermille = minimumCharacterHpPermille,
     };
 
-    private static NetherSnapshot Snapshot(int erosion, params NetherFloorNode[] floors) => new()
+    private static NetherSnapshot Snapshot(int erosion, params NetherFloorNode[] floors) =>
+        SnapshotWithHp(erosion, hpPermille: 500, floors);
+
+    private static NetherSnapshot SnapshotWithHp(
+        int erosion,
+        int hpPermille,
+        params NetherFloorNode[] floors
+    ) => new()
     {
         Status = NetherSessionStatus.Play,
         MapId = 1,
         CurrentFloorId = 1,
         ErosionPoint = erosion,
         Floors = floors,
+        Characters = new[] { new NetherCharacterState(1, hpPermille, IsActive: true) },
     };
 
     private static NetherFloorNode Floor(
@@ -402,4 +604,51 @@ public class NetherRouteSafetyProductionCoordinatorTests
         IsUnlocked = true,
         PreviousFloorIds = previous ?? (id == 1 ? Array.Empty<long>() : new[] { 1L }),
     };
+
+    private static NetherActivePartyHpSafety RuntimeHp(params object[] characters) =>
+        new NetherRuntimeActivePartyHpExtractor().Extract(
+            new FakeNetherModel(new FakePartyModel(characters))
+        );
+
+    private sealed class FakeNetherModel
+    {
+        public FakeNetherModel(FakePartyModel partyModel) => PartyModel = partyModel;
+
+        public FakePartyModel PartyModel { get; }
+    }
+
+    private sealed class FakePartyModel
+    {
+        public FakePartyModel(params object[] characterModels) => CharacterModels = characterModels;
+
+        public object[] CharacterModels { get; }
+    }
+
+    private sealed class FakePartyCharacter
+    {
+        public FakePartyCharacter(long characterId, double hpRatio, bool isAlive)
+        {
+            MCharacterId = characterId;
+            HpRatio = hpRatio;
+            IsAlive = isAlive;
+        }
+
+        public long MCharacterId { get; }
+        public double HpRatio { get; }
+        public bool IsAlive { get; }
+    }
+
+    private sealed class FakeNativeFloatPartyCharacter
+    {
+        public FakeNativeFloatPartyCharacter(long characterId, float hpRatio, bool isAlive)
+        {
+            MCharacterId = characterId;
+            HpRatio = hpRatio;
+            IsAlive = isAlive;
+        }
+
+        public long MCharacterId { get; }
+        public float HpRatio { get; }
+        public bool IsAlive { get; }
+    }
 }

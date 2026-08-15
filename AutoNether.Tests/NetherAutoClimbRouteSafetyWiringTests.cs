@@ -42,7 +42,7 @@ public class NetherAutoClimbRouteSafetyWiringTests
             bounds: Bounds((2, 1, 1), (3, 0, 0))
         );
         NetherAutoClimbRouteSafetyDecision hp299 = Decide(
-            hp: new NetherActivePartyHpSafety(true, 299, string.Empty)
+            hp: NetherRouteSafetyHpTestEvidence.Single(1, 299)
         );
         NetherAutoClimbRouteSafetyDecision unknownMaster = Decide(
             bounds: Bounds((3, 0, 0))
@@ -60,14 +60,15 @@ public class NetherAutoClimbRouteSafetyWiringTests
     }
 
     [Fact]
-    public void NecessaryBossUsesHardLimitButNinetyFiveToOneHundredRemainsRejected()
+    public void Boss_at_or_above_seventy_without_confirmed_recovery_is_paused_before_mutation()
     {
         NetherAutoClimbRouteSafetyDecision allowedBoss = DecideBoss(94, Bounds((2, 0, 100)));
         NetherAutoClimbRouteSafetyDecision rejectedBoss = DecideBoss(95, Bounds((2, 0, 100)));
 
-        Assert.Equal(2, Assert.IsType<NetherFloorNode>(allowedBoss.Route.SelectedNode).FloorId);
-        Assert.NotNull(allowedBoss.SelectedBattleProjection);
-        Assert.Equal(99, allowedBoss.SelectedBattleProjection!.ProjectedMaximumErosion);
+        Assert.False(allowedBoss.Route.HasSelection);
+        Assert.Null(allowedBoss.SelectedBattleProjection);
+        Assert.Equal("erosion-70-without-confirmed-recovery", allowedBoss.Context.HorizonRejection(2));
+        Assert.True(allowedBoss.Context.RequiresUserPause(2));
         Assert.False(rejectedBoss.Route.HasSelection);
         Assert.Null(rejectedBoss.SelectedBattleProjection);
     }
@@ -97,6 +98,10 @@ public class NetherAutoClimbRouteSafetyWiringTests
             MapId = 1,
             CurrentFloorId = 1,
             ErosionPoint = erosion,
+            Characters = new[]
+            {
+                new NetherCharacterState(1, hp?.MinimumHpPermille ?? 500, IsActive: true),
+            },
             Floors = new[]
             {
                 Floor(1, 1, NetherFloorNodeType.Recovery),
@@ -119,6 +124,7 @@ public class NetherAutoClimbRouteSafetyWiringTests
             MapId = 1,
             CurrentFloorId = 1,
             ErosionPoint = erosion,
+            Characters = new[] { new NetherCharacterState(1, 500, IsActive: true) },
             Floors = new[]
             {
                 Floor(1, 1, NetherFloorNodeType.Recovery),
@@ -137,7 +143,7 @@ public class NetherAutoClimbRouteSafetyWiringTests
     ) => new()
     {
         FloorBoundsByFloorId = bounds ?? Bounds((2, 0, 0), (3, 0, 0)),
-        ActivePartyHp = hp ?? new NetherActivePartyHpSafety(true, 500, string.Empty),
+        ActivePartyHp = hp ?? NetherRouteSafetyHpTestEvidence.Single(1, 500),
         ActiveCodeErosion = code ?? KnownCode("nether-codes:none"),
     };
 

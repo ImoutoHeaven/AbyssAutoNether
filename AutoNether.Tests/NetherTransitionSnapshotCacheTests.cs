@@ -26,6 +26,8 @@ public sealed class NetherTransitionSnapshotCacheTests
                 FloorIndex = 1,
                 MaxFloorLevel = 130,
                 ContinuanceFloorLevel = 10,
+                MasterMaxFloorLevel = 130,
+                AuthoritativeBossFloorLevels = BossFloorLevels,
                 ErosionPoint = 5,
                 TicketCount = 13,
                 SignalCount = 0,
@@ -212,6 +214,8 @@ public sealed class NetherTransitionSnapshotCacheTests
                 FloorIndex = 1,
                 MaxFloorLevel = 130,
                 ContinuanceFloorLevel = 10,
+                MasterMaxFloorLevel = 130,
+                AuthoritativeBossFloorLevels = BossFloorLevels,
                 ErosionPoint = 10,
                 TicketCount = 13,
                 SignalCount = 0,
@@ -307,6 +311,8 @@ public sealed class NetherTransitionSnapshotCacheTests
                 FloorIndex = 1,
                 MaxFloorLevel = 130,
                 ContinuanceFloorLevel = 10,
+                MasterMaxFloorLevel = 130,
+                AuthoritativeBossFloorLevels = BossFloorLevels,
                 ErosionPoint = 10,
                 TicketCount = 13,
                 CodeCapacity = 28,
@@ -335,6 +341,8 @@ public sealed class NetherTransitionSnapshotCacheTests
                 CurrentFloorId = 27,
                 FloorLevel = 8,
                 FloorIndex = 1,
+                MasterMaxFloorLevel = 130,
+                AuthoritativeBossFloorLevels = BossFloorLevels,
                 Codes = Array.Empty<NetherCodeState>(),
                 AcquiredItems = Array.Empty<NetherRewardItem>(),
             },
@@ -360,6 +368,8 @@ public sealed class NetherTransitionSnapshotCacheTests
         FloorIndex = apiFloorIndex,
         MaxFloorLevel = 130,
         ContinuanceFloorLevel = 10,
+        MasterMaxFloorLevel = 130,
+        AuthoritativeBossFloorLevels = BossFloorLevels,
         ErosionPoint = 5,
         TicketCount = 13,
         SignalCount = 0,
@@ -389,6 +399,7 @@ public sealed class NetherTransitionSnapshotCacheTests
         MaxFloorLevel = 130,
         ContinuanceFloorLevel = 10,
         MasterMaxFloorLevel = 130,
+        AuthoritativeBossFloorLevels = BossFloorLevels,
         ErosionPoint = 5,
         TicketCount = 13,
         NetherGold = 45,
@@ -420,4 +431,7 @@ public sealed class NetherTransitionSnapshotCacheTests
         CodeHash = string.Empty,
         MapHash = "cached-map-1",
     };
+
+    private static readonly int[] BossFloorLevels =
+        [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130];
 }

@@ -282,6 +282,66 @@ public class NetherAutoClimbStateMachineTests
     }
 
     [Fact]
+    public void Strategy_mode_defaults_to_equipment_without_runtime_auto_detection()
+    {
+        // Fresh Project.dll evidence exposes NetherPointData.RecoveryFloorLevel and the four
+        // MNetherCodes.category values, but no native field that authoritatively chooses a
+        // plugin strategy mode. The mode therefore remains an explicit user setting.
+        var settings = new NetherAutoClimbSettings();
+
+        Assert.Equal(NetherStrategyMode.Equipment, settings.StrategyMode);
+    }
+
+    [Fact]
+    public void Research_requires_a_known_primary_family_before_any_native_action()
+    {
+        var gate = new NetherAutoClimbSettingsSnapshotGate();
+
+        bool accepted = gate.TryCapture(
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Unknown,
+            },
+            NetherAutoClimbPhase.Stable,
+            out _,
+            out NetherPauseReason reason,
+            out string detail);
+
+        Assert.False(accepted);
+        Assert.Equal(NetherPauseReason.InvalidConfiguration, reason);
+        Assert.Equal("research-primary-family-required", detail);
+    }
+
+    [Theory]
+    [InlineData((int)NetherCodeFamily.Rush, (int)NetherCodeFamily.Impact)]
+    [InlineData((int)NetherCodeFamily.Impact, (int)NetherCodeFamily.Rush)]
+    [InlineData((int)NetherCodeFamily.Safe, (int)NetherCodeFamily.Risk)]
+    [InlineData((int)NetherCodeFamily.Risk, (int)NetherCodeFamily.Safe)]
+    public void Research_rejects_opposed_primary_and_secondary_families_before_native_action(
+        int primary,
+        int secondary)
+    {
+        var gate = new NetherAutoClimbSettingsSnapshotGate();
+
+        bool accepted = gate.TryCapture(
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = (NetherCodeFamily)primary,
+                ResearchSecondaryFamily = (NetherCodeFamily)secondary,
+            },
+            NetherAutoClimbPhase.Stable,
+            out _,
+            out NetherPauseReason reason,
+            out string detail);
+
+        Assert.False(accepted);
+        Assert.Equal(NetherPauseReason.InvalidConfiguration, reason);
+        Assert.Equal("research-families-are-opposed", detail);
+    }
+
+    [Fact]
     public void Zero_soft_erosion_limit_is_invalid_instead_of_disabling_the_safety_boundary()
     {
         var gate = new NetherAutoClimbSettingsSnapshotGate();

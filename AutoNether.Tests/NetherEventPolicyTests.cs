@@ -130,6 +130,45 @@ public class NetherEventPolicyTests
     }
 
     [Fact]
+    public void Treasure_without_a_key_rejects_exact_damage_shape_without_route_proof()
+    {
+        NetherEventDecision decision = EventPolicy().DecideTreasure(
+            Snapshot(hp: 500, keys: 0),
+            [
+                Option(1, new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1)),
+                Option(2, new NetherEffect(NetherEffectKind.Damage, 200)),
+                Option(3, new NetherEffect(NetherEffectKind.Erosion, 20)),
+            ],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Pause, decision.Kind);
+        Assert.Equal(NetherPauseReason.NoSafeRoute, decision.PauseReason);
+    }
+
+    [Fact]
+    public void Treasure_without_a_key_accepts_exact_damage_only_with_prevalidated_objective()
+    {
+        NetherEventDecision decision = EventPolicy().DecideTreasure(
+            Snapshot(hp: 500, keys: 0),
+            [
+                Option(1, new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1)),
+                Option(2, new NetherEffect(NetherEffectKind.Damage, 200)) with
+                {
+                    EventId = 42,
+                    EventPartId = 1002,
+                    PartialDeathEligibility = TreasureEligibility(42, 1002),
+                },
+            ],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        Assert.Equal(2, decision.OptionNumber);
+        Assert.True(decision.AllowsPartialActiveDeaths);
+    }
+
+    [Fact]
     public void Treasure_never_selects_hp_or_erosion_payment()
     {
         NetherEventDecision decision = EventPolicy().DecideTreasure(
@@ -243,4 +282,16 @@ public class NetherEventPolicyTests
     };
 
     private static NetherEventOption Option(int number, params NetherEffect[] effects) => new(number, effects);
+
+    private static NetherInteractivePartialDeathEligibility TreasureEligibility(long eventId, long partId) => new(
+        NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,
+        eventId,
+        partId,
+        ObjectiveNodeId: 999
+    )
+    {
+        IsKnown = true,
+        ObjectiveReachable = true,
+        ExactTreasureRank = 5,
+    };
 }

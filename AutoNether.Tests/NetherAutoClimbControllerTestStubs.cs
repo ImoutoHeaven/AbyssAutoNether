@@ -44,6 +44,10 @@ internal interface INetherRuntimeBridge : INetherRuntimeParentDriver, INetherRea
     bool IsBattleActive { get; }
     bool IsResultObserved { get; }
     NetherRuntimeSnapshotResult TryCaptureSnapshot();
+    NetherRuntimeStrategyEvidenceResult TryCaptureStrategyEvidence(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings
+    );
     NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors);
     NetherRuntimeInteractivePreEntryInputsResult TryCaptureInteractivePreEntryInputs(
         NetherSnapshot snapshot,
@@ -89,6 +93,10 @@ internal sealed class NetherRuntimeBridge
             long minimumGenerationExclusive = 0
         ) => NetherFloorSceneSnapshotResult.Waiting(0, "test-unconfigured-floor-scene");
         public NetherRuntimeSnapshotResult TryCaptureSnapshot() => NetherRuntimeSnapshotResult.Failure("test-unconfigured-snapshot");
+        public NetherRuntimeStrategyEvidenceResult TryCaptureStrategyEvidence(
+            NetherSnapshot snapshot,
+            NetherAutoClimbSettings settings
+        ) => NetherRuntimeStrategyEvidenceResult.Failure("test-unconfigured-strategy-evidence");
         public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors) => new();
         public NetherRuntimeInteractivePreEntryInputsResult TryCaptureInteractivePreEntryInputs(NetherSnapshot snapshot, NetherAutoClimbSettings settings) =>
             NetherRuntimeInteractivePreEntryInputsResult.Failure("test-unconfigured-interactive");

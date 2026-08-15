@@ -81,7 +81,7 @@ internal static class NetherShopContentMapper
                     row.UsesNetherGold,
                     row.Amount,
                     known: true
-                ));
+                ) { RawContentType = row.RawContentType });
                 continue;
             }
 
@@ -99,7 +99,7 @@ internal static class NetherShopContentMapper
                 row.UsesNetherGold,
                 row.Amount,
                 known: true
-            ));
+            ) { RawContentType = row.RawContentType });
         }
 
         return NetherShopContentMapResult.Success(mapped);

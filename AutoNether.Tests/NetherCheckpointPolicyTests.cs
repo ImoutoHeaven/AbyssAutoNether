@@ -58,6 +58,31 @@ public class NetherCheckpointPolicyTests
     }
 
     [Fact]
+    public void Positive_non_boss_target_does_not_pause_before_the_next_authoritative_boss()
+    {
+        NetherCheckpointDecision decision = Decide(
+            Snapshot(NetherSessionStatus.Play, floor: 53, max: 100, masterMax: 100),
+            Settings(maxDepth: 53)
+        );
+
+        Assert.Equal(NetherCheckpointDecisionKind.None, decision.Kind);
+        Assert.Equal(NetherPauseReason.None, decision.PauseReason);
+        Assert.Equal(60, decision.EffectiveMaxDepth);
+    }
+
+    [Fact]
+    public void Normalized_boss_target_finishes_normally_only_after_sleep_settlement()
+    {
+        NetherCheckpointDecision decision = Decide(
+            Snapshot(NetherSessionStatus.Sleep, floor: 60, max: 100, masterMax: 100, tickets: 5),
+            Settings(maxDepth: 53)
+        );
+
+        Assert.Equal(NetherCheckpointDecisionKind.FinishNormally, decision.Kind);
+        Assert.Equal(60, decision.EffectiveMaxDepth);
+    }
+
+    [Fact]
     public void Sleep_below_target_with_ticket_continues_with_exactly_one_ticket()
     {
         NetherCheckpointDecision decision = Decide(Snapshot(NetherSessionStatus.Sleep, floor: 40, max: 100, masterMax: 100, tickets: 5), Settings(maxDepth: 50));
@@ -130,6 +155,11 @@ public class NetherCheckpointPolicyTests
         FloorLevel = floor,
         MaxFloorLevel = max,
         MasterMaxFloorLevel = masterMax,
+        RecoveryFloorLevel = max,
+        AuthoritativeBossFloorLevels = new[]
+        {
+            10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130,
+        }.Where(level => level <= masterMax).ToArray(),
         TicketCount = tickets,
     };
 }

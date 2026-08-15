@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AutoNether.Services;
 
@@ -19,6 +20,21 @@ internal sealed record NetherRouteSafetyFloorInput(
 {
     /// <summary>Bounded component-level evidence used only when this floor remains unknown.</summary>
     public string Detail { get; init; } = string.Empty;
+
+    /// <summary>
+    /// True only when the current authoritative character snapshot, plus any preceding exact
+    /// deterministic HP costs, reaches this combat without crossing an unsettled battle. Native
+    /// post-battle HP is returned by NetherClearBattleResponseEntity.t_nether_characters; a later
+    /// combat therefore remains false until the controller replans from that response.
+    /// </summary>
+    public bool HasExactPreEntryHpEvidence { get; init; } = true;
+
+    /// <summary>
+    /// Exact native payment identity for deterministic HP costs. The default deliberately keeps
+    /// ordinary all-living-character survival; only the production evidence mapper may grant one
+    /// of the two narrow group-survival exceptions.
+    /// </summary>
+    public NetherRouteHpRule HpRule { get; init; } = NetherRouteHpRule.OrdinaryAllLivingSurvive;
 }
 
 /// <summary>
@@ -31,7 +47,11 @@ internal sealed record NetherRouteSafetyContextBuilderInput(
     IReadOnlySet<long> NecessaryTerminalFloorIds,
     IReadOnlyDictionary<long, bool> SafeExitKnownByFloorId,
     int MaximumFloorLevel
-);
+)
+{
+    public NetherStrategyMode StrategyMode { get; init; } = NetherStrategyMode.Equipment;
+    public NetherCodeFamily PrimaryResearchFamily { get; init; } = NetherCodeFamily.Unknown;
+}
 
 /// <summary>
 /// Builds the complete fail-closed maps consumed by <see cref="NetherRoutePlanner"/>.  Values
@@ -42,6 +62,8 @@ internal sealed class NetherRouteSafetyContextBuilder
 {
     private const int UnknownErosion = int.MaxValue;
     private const int UnknownScalar = int.MinValue;
+    private const int HorizonSoftErosionLimit = 70;
+    private readonly NetherRouteHorizonSafetyPolicy _horizonPolicy = new();
 
     public NetherRouteSafetyContext Build(NetherRouteSafetyContextBuilderInput input)
     {
@@ -88,7 +110,9 @@ internal sealed class NetherRouteSafetyContextBuilder
                     && floor.ServerNode.NodeType == NetherFloorNodeType.Boss
                 : floor.EvaluationInput.Kind == NetherFloorSafetyKind.Optional;
             NetherFloorSafetyEvaluation evaluation = new NetherFloorSafetyEvaluator().Evaluate(floor.EvaluationInput);
-            bool hasProjectedMetadata = floor.ProjectedHpDelta.HasValue && floor.SafeCodeOpportunity.HasValue;
+            bool combatWithDeferredHpSettlement = IsCombat(floor.ServerNode.NodeType);
+            bool hasProjectedMetadata = floor.SafeCodeOpportunity.HasValue
+                && (floor.ProjectedHpDelta.HasValue || combatWithDeferredHpSettlement);
             bool evaluationKnown = evaluation.PauseReason is not NetherPauseReason.UnknownMasterData
                 and not NetherPauseReason.UnknownEffect
                 and not NetherPauseReason.InvalidConfiguration;
@@ -119,12 +143,14 @@ internal sealed class NetherRouteSafetyContextBuilder
                 continue;
             }
 
-            bool hpSafe = IsHpSafe(floor.EvaluationInput, floor.ProjectedHpDelta);
+            bool hpSafe = (!IsCombat(floor.ServerNode.NodeType)
+                    || floor.HasExactPreEntryHpEvidence)
+                && IsHpSafe(floor.EvaluationInput, floor.ProjectedHpDelta, floor.HpRule);
             context.SetKnown(
                 floorId,
                 hpSafe,
                 projectedErosion,
-                floor.ProjectedHpDelta!.Value,
+                floor.ProjectedHpDelta ?? UnknownScalar,
                 floor.SafeCodeOpportunity!.Value
             );
             states[floorId] = new FloorState(
@@ -175,7 +201,148 @@ internal sealed class NetherRouteSafetyContextBuilder
             }
         }
 
+        // The legacy reverse cost above proves graph reachability.  The horizon pass now proves
+        // the same visible path from one evolving erosion/HP state; a later floor never reuses the
+        // decision snapshot's starting values independently.
+        foreach (long floorId in nodes.Keys)
+        {
+            IReadOnlyList<IReadOnlyList<long>> paths = FindTerminalPaths(
+                floorId,
+                states,
+                terminals,
+                successors,
+                cyclic
+            );
+            var evaluations = new List<NetherRouteHorizonSafetyEvaluation>(paths.Count);
+            foreach (IReadOnlyList<long> path in paths)
+                evaluations.Add(EvaluateHorizon(path, nodes, input));
+
+            NetherRouteHorizonSafetyEvaluation? eligible = evaluations
+                .Where(result => result.IsEligible)
+                .OrderBy(result => result.PeakErosion ?? int.MaxValue)
+                .ThenByDescending(result => result.MinimumActiveCharacterHpPermille ?? int.MinValue)
+                .FirstOrDefault();
+            if (eligible != null)
+            {
+                int currentErosion = nodes[floorId].EvaluationInput.CurrentErosion;
+                context.SetHorizonEligible(floorId, eligible, currentErosion);
+                continue;
+            }
+
+            NetherRouteHorizonSafetyEvaluation rejection = evaluations
+                .OrderByDescending(result => result.RequiresUserPause)
+                .ThenBy(result => result.RejectionDetail, StringComparer.Ordinal)
+                .FirstOrDefault()
+                ?? new NetherRouteHorizonSafetyEvaluation
+                {
+                    RequiresUserPause = true,
+                    RejectionDetail = "visible-horizon-incomplete",
+                };
+            context.SetHorizonRejected(floorId, rejection);
+        }
+
         return context.ToImmutable();
+    }
+
+    private NetherRouteHorizonSafetyEvaluation EvaluateHorizon(
+        IReadOnlyList<long> path,
+        IReadOnlyDictionary<long, NetherRouteSafetyFloorInput> nodes,
+        NetherRouteSafetyContextBuilderInput builderInput
+    )
+    {
+        NetherFloorSafetyInput start = nodes[path[0]].EvaluationInput;
+        var steps = new List<NetherRouteHorizonStep>(path.Count);
+        foreach (long nodeId in path)
+        {
+            NetherRouteSafetyFloorInput floor = nodes[nodeId];
+            NetherFloorSafetyInput evaluation = floor.EvaluationInput;
+            int baseDelta;
+            try
+            {
+                baseDelta = checked(evaluation.FloorMaximumErosion + evaluation.KnownModifierDelta);
+            }
+            catch (OverflowException)
+            {
+                return new NetherRouteHorizonSafetyEvaluation
+                {
+                    RequiresUserPause = true,
+                    RejectionDetail = "horizon-erosion-input-overflow:" + nodeId,
+                };
+            }
+            steps.Add(new NetherRouteHorizonStep(
+                nodeId,
+                floor.ServerNode.NodeType,
+                baseDelta,
+                floor.ProjectedHpDelta,
+                evaluation.ErosionModifiers ?? Array.Empty<NetherErosionModifier>()
+            )
+            {
+                IsOutcomeCertain = floor.SafeCodeOpportunity.HasValue
+                    && evaluation.AllInputsKnown
+                    && (floor.ProjectedHpDelta.HasValue || IsCombat(floor.ServerNode.NodeType)),
+                HasExactPreEntryHpEvidence = floor.HasExactPreEntryHpEvidence
+                    && evaluation.CurrentHpPermille != null
+                    && evaluation.CurrentHpPermille.Count > 0,
+                IsConfirmedRecovery = floor.ServerNode.NodeType == NetherFloorNodeType.Recovery
+                    && baseDelta < 0,
+                IsNecessaryCombat = IsCombat(floor.ServerNode.NodeType),
+                IsTerminalBoss = floor.ServerNode.NodeType == NetherFloorNodeType.Boss
+                    && path[^1] == nodeId,
+                MinimumCombatEntryHpPermille = evaluation.MinimumHpPermille,
+                HpRule = floor.HpRule,
+            });
+        }
+        return _horizonPolicy.Evaluate(new NetherRouteHorizonSafetyInput(
+            start.CurrentErosion,
+            start.CurrentHpPermille,
+            steps,
+            HorizonSoftErosionLimit,
+            start.HardErosionLimit
+        )
+        {
+            IsVisibleHorizonComplete = true,
+            StrategyMode = builderInput.StrategyMode,
+            PrimaryResearchFamily = builderInput.PrimaryResearchFamily,
+        });
+    }
+
+    private static IReadOnlyList<IReadOnlyList<long>> FindTerminalPaths(
+        long start,
+        IReadOnlyDictionary<long, FloorState> states,
+        IReadOnlySet<long> terminals,
+        IReadOnlyDictionary<long, List<long>> successors,
+        IReadOnlySet<long> cyclic
+    )
+    {
+        var paths = new List<IReadOnlyList<long>>();
+        var current = new List<long>();
+        var visiting = new HashSet<long>();
+        Visit(start);
+        return paths;
+
+        void Visit(long nodeId)
+        {
+            if (cyclic.Contains(nodeId)
+                || !states.TryGetValue(nodeId, out FloorState state)
+                || !state.IsKnown
+                || !state.IsEligibleForTerminalPath
+                || !visiting.Add(nodeId))
+            {
+                return;
+            }
+            current.Add(nodeId);
+            if (terminals.Contains(nodeId))
+            {
+                paths.Add(current.ToArray());
+            }
+            else if (successors.TryGetValue(nodeId, out List<long>? next))
+            {
+                foreach (long successor in next)
+                    Visit(successor);
+            }
+            current.RemoveAt(current.Count - 1);
+            visiting.Remove(nodeId);
+        }
     }
 
     private static string BuildUnknownDetail(
@@ -390,13 +557,36 @@ internal sealed class NetherRouteSafetyContextBuilder
         }
     }
 
-    private static bool IsHpSafe(NetherFloorSafetyInput input, int? projectedHpDelta)
+    private static bool IsHpSafe(
+        NetherFloorSafetyInput input,
+        int? projectedHpDelta,
+        NetherRouteHpRule hpRule
+    )
     {
         if (!input.AllInputsKnown
             || input.CurrentHpPermille == null
             || input.CurrentHpPermille.Count == 0
             || input.MinimumHpPermille is < 0 or > 1000)
             return false;
+        if (hpRule is NetherRouteHpRule.TreasureGroupSurvival
+            or NetherRouteHpRule.HpPaidKeyGroupSurvival)
+        {
+            if (!projectedHpDelta.HasValue)
+                return false;
+            try
+            {
+                return input.CurrentHpPermille
+                    .Where(hpPermille => hpPermille > 0)
+                    .Any(hpPermille => checked(hpPermille + projectedHpDelta.Value) > 0);
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+        }
+        if (hpRule != NetherRouteHpRule.OrdinaryAllLivingSurvive)
+            return false;
+
         foreach (int hpPermille in input.CurrentHpPermille)
         {
             if (hpPermille is < 0 or > 1000)
@@ -448,6 +638,10 @@ internal sealed class NetherRouteSafetyContextBuilder
         private readonly Dictionary<long, int> _projectedErosion = new();
         private readonly Dictionary<long, int> _projectedHp = new();
         private readonly Dictionary<long, string> _unknownDetail = new();
+        private readonly Dictionary<long, int> _peakErosion = new();
+        private readonly Dictionary<long, int> _minimumActiveHp = new();
+        private readonly Dictionary<long, string> _horizonRejection = new();
+        private readonly Dictionary<long, bool> _requiresUserPause = new();
         private readonly int _maximumFloorLevel;
 
         public MutableContext(int maximumFloorLevel) => _maximumFloorLevel = maximumFloorLevel;
@@ -462,6 +656,10 @@ internal sealed class NetherRouteSafetyContextBuilder
             _projectedErosion[floorId] = UnknownErosion;
             _projectedHp[floorId] = UnknownScalar;
             _unknownDetail[floorId] = detail;
+            _peakErosion[floorId] = UnknownErosion;
+            _minimumActiveHp[floorId] = UnknownScalar;
+            _horizonRejection[floorId] = detail;
+            _requiresUserPause[floorId] = false;
         }
 
         public void SetUnsafe(long floorId, string detail) => AddUnknown(floorId, detail);
@@ -495,6 +693,34 @@ internal sealed class NetherRouteSafetyContextBuilder
             _hardSafe[floorId] = false;
         }
 
+        public void SetHorizonEligible(
+            long floorId,
+            NetherRouteHorizonSafetyEvaluation evaluation,
+            int currentErosion
+        )
+        {
+            _hardSafe[floorId] = true;
+            _hpSafe[floorId] = true;
+            _minimumWorstCase[floorId] = checked(evaluation.FinalErosion!.Value - currentErosion);
+            _peakErosion[floorId] = evaluation.PeakErosion!.Value;
+            _minimumActiveHp[floorId] = evaluation.MinimumActiveCharacterHpPermille!.Value;
+            _horizonRejection[floorId] = string.Empty;
+            _requiresUserPause[floorId] = false;
+        }
+
+        public void SetHorizonRejected(long floorId, NetherRouteHorizonSafetyEvaluation evaluation)
+        {
+            _hardSafe[floorId] = false;
+            _hpSafe[floorId] = false;
+            _minimumWorstCase[floorId] = UnknownErosion;
+            _peakErosion[floorId] = evaluation.PeakErosion ?? UnknownErosion;
+            _minimumActiveHp[floorId] = evaluation.MinimumActiveCharacterHpPermille ?? UnknownScalar;
+            _horizonRejection[floorId] = string.IsNullOrWhiteSpace(evaluation.RejectionDetail)
+                ? "visible-horizon-incomplete"
+                : evaluation.RejectionDetail;
+            _requiresUserPause[floorId] = evaluation.RequiresUserPause;
+        }
+
         public NetherRouteSafetyContext ToImmutable() => new()
         {
             MaximumFloorLevel = _maximumFloorLevel,
@@ -506,6 +732,10 @@ internal sealed class NetherRouteSafetyContextBuilder
             ProjectedErosionDeltaByFloorId = _projectedErosion,
             ProjectedHpDeltaByFloorId = _projectedHp,
             UnknownDetailByFloorId = _unknownDetail,
+            PeakErosionByFloorId = _peakErosion,
+            MinimumActiveCharacterHpPermilleByFloorId = _minimumActiveHp,
+            HorizonRejectionByFloorId = _horizonRejection,
+            RequiresUserPauseByFloorId = _requiresUserPause,
         };
     }
 }

@@ -78,15 +78,39 @@ internal sealed class NetherAutoClimbSettingsSnapshotGate
         }
         if (!System.Enum.IsDefined(typeof(NetherCombatLane), candidate.CombatLane)
             || !System.Enum.IsDefined(typeof(NetherTreasureMode), candidate.TreasureMode)
-            || !System.Enum.IsDefined(typeof(NetherShopMode), candidate.ShopMode))
+            || !System.Enum.IsDefined(typeof(NetherShopMode), candidate.ShopMode)
+            || !System.Enum.IsDefined(typeof(NetherStrategyMode), candidate.StrategyMode)
+            || !System.Enum.IsDefined(typeof(NetherCodeFamily), candidate.ResearchPrimaryFamily)
+            || !System.Enum.IsDefined(typeof(NetherCodeFamily), candidate.ResearchSecondaryFamily))
         {
             detail = "invalid-nether-policy-enum";
+            return false;
+        }
+        if (candidate.StrategyMode == NetherStrategyMode.Research
+            && candidate.ResearchPrimaryFamily == NetherCodeFamily.Unknown)
+        {
+            detail = "research-primary-family-required";
+            return false;
+        }
+        if (candidate.StrategyMode == NetherStrategyMode.Research
+            && AreOpposed(
+                candidate.ResearchPrimaryFamily,
+                candidate.ResearchSecondaryFamily
+            ))
+        {
+            detail = "research-families-are-opposed";
             return false;
         }
 
         detail = string.Empty;
         return true;
     }
+
+    private static bool AreOpposed(NetherCodeFamily first, NetherCodeFamily second) =>
+        (first == NetherCodeFamily.Rush && second == NetherCodeFamily.Impact)
+        || (first == NetherCodeFamily.Impact && second == NetherCodeFamily.Rush)
+        || (first == NetherCodeFamily.Safe && second == NetherCodeFamily.Risk)
+        || (first == NetherCodeFamily.Risk && second == NetherCodeFamily.Safe);
 }
 
 internal sealed class NetherAutoClimbStateMachine
@@ -171,11 +195,6 @@ internal sealed class NetherAutoClimbStateMachine
         if (!IsEnabled && _pendingAction == null)
             return;
 
-        if (fingerprint.Status == NetherSessionStatus.NotPlayed)
-        {
-            Pause(NetherPauseReason.NotPlayed, "not-played");
-            return;
-        }
         if (fingerprint.Status == NetherSessionStatus.Unknown)
         {
             Pause(NetherPauseReason.UnknownStatus, "unknown-status");

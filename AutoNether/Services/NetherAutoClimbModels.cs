@@ -50,6 +50,8 @@ internal enum NetherActionKind
 {
     None,
     Reconcile,
+    /// <summary>Native NotPlayed run start at the mode-derived authoritative floor.</summary>
+    StartRun,
     SelectFloor,
     SelectEventOption,
     LeaveShop,
@@ -252,6 +254,16 @@ internal enum NetherCombatLane
     Auto,
     Rush,
     Impact,
+}
+
+/// <summary>
+/// User-selected strategy intent. The current client exposes authoritative run/code state but no
+/// native field that chooses between research progression and equipment farming for the plugin.
+/// </summary>
+internal enum NetherStrategyMode
+{
+    Equipment = 0,
+    Research = 1,
 }
 
 internal enum NetherTreasureMode
@@ -481,6 +493,9 @@ internal sealed record NetherRewardItem(long ItemId, int Amount)
 
 internal sealed record NetherAutoClimbSettings
 {
+    public NetherStrategyMode StrategyMode { get; init; } = NetherStrategyMode.Equipment;
+    public NetherCodeFamily ResearchPrimaryFamily { get; init; } = NetherCodeFamily.Unknown;
+    public NetherCodeFamily ResearchSecondaryFamily { get; init; } = NetherCodeFamily.Unknown;
     public int MaxDepth { get; init; } = 130;
     public int SoftErosionLimit { get; init; } = 90;
     public int MinimumCharacterHpPermille { get; init; } = 300;
@@ -518,6 +533,16 @@ internal sealed record NetherSnapshot
     public int MaxFloorLevel { get; init; }
     public int ContinuanceFloorLevel { get; init; }
     public int MasterMaxFloorLevel { get; init; }
+    /// <summary>
+    /// Live unlocked elevator/checkpoint authority from NetherPointData.RecoveryFloorLevel.
+    /// It is never inferred from the reached-floor record.
+    /// </summary>
+    public int RecoveryFloorLevel { get; init; }
+    /// <summary>
+    /// Exact Boss floor levels derived from current MNetherMapFloors BattleBoss rows. Policy
+    /// normalizes against this authority instead of assuming ten-floor arithmetic or floor 130.
+    /// </summary>
+    public IReadOnlyList<int> AuthoritativeBossFloorLevels { get; init; } = Array.Empty<int>();
     public int ErosionPoint { get; init; }
     public int TicketCount { get; init; }
     public int SignalCount { get; init; }

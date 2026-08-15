@@ -26,6 +26,7 @@ internal static class NetherActionReconcilePolicy
 
         return action.Kind switch
         {
+            NetherActionKind.StartRun => EvaluateRunStart(action, before, after),
             NetherActionKind.SelectFloor => EvaluateFloor(action, before, after),
             NetherActionKind.SelectEventOption => EvaluateEvent(action, before, after),
             NetherActionKind.BuyShopItem => EvaluateShopBuy(action, before, after),
@@ -46,6 +47,31 @@ internal static class NetherActionReconcilePolicy
                     : UnchangedOrAmbiguous(before, after),
             _ => NetherActionOutcome.Ambiguous,
         };
+    }
+
+    private static NetherActionOutcome EvaluateRunStart(
+        NetherPlannedAction action,
+        NetherSnapshot before,
+        NetherSnapshot after
+    )
+    {
+        if (action.ExpectedBeforeStatus != NetherSessionStatus.NotPlayed
+            || action.ExpectedAfterStatus != NetherSessionStatus.Play
+            || before.Status != NetherSessionStatus.NotPlayed)
+        {
+            return NetherActionOutcome.Ambiguous;
+        }
+
+        if (after.Status == NetherSessionStatus.NotPlayed
+            && after.Fingerprint == before.Fingerprint)
+        {
+            return NetherActionOutcome.NotApplied;
+        }
+
+        return after.Status == NetherSessionStatus.Play
+            && after.FloorLevel == action.FloorLevel
+            ? NetherActionOutcome.Applied
+            : NetherActionOutcome.Ambiguous;
     }
 
     private static NetherActionOutcome EvaluateFloor(

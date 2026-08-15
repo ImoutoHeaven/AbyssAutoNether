@@ -7,6 +7,7 @@ namespace AutoNether.Services;
 internal enum NetherCheckpointDecisionKind
 {
     None,
+    StartRun,
     ContinueOneTicket,
     FinishNormally,
     PauseAtNonCheckpointTarget,
@@ -19,6 +20,7 @@ internal sealed record NetherCheckpointDecision
     public NetherCheckpointDecisionKind Kind { get; init; }
     public int EffectiveMaxDepth { get; init; }
     public int TicketCount { get; init; }
+    public int StartFloorLevel { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
 }
@@ -36,11 +38,16 @@ internal sealed class NetherCheckpointPolicy
         if (snapshot.MaxFloorLevel < 0 || snapshot.MasterMaxFloorLevel < 1 || snapshot.FloorLevel < 0)
             return Pause(NetherPauseReason.UnknownMasterData, "invalid-floor-record-or-master-depth");
 
-        // NetherEntity.max_floor_level is the account/session reached-floor record.  It can
-        // legitimately equal the current floor (or be zero for a fresh account), so treating
-        // it as a climb cap makes automation stop as soon as it reaches the previous record.
-        // MNetherMaps.max_floor_num is the authoritative map cap; cfg may only lower it.
-        int target = Math.Min(settings.MaxDepth, snapshot.MasterMaxFloorLevel);
+        // NetherEntity.max_floor_level is the account/session reached-floor record, not a cap.
+        // Resolve the configured request through the authoritative MNetherMapFloors Boss rows so
+        // an intermediate floor can never become an artificial completion boundary.
+        NetherRunBoundaryDecision boundary = new NetherRunBoundaryPolicy().Resolve(
+            snapshot,
+            settings
+        );
+        if (!boundary.IsReady)
+            return Pause(boundary.PauseReason, boundary.Detail);
+        int target = boundary.TargetFloorLevel;
         if (snapshot.Status == NetherSessionStatus.Clear)
             return new NetherCheckpointDecision { Kind = NetherCheckpointDecisionKind.AwaitResult, EffectiveMaxDepth = target };
         if (snapshot.Status == NetherSessionStatus.Lose)
@@ -52,7 +59,15 @@ internal sealed class NetherCheckpointPolicy
                 Detail = "lose-no-signal-auto-use",
             };
         if (snapshot.Status == NetherSessionStatus.NotPlayed)
-            return Pause(NetherPauseReason.NotPlayed, "not-played", target);
+        {
+            return new NetherCheckpointDecision
+            {
+                Kind = NetherCheckpointDecisionKind.StartRun,
+                EffectiveMaxDepth = target,
+                StartFloorLevel = boundary.StartFloorLevel,
+                Detail = "mode-derived-native-start",
+            };
+        }
         if (snapshot.Status == NetherSessionStatus.Unknown)
             return Pause(NetherPauseReason.UnknownStatus, "unknown-status", target);
 

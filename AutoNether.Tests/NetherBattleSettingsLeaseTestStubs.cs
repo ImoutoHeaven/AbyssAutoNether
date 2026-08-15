@@ -40,6 +40,9 @@ namespace AutoNether
     public static class Config
     {
         internal static ControllerTestConfigEntry<int> NetherAutoClimbMaxDepth { get; } = new(130);
+        internal static ControllerTestConfigEntry<AutoNether.Services.NetherStrategyMode> NetherAutoClimbStrategyMode { get; } = new(AutoNether.Services.NetherStrategyMode.Equipment);
+        internal static ControllerTestConfigEntry<AutoNether.Services.NetherCodeFamily> NetherAutoClimbResearchPrimaryFamily { get; } = new(AutoNether.Services.NetherCodeFamily.Unknown);
+        internal static ControllerTestConfigEntry<AutoNether.Services.NetherCodeFamily> NetherAutoClimbResearchSecondaryFamily { get; } = new(AutoNether.Services.NetherCodeFamily.Unknown);
         internal static ControllerTestConfigEntry<int> NetherAutoClimbSoftErosionLimit { get; } = new(90);
         internal static ControllerTestConfigEntry<int> NetherAutoClimbMinimumCharacterHpPermille { get; } = new(300);
         internal static ControllerTestConfigEntry<AutoNether.Services.NetherCombatLane> NetherAutoClimbCombatLane { get; } = new(AutoNether.Services.NetherCombatLane.Auto);

@@ -78,6 +78,10 @@ internal sealed class NetherRouteSafetyProductionCoordinator
 
         IReadOnlyList<NetherFloorNode> serverFloors = snapshot.Floors ?? Array.Empty<NetherFloorNode>();
         HashSet<long> necessaryTerminalIds = ResolveNecessaryTerminalFloorIds(serverFloors);
+        HashSet<long> exactCombatPreEntryIds = ResolveCombatNodesBeforeFirstUnsettledBattle(
+            snapshot,
+            serverFloors
+        );
         var floorInputs = new List<NetherRouteSafetyFloorInput>(serverFloors.Count);
         var safeExitKnown = new Dictionary<long, bool>();
         var payloads = new Dictionary<long, NetherBattleProjectionPayload>();
@@ -97,7 +101,8 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                         interactivePreEntry,
                         runtime.ActiveCodeErosion,
                         out NetherFloorSafetyInput interactiveInput,
-                        out NetherInteractiveWorstCaseProjection interactiveProjection
+                        out NetherInteractiveWorstCaseProjection interactiveProjection,
+                        out NetherRouteHpRule hpRule
                     ))
                 {
                     floorInputs.Add(new NetherRouteSafetyFloorInput(
@@ -111,6 +116,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                     )
                     {
                         Detail = "interactive:known",
+                        HpRule = hpRule,
                     });
                     safeExitKnown[floor.NodeId] = true;
                 }
@@ -139,20 +145,23 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             );
             NetherFloorSafetyInput evaluationInput = projection.EvaluatorInput
                 ?? UnknownInput(snapshot, floor, necessaryTerminal);
+            bool hasExactPreEntryHp = exactCombatPreEntryIds.Contains(floor.NodeId);
             floorInputs.Add(new NetherRouteSafetyFloorInput(
                 floor,
                 evaluationInput,
-                // Battle HP loss is calibrated after authoritative settlement; this route gate
-                // asserts only the exact pre-entry minimum HP and never invents a future heal.
-                ProjectedHpDelta: projection.EvaluatorInput == null ? null : 0,
+                // Fresh native evidence exposes post-battle HP only on
+                // NetherClearBattleResponseEntity.t_nether_characters. Do not turn the absence
+                // of that future response into a fabricated zero-damage result.
+                ProjectedHpDelta: null,
                 SafeCodeOpportunity: projection.EvaluatorInput == null ? null : 0
             )
             {
                 Detail = DescribeCombatInputs(floor, runtime, projection),
+                HasExactPreEntryHpEvidence = hasExactPreEntryHp,
             });
             safeExitKnown[floor.NodeId] = projection.EvaluatorInput != null;
 
-            if (projection.IsSafe)
+            if (projection.IsSafe && hasExactPreEntryHp)
             {
                 payloads[floor.NodeId] = CreatePayload(
                     snapshot,
@@ -168,7 +177,11 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             NecessaryTerminalFloorIds: necessaryTerminalIds,
             SafeExitKnownByFloorId: safeExitKnown,
             MaximumFloorLevel: effectiveMaximumDepth
-        ));
+        )
+        {
+            StrategyMode = settings.StrategyMode,
+            PrimaryResearchFamily = settings.ResearchPrimaryFamily,
+        });
         NetherRoutePlan route = _routePlanner.Plan(snapshot, context);
         return new NetherProductionRouteSafetyPlan
         {
@@ -260,8 +273,38 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             ?? NetherActiveCodeErosionProjectionMapper.Unknown("missing-active-code-erosion-projection");
         IReadOnlyList<NetherCodeEffect> codeEffects = codeProjection.ErosionEffects
             ?? Array.Empty<NetherCodeEffect>();
-        bool hasHp = runtime.ActivePartyHp.IsKnown
-            && runtime.ActivePartyHp.MinimumHpPermille.HasValue;
+        IReadOnlyList<NetherCharacterState> activeCharacters = snapshot.Characters == null
+            ? Array.Empty<NetherCharacterState>()
+            : snapshot.Characters
+                .Where(character => character.IsActive)
+                .OrderBy(character => character.CharacterId)
+                .ToArray();
+        IReadOnlyList<int> activeHp = activeCharacters
+            .Select(character => character.HpPermille)
+            .ToArray();
+        IReadOnlyList<NetherActiveLivingMemberHp>? observedRuntimeLiving =
+            runtime.ActivePartyHp.LivingMembers;
+        bool hasRuntimeHp = runtime.ActivePartyHp.IsKnown
+            && runtime.ActivePartyHp.MinimumHpPermille.HasValue
+            && observedRuntimeLiving != null;
+        IReadOnlyList<NetherActiveLivingMemberHp> runtimeLiving = observedRuntimeLiving
+            ?? Array.Empty<NetherActiveLivingMemberHp>();
+        bool hasExactLivingRows = activeCharacters.Count == runtimeLiving.Count
+            && activeCharacters.Count > 0
+            && activeCharacters.Select(character => character.CharacterId).Distinct().Count()
+                == activeCharacters.Count
+            && runtimeLiving.Select(member => member.CharacterId).Distinct().Count()
+                == runtimeLiving.Count
+            && activeCharacters.Zip(
+                runtimeLiving,
+                static (snapshotMember, runtimeMember) =>
+                    snapshotMember.CharacterId == runtimeMember.CharacterId
+                    && snapshotMember.HpPermille == runtimeMember.HpPermille
+            ).All(matches => matches);
+        bool hasHp = hasRuntimeHp
+            && hasExactLivingRows
+            && activeHp.All(value => value is >= 0 and <= 1000)
+            && activeHp.Min() == runtime.ActivePartyHp.MinimumHpPermille!.Value;
         bool hasCode = codeProjection.ErosionProjectionKnown
             && !string.IsNullOrEmpty(codeProjection.CodeHash)
             && codeProjection.ErosionEffects != null;
@@ -274,9 +317,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             MinimumErosionPoint: hasBounds ? BattleBaseErosionIncrease : null,
             MaximumErosionPoint: hasBounds ? BattleBaseErosionIncrease : null,
             CurrentErosion: snapshot.ErosionPoint,
-            ActiveHpPermille: hasHp
-                ? new[] { runtime.ActivePartyHp.MinimumHpPermille!.Value }
-                : Array.Empty<int>(),
+            ActiveHpPermille: hasHp ? activeHp : Array.Empty<int>(),
             ActiveCodeEffects: hasCode
                 ? codeEffects
                 : Array.Empty<NetherCodeEffect>(),
@@ -304,11 +345,13 @@ internal sealed class NetherRouteSafetyProductionCoordinator
         NetherRuntimeInteractivePreEntryInputsResult? interactivePreEntry,
         NetherActiveCodeErosionProjection? activeCodeErosion,
         out NetherFloorSafetyInput safetyInput,
-        out NetherInteractiveWorstCaseProjection worstCaseProjection
+        out NetherInteractiveWorstCaseProjection worstCaseProjection,
+        out NetherRouteHpRule hpRule
     )
     {
         safetyInput = default;
         worstCaseProjection = default;
+        hpRule = NetherRouteHpRule.OrdinaryAllLivingSurvive;
         if (!IsInteractive(floor.NodeType)
             || interactivePreEntry == null
             || !interactivePreEntry.IsSuccess
@@ -361,6 +404,12 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             return false;
         }
 
+        hpRule = NetherRouteHpRuleMapper.Map(
+            floor.NodeType,
+            capture.Safety.SafeOptionProjectionByEventId?.Values,
+            worstCaseProjection
+        );
+
         IReadOnlyList<NetherErosionModifier> erosionModifiers = Array.Empty<NetherErosionModifier>();
         if (floor.NodeType is NetherFloorNodeType.Event
             or NetherFloorNodeType.Recovery
@@ -390,7 +439,10 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             Kind: NetherFloorSafetyKind.Optional,
             NodeType: floor.NodeType,
             CurrentHpPermille: expectedActiveHp,
-            MinimumHpPermille: settings.MinimumCharacterHpPermille,
+            // Ordinary deterministic Event costs are hard-eligible while every currently living
+            // character remains above zero. The configurable HP floor is a later preference and
+            // remains the combat-entry gate; it must not turn a surviving Event result into death.
+            MinimumHpPermille: 1,
             SoftErosionLimit: settings.SoftErosionLimit,
             HardErosionLimit: HardErosionLimit,
             AllInputsKnown: true
@@ -411,7 +463,9 @@ internal sealed class NetherRouteSafetyProductionCoordinator
         if (safety.WorstCaseProjection is not NetherInteractiveWorstCaseProjection captured)
             return false;
 
-        if (floorKind is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery)
+        if (floorKind is NetherFloorNodeType.Event
+            or NetherFloorNodeType.Recovery
+            or NetherFloorNodeType.Treasure)
         {
             if (safety.SafeOptionNumberByEventId == null
                 || safety.SafeOptionProjectionByEventId == null
@@ -432,7 +486,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 }
             }
         }
-        else if (floorKind is not NetherFloorNodeType.Shop and not NetherFloorNodeType.Treasure)
+        else if (floorKind is not NetherFloorNodeType.Shop)
         {
             return false;
         }
@@ -511,5 +565,53 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 && !predecessorIds.Contains(floor.NodeId))
             .Select(floor => floor.NodeId)
             .ToHashSet();
+    }
+
+    private static HashSet<long> ResolveCombatNodesBeforeFirstUnsettledBattle(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherFloorNode> floors
+    )
+    {
+        long currentNodeId = snapshot.CurrentNodeId > 0
+            ? snapshot.CurrentNodeId
+            : snapshot.CurrentFloorId;
+        if (currentNodeId <= 0 || floors.All(floor => floor?.NodeId != currentNodeId))
+            return new HashSet<long>();
+
+        var successors = floors
+            .Where(floor => floor != null && floor.NodeId > 0)
+            .ToDictionary(floor => floor.NodeId, _ => new List<NetherFloorNode>());
+        foreach (NetherFloorNode floor in floors)
+        {
+            if (floor?.PreviousFloorIds == null)
+                continue;
+            foreach (long predecessorId in floor.PreviousFloorIds)
+            {
+                if (successors.TryGetValue(predecessorId, out List<NetherFloorNode>? next))
+                    next.Add(floor);
+            }
+        }
+
+        var exactCombatIds = new HashSet<long>();
+        var visitedNonCombatIds = new HashSet<long> { currentNodeId };
+        var pending = new Queue<long>();
+        pending.Enqueue(currentNodeId);
+        while (pending.Count > 0)
+        {
+            long predecessorId = pending.Dequeue();
+            if (!successors.TryGetValue(predecessorId, out List<NetherFloorNode>? next))
+                continue;
+            foreach (NetherFloorNode floor in next)
+            {
+                if (IsCombat(floor.NodeType))
+                {
+                    exactCombatIds.Add(floor.NodeId);
+                    continue;
+                }
+                if (visitedNonCombatIds.Add(floor.NodeId))
+                    pending.Enqueue(floor.NodeId);
+            }
+        }
+        return exactCombatIds;
     }
 }

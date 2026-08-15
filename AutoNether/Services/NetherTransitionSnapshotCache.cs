@@ -22,6 +22,9 @@ internal sealed record NetherAuthoritativeTransitionState
     public int FloorIndex { get; init; }
     public int MaxFloorLevel { get; init; }
     public int ContinuanceFloorLevel { get; init; }
+    public int RecoveryFloorLevel { get; init; }
+    public int MasterMaxFloorLevel { get; init; }
+    public IReadOnlyList<int> AuthoritativeBossFloorLevels { get; init; } = Array.Empty<int>();
     public int ErosionPoint { get; init; }
     public int TicketCount { get; init; }
     public int SignalCount { get; init; }
@@ -122,6 +125,19 @@ internal sealed class NetherTransitionSnapshotCache
             return NetherRuntimeSnapshotResult.Failure("invalid-authoritative-current-floor");
         if (state.Codes == null || state.AcquiredItems == null)
             return NetherRuntimeSnapshotResult.Failure("missing-authoritative-transition-collections");
+        if (state.MasterMaxFloorLevel < 1
+            || state.AuthoritativeBossFloorLevels == null
+            || state.AuthoritativeBossFloorLevels.Count == 0
+            || state.AuthoritativeBossFloorLevels.Any(level =>
+                level < 1 || level > state.MasterMaxFloorLevel)
+            || !state.AuthoritativeBossFloorLevels.SequenceEqual(
+                state.AuthoritativeBossFloorLevels.Distinct().OrderBy(level => level)
+            ))
+        {
+            return NetherRuntimeSnapshotResult.Failure(
+                "invalid-authoritative-transition-run-boundaries"
+            );
+        }
 
         NetherFloorNode[] current = cached.Floors
             .Where(floor => floor != null
@@ -186,7 +202,9 @@ internal sealed class NetherTransitionSnapshotCache
             FloorIndex = state.FloorIndex,
             MaxFloorLevel = state.MaxFloorLevel,
             ContinuanceFloorLevel = state.ContinuanceFloorLevel,
-            MasterMaxFloorLevel = cached.MasterMaxFloorLevel,
+            RecoveryFloorLevel = state.RecoveryFloorLevel,
+            MasterMaxFloorLevel = state.MasterMaxFloorLevel,
+            AuthoritativeBossFloorLevels = state.AuthoritativeBossFloorLevels.ToArray(),
             ErosionPoint = state.ErosionPoint,
             TicketCount = state.TicketCount,
             SignalCount = state.SignalCount,

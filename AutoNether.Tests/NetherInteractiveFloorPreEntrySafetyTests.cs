@@ -80,27 +80,46 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         Assert.Equal(0, result.WorstCaseProjection!.Value.ErosionDelta);
     }
 
-    [Theory]
-    [InlineData((int)NetherEffectKind.Damage, 201, 500, 20, (int)NetherPauseReason.UnsafeHp)]
-    [InlineData((int)NetherEffectKind.Erosion, 70, 500, 20, (int)NetherPauseReason.UnsafeErosion)]
-    public void Damage_below_configured_hp_or_erosion_at_soft_limit_is_not_a_safe_exit(
-        int targetType,
-        long parameter,
-        int hp,
-        int erosion,
-        int expectedReason
-    )
+    [Fact]
+    public void Ordinary_event_hp_cost_is_safe_while_every_living_character_remains_above_zero()
     {
         NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
             NetherFloorNodeType.Event,
             events: [Event(100, 1001)],
-            parts: [Part(1001, targetType1: targetType, parameter1: parameter)],
-            hp: hp,
-            erosion: erosion
+            parts: [Part(1001, targetType1: (int)NetherEffectKind.Damage, parameter1: 201)],
+            hp: 500
+        ));
+
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(-201, result.WorstCaseProjection!.Value.HpDelta);
+    }
+
+    [Fact]
+    public void Ordinary_event_hp_cost_is_rejected_when_any_living_character_reaches_zero()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Event,
+            events: [Event(100, 1001)],
+            parts: [Part(1001, targetType1: (int)NetherEffectKind.Damage, parameter1: 500)],
+            hp: 500
         ));
 
         Assert.False(result.IsSafe);
-        Assert.Equal((NetherPauseReason)expectedReason, result.PauseReason);
+        Assert.Equal(NetherPauseReason.UnsafeHp, result.PauseReason);
+    }
+
+    [Fact]
+    public void Erosion_at_the_soft_limit_is_not_a_safe_exit()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Event,
+            events: [Event(100, 1001)],
+            parts: [Part(1001, targetType1: (int)NetherEffectKind.Erosion, parameter1: 70)],
+            erosion: 20
+        ));
+
+        Assert.False(result.IsSafe);
+        Assert.Equal(NetherPauseReason.UnsafeErosion, result.PauseReason);
     }
 
     [Fact]
@@ -258,20 +277,65 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
-    public void Treasure_key_only_requires_a_key_and_known_safe_master_bounds()
+    public void Treasure_prefers_the_exact_key_option_and_rejects_unproved_hp_fallback()
     {
         NetherInteractiveFloorPreEntrySafetyResult key = Evaluate(Input(
             NetherFloorNodeType.Treasure,
+            events: [Event(100, 1001, 1002)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.TreasureKeyUsed, parameter1: 1),
+                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 200),
+            ],
             keys: 1
         ));
         NetherInteractiveFloorPreEntrySafetyResult noKey = Evaluate(Input(
             NetherFloorNodeType.Treasure,
+            events: [Event(100, 1001, 1002)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.TreasureKeyUsed, parameter1: 1),
+                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 200),
+            ],
             keys: 0
         ));
 
         Assert.True(key.IsSafe);
+        Assert.Equal(1, key.SafeOptionNumberByEventId[100]);
         Assert.False(noKey.IsSafe);
         Assert.Equal(NetherPauseReason.NoSafeRoute, noKey.PauseReason);
+    }
+
+    [Theory]
+    [InlineData(5, false)]
+    [InlineData(0, true)]
+    public void Treasure_hp_fallback_requires_prevalidated_rank5_or_only_terminal_route(
+        int exactTreasureRank,
+        bool onlyTerminalRoute
+    )
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Treasure,
+            events: [Event(100, 1001, 1002)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.TreasureKeyUsed, parameter1: 1),
+                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 200),
+            ],
+            keys: 0,
+            eligibility:
+            [
+                TreasureEligibility(100, 1002) with
+                {
+                    ExactTreasureRank = exactTreasureRank,
+                    IsOnlyTerminalReachingRoute = onlyTerminalRoute,
+                },
+            ]
+        ));
+
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(2, result.SafeOptionNumberByEventId[100]);
+        Assert.True(result.SafeOptionProjectionByEventId[100].AllowsPartialActiveDeaths);
     }
 
     [Fact]
@@ -313,7 +377,8 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         int mapMinimumErosion = 0,
         int mapMaximumErosion = 10,
         long floorExtendId = 0,
-        IReadOnlyList<NetherCodeState>? codes = null
+        IReadOnlyList<NetherCodeState>? codes = null,
+        IReadOnlyList<NetherInteractivePartialDeathEligibility>? eligibility = null
     ) => new(
         FloorKind: kind,
         FloorMasterId: 900,
@@ -337,6 +402,18 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         FloorExtendId = floorExtendId,
         CurrentCodes = codes ?? [Code(40024, NetherCodeFamily.Risk)],
         CodeCapacity = 5,
+        PartialDeathEligibility = eligibility ?? [],
+    };
+
+    private static NetherInteractivePartialDeathEligibility TreasureEligibility(long eventId, long partId) => new(
+        NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,
+        eventId,
+        partId,
+        ObjectiveNodeId: 999
+    )
+    {
+        IsKnown = true,
+        ObjectiveReachable = true,
     };
 
     private static NetherCodeState Code(long id, NetherCodeFamily family) => new(id, family, 1)

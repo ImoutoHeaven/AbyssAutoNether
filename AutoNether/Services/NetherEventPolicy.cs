@@ -6,7 +6,12 @@ using System.Linq;
 
 namespace AutoNether.Services;
 
-internal sealed record NetherEventOption(int OptionNumber, IReadOnlyList<NetherEffect> Effects);
+internal sealed record NetherEventOption(int OptionNumber, IReadOnlyList<NetherEffect> Effects)
+{
+    public long EventId { get; init; }
+    public long EventPartId { get; init; }
+    public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
+}
 
 internal enum NetherEventDecisionKind
 {
@@ -30,6 +35,7 @@ internal sealed record NetherEventDecision
     /// </summary>
     public IReadOnlyList<NetherEffect> ExpectedEffects { get; init; } = Array.Empty<NetherEffect>();
     public bool StartsBattleAfterSelection { get; init; }
+    public bool AllowsPartialActiveDeaths { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
 }
@@ -53,6 +59,8 @@ internal readonly record struct NetherShopContent(
     public bool UsesNetherGold => usesNetherGold;
     public int Amount => amount;
     public bool Known => known;
+    /// <summary>Exact MNetherFloorShopContents.content_type; retained for strategy evidence.</summary>
+    public int RawContentType { get; init; }
 }
 
 internal enum NetherShopDecisionKind
@@ -121,19 +129,38 @@ internal sealed class NetherEventPolicy
         if (settings.TreasureMode != NetherTreasureMode.KeyOnly)
             return Pause(NetherPauseReason.NoSafeRoute, "treasure-mode-off");
 
-        var candidates = new List<EventCandidate>();
+        var keyCandidates = new List<EventCandidate>();
+        var hpCandidates = new List<EventCandidate>();
         foreach (NetherEventOption option in options)
         {
-            if (!TryValidateOption(option, snapshot, settings, modifiers, out EventCandidate candidate, out _))
+            bool isExactHpPayment = IsExactTreasureHpPayment(option);
+            bool isStrategicallyEligibleHpPayment = isExactHpPayment
+                && option.PartialDeathEligibility?.AllowsTreasureHpPayment == true;
+            if (!TryValidateOption(
+                    option,
+                    snapshot,
+                    settings,
+                    modifiers,
+                    allowPartialActiveDeaths: isStrategicallyEligibleHpPayment,
+                    out EventCandidate candidate,
+                    out _
+                ))
+            {
                 continue;
+            }
             int exactKeyCosts = option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount == 1);
             bool hasOnlySafePayments = option.Effects.All(effect => effect.Kind is not NetherEffectKind.Damage and not NetherEffectKind.Erosion);
             bool hasNoOtherKeyCost = option.Effects.All(effect => effect.Kind != NetherEffectKind.TreasureKeyUsed || effect.Amount == 1);
-            if (exactKeyCosts != 1 || !hasNoOtherKeyCost || !hasOnlySafePayments || snapshot.TreasureKeyCount < 1)
-                continue;
-            candidates.Add(candidate);
+            if (exactKeyCosts == 1 && hasNoOtherKeyCost && hasOnlySafePayments && snapshot.TreasureKeyCount >= 1)
+                keyCandidates.Add(candidate);
+            else if (snapshot.TreasureKeyCount < 1 && isStrategicallyEligibleHpPayment)
+                hpCandidates.Add(candidate);
         }
 
+        // The live popup exposes distinct Key/Hp/Abyss panels.  A verified one-key option is
+        // always preferred.  The exact Damage-only Hp panel is a fallback only when no key is
+        // held; the Erosion/Abyss panel is never promoted to a substitute.
+        List<EventCandidate> candidates = keyCandidates.Count > 0 ? keyCandidates : hpCandidates;
         if (candidates.Count == 0)
             return Pause(NetherPauseReason.NoSafeRoute, "no-key-only-treasure-option");
 
@@ -201,11 +228,16 @@ internal sealed class NetherEventPolicy
         string firstDetail = "no-safe-event-option";
         foreach (NetherEventOption option in options)
         {
+            bool allowPartialActiveDeaths = !isRecovery
+                && IsExactHpPaidKeyEvent(option)
+                && snapshot.TreasureKeyCount == 0
+                && option.PartialDeathEligibility?.AllowsHpPaidEventKey == true;
             if (!TryValidateOption(
                     option,
                     snapshot,
                     settings,
                     modifiers,
+                    allowPartialActiveDeaths,
                     out EventCandidate candidate,
                     out NetherEventDecision rejection
                 ))
@@ -248,6 +280,7 @@ internal sealed class NetherEventPolicy
         NetherSnapshot snapshot,
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers,
+        bool allowPartialActiveDeaths,
         out EventCandidate candidate,
         out NetherEventDecision rejection
     )
@@ -301,9 +334,19 @@ internal sealed class NetherEventPolicy
             rejection = Pause(NetherPauseReason.UnknownEffect, "event-hp-overflow");
             return false;
         }
-        if (snapshot.Characters.Any(character => character.IsActive && character.HpPermille + hpDelta <= 0))
+        NetherCharacterState[] activeCharacters = snapshot.Characters
+            .Where(character => character.IsActive)
+            .ToArray();
+        bool hpIsLethal = allowPartialActiveDeaths
+            ? activeCharacters.Length == 0
+                || activeCharacters.All(character => character.HpPermille + hpDelta <= 0)
+            : activeCharacters.Any(character => character.HpPermille + hpDelta <= 0);
+        if (hpIsLethal)
         {
-            rejection = Pause(NetherPauseReason.UnsafeHp, "lethal-event-damage");
+            rejection = Pause(
+                NetherPauseReason.UnsafeHp,
+                allowPartialActiveDeaths ? "party-lethal-event-damage" : "lethal-event-damage"
+            );
             return false;
         }
 
@@ -336,10 +379,23 @@ internal sealed class NetherEventPolicy
             option.Effects.Any(effect => effect.Kind == NetherEffectKind.AbyssCodeOffer) ? 1 : 0,
             benefit,
             startsBattle,
-            optionalBattle
+            optionalBattle,
+            allowPartialActiveDeaths
         );
         return true;
     }
+
+    private static bool IsExactTreasureHpPayment(NetherEventOption option) =>
+        option?.Effects != null
+        && option.Effects.Count == 1
+        && option.Effects[0].Kind == NetherEffectKind.Damage
+        && option.Effects[0].Amount > 0;
+
+    private static bool IsExactHpPaidKeyEvent(NetherEventOption option) =>
+        option?.Effects != null
+        && option.Effects.Count == 2
+        && option.Effects.Count(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount > 0) == 1
+        && option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyGain && effect.Amount == 1) == 1;
 
     private static NetherEventDecision Select(EventCandidate candidate) => new()
     {
@@ -352,6 +408,7 @@ internal sealed class NetherEventPolicy
         HpDelta = candidate.HpDelta,
         ExpectedEffects = candidate.Option.Effects.ToArray(),
         StartsBattleAfterSelection = candidate.StartsBattle,
+        AllowsPartialActiveDeaths = candidate.AllowsPartialActiveDeaths,
     };
 
     private static NetherEventDecision Pause(NetherPauseReason reason, string detail) => new()
@@ -384,7 +441,8 @@ internal sealed class NetherEventPolicy
         int SafeCodeBenefit,
         int Benefit,
         bool StartsBattle,
-        bool OptionalBattle
+        bool OptionalBattle,
+        bool AllowsPartialActiveDeaths
     )
     {
         // Recovery must never select damage/erosion, but an otherwise neutral native option

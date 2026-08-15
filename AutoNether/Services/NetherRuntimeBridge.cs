@@ -8,6 +8,7 @@ using System.Linq;
 using System.Reflection;
 using Absf;
 using Cysharp.Threading.Tasks;
+using Il2CppInterop.Runtime.InteropTypes;
 using Il2CppSystem.Threading;
 using Project.Api;
 using Project.Ingame.Exploration;
@@ -68,6 +69,15 @@ internal interface INetherRuntimeBridge : INetherRuntimeParentDriver, INetherRea
     bool IsResultObserved { get; }
 
     NetherRuntimeSnapshotResult TryCaptureSnapshot();
+
+    /// <summary>
+    /// Copies one immutable strategy package from the same current FloorSelection owner and
+    /// authoritative snapshot. Missing optional mechanics stay component-local unknowns.
+    /// </summary>
+    NetherRuntimeStrategyEvidenceResult TryCaptureStrategyEvidence(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings
+    );
 
     /// <summary>Read-only master/HP/code inputs for the production combat route gate.</summary>
     NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors);
@@ -827,7 +837,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 FloorIndex = floorIndex,
                 MaxFloorLevel = data.MaxFloorLevel,
                 ContinuanceFloorLevel = data.ContinuanceFloorLevel,
-                MasterMaxFloorLevel = rows!.Map.MaxFloorFloorNumber,
+                RecoveryFloorLevel = pointData.RecoveryFloorLevel,
+                MasterMaxFloorLevel = rows!.RunBoundary.MasterMaxFloorLevel,
+                AuthoritativeBossFloorLevels = rows.RunBoundary.BossFloorLevels,
                 ErosionPoint = erosionPoint,
                 TicketCount = dataStore.GetTicketCount(),
                 SignalCount = dataStore.GetSignalCount(),
@@ -1727,6 +1739,151 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
     }
 
+    public NetherRuntimeStrategyEvidenceResult TryCaptureStrategyEvidence(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings
+    )
+    {
+        if (snapshot == null)
+            return NetherRuntimeStrategyEvidenceResult.Failure("strategy-evidence-snapshot-unavailable");
+        if (settings == null)
+            return NetherRuntimeStrategyEvidenceResult.Failure("strategy-evidence-settings-unavailable");
+
+        NetherStrategyEvidenceCaptureBoundary before;
+        lock (_gate)
+        {
+            before = new NetherStrategyEvidenceCaptureBoundary(
+                _floorSelectionController,
+                _runtimeGeneration,
+                _sceneObservedRuntimeGeneration,
+                _sceneEnteredRuntimeGeneration
+            );
+        }
+        if (before.Controller == null
+            || before.RuntimeGeneration <= 0
+            || before.ObservedSubsceneGeneration != before.RuntimeGeneration
+            || before.EnteredSubsceneGeneration != before.RuntimeGeneration)
+        {
+            return NetherRuntimeStrategyEvidenceResult.Failure(
+                "strategy-evidence-owner-not-fully-entered"
+            );
+        }
+
+        NetherStrategyEvidenceMapRequest request;
+        try
+        {
+            if (!TryReadMember(before.Controller, "_netherModel", out object? model) || model == null)
+            {
+                return NetherRuntimeStrategyEvidenceResult.Failure(
+                    "strategy-evidence-missing-floor-selection-nether-model"
+                );
+            }
+            UserData? userData = Engine.Get<UserData>();
+            NetherDataStore? dataStore = userData?.NetherDataStore;
+            NetherPointData? pointData = dataStore?.NetherPointData;
+            MasterDataStore? masterDataStore = Engine.Get<MasterDataStore>();
+            if (dataStore == null || pointData == null || masterDataStore == null)
+            {
+                return NetherRuntimeStrategyEvidenceResult.Failure(
+                    "strategy-evidence-missing-live-store-or-master"
+                );
+            }
+
+            bool partyMapped = TryMapStrategyParty(
+                model,
+                out IReadOnlyList<NetherStrategyPartyMember>? mappedParty,
+                out string partyError
+            );
+            IReadOnlyList<NetherStrategyPartyMember>? party = partyMapped ? mappedParty : null;
+            bool codesMapped = TryMapStrategyCodes(
+                snapshot,
+                masterDataStore,
+                out NetherStrategyOwnedCodeEvidence? mappedCodes,
+                out string codesError
+            );
+            NetherStrategyOwnedCodeEvidence? codes = codesMapped ? mappedCodes : null;
+            bool researchMapped = TryMapStrategyResearch(
+                pointData,
+                snapshot.Codes,
+                out IReadOnlyList<NetherStrategyResearchFamilyState>? mappedResearch,
+                out string researchError
+            );
+            IReadOnlyList<NetherStrategyResearchFamilyState>? research = researchMapped
+                ? mappedResearch
+                : null;
+            bool mechanicsMapped = NetherNativeMechanicProductionCapture.TryCapture(
+                snapshot.Codes,
+                masterDataStore,
+                out IReadOnlyList<NetherStrategyNativeMechanic>? mappedMechanics,
+                out string mechanicsError
+            );
+            IReadOnlyList<NetherStrategyNativeMechanic>? mechanics = mechanicsMapped
+                ? mappedMechanics
+                : null;
+            NetherRuntimeInteractivePreEntryInputsResult interactive =
+                TryCaptureInteractivePreEntryInputs(snapshot, settings);
+            NetherRuntimePopupResult activeStrategyPopup = TryGetActivePopup();
+            bool visibleMapped = TryMapStrategyVisibleEvidence(
+                snapshot,
+                interactive,
+                activeStrategyPopup,
+                masterDataStore,
+                out NetherStrategyVisibleMapEvidence? mappedVisible,
+                out string visibleError
+            );
+            NetherStrategyVisibleMapEvidence? visible = visibleMapped ? mappedVisible : null;
+
+            request = new NetherStrategyEvidenceMapRequest(
+                new NetherStrategyEvidenceIdentity(
+                    before.RuntimeGeneration,
+                    before.RuntimeGeneration,
+                    before.EnteredSubsceneGeneration,
+                    snapshot.Fingerprint
+                ),
+                snapshot
+            )
+            {
+                Party = party,
+                PartyUnknownReason = partyError,
+                OwnedCodes = codes,
+                OwnedCodesUnknownReason = codesError,
+                Research = research,
+                ResearchUnknownReason = researchError,
+                NativeMechanics = mechanics,
+                NativeMechanicsUnknownReason = mechanicsError,
+                VisibleMap = visible,
+                VisibleMapUnknownReason = visibleError,
+            };
+        }
+        catch (Exception ex)
+        {
+            return NetherRuntimeStrategyEvidenceResult.Failure(
+                "strategy-evidence-capture-exception:"
+                    + ex.GetType().Name
+                    + ":"
+                    + ex.Message
+            );
+        }
+
+        NetherStrategyEvidenceMapResult mapped = NetherStrategyEvidenceMapper.Map(request);
+        NetherStrategyEvidenceCaptureBoundary after;
+        lock (_gate)
+        {
+            after = new NetherStrategyEvidenceCaptureBoundary(
+                _floorSelectionController,
+                _runtimeGeneration,
+                _sceneObservedRuntimeGeneration,
+                _sceneEnteredRuntimeGeneration
+            );
+        }
+        return NetherStrategyEvidenceProductionGate.Bind(
+            mapped,
+            before,
+            after,
+            snapshot.Fingerprint
+        );
+    }
+
     /// <summary>
     /// Reproduces only the packaged UI's GetBuffTargetCount projection.  Native code proves that
     /// this count is multiplied by MNetherCodes.power for display; it does not prove that every
@@ -2350,6 +2507,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 FloorIndex = data.FloorIndex,
                 MaxFloorLevel = data.MaxFloorLevel,
                 ContinuanceFloorLevel = data.ContinuanceFloorLevel,
+                RecoveryFloorLevel = pointData.RecoveryFloorLevel,
+                MasterMaxFloorLevel = rows!.RunBoundary.MasterMaxFloorLevel,
+                AuthoritativeBossFloorLevels = rows.RunBoundary.BossFloorLevels,
                 ErosionPoint = data.ErosionPoint,
                 TicketCount = dataStore.GetTicketCount(),
                 SignalCount = dataStore.GetSignalCount(),
@@ -2421,6 +2581,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     public NetherNativeActionResult Invoke(NetherPlannedAction action) => action.Kind switch
     {
         NetherActionKind.Reconcile => Reconcile(),
+        NetherActionKind.StartRun => StartRun(action),
         NetherActionKind.SelectFloor => SelectFloor(action),
         NetherActionKind.SelectEventOption => SelectEventOption(action),
         NetherActionKind.LeaveShop => LeaveShop(),
@@ -2439,6 +2600,78 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherActionKind.FinishAtCheckpoint => FinishAtCheckpoint(),
         _ => NetherNativeActionResult.Rejected("unsupported-native-action:" + action.Kind),
     };
+
+    private NetherNativeActionResult StartRun(NetherPlannedAction action) =>
+        NetherStartRunNativeBinding.Invoke(action, InvokeStartRunNative);
+
+    private NetherNativeActionResult InvokeStartRunNative(NetherStartRunNativeRequest request)
+    {
+        // Fresh 2026-08-15 Cpp2IL evidence for the current packaged client:
+        // Party.Top.SubViewController's generated party-owned mutation has the exact positional
+        // contract (useTicket, startFloorLevel, partyNo, ct). Invoke that native UniTask so the
+        // policy-selected floor is consumed by the game flow without confusing semantic request
+        // field order with native parameter order;
+        // an absent/changed signature remains a binding failure and no raw endpoint fallback is
+        // permitted.
+        Type controllerType = typeof(Project.Party.Top.SubViewController);
+        NetherNativeMethodDescriptor descriptor = new(
+            "Method_Internal_Static_UniTask_Int32_Int32_Int32_CancellationToken_PDM_0",
+            new[]
+            {
+                "System.Int32",
+                "System.Int32",
+                "System.Int32",
+                "Il2CppSystem.Threading.CancellationToken",
+            },
+            UniTaskTypeName
+        ) { IsStatic = true };
+        if (!TryResolveExactMethod(
+                controllerType,
+                descriptor,
+                StaticFlags,
+                out string error,
+                out MethodInfo? method
+            ))
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "native-run-start-binding:" + error
+            );
+        }
+
+        try
+        {
+            NetherStartRunNativeInvocation invocation =
+                NetherStartRunNativeBinding.ToNativeInvocation(request);
+            object? task = method!.Invoke(
+                null,
+                new object[]
+                {
+                    invocation.UseTicket,
+                    invocation.StartFloorLevel,
+                    invocation.PartyNumber,
+                    new CancellationToken(),
+                }
+            );
+            RegisterNativeActionTask(task);
+            return task == null
+                ? NetherNativeActionResult.BindingUnavailable("native-run-start-task-unavailable")
+                : NetherNativeActionResult.Started(
+                    "native-run-start-floor:" + request.StartFloorLevel
+                );
+        }
+        catch (TargetInvocationException ex)
+        {
+            return NetherNativeActionResult.UnknownOutcome(
+                FormatInvocationException("run-start", ex)
+            );
+        }
+        catch (Exception ex)
+        {
+            return NetherNativeActionResult.UnknownOutcome(
+                "native-run-start-exception:" + ex.GetType().Name + ":" + ex.Message
+            );
+        }
+    }
 
     public bool TryBeginContinueSceneHandoff(out long ownerGeneration)
     {
@@ -7773,6 +8006,424 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         return true;
     }
 
+    private static bool TryMapStrategyParty(
+        object model,
+        out IReadOnlyList<NetherStrategyPartyMember>? members,
+        out string error
+    )
+    {
+        members = null;
+        if (!TryReadMember(model, "PartyModel", out object? party) || party == null
+            || !TryReadMember(party, "CharacterModels", out object? rawCharacters)
+            || rawCharacters == null)
+        {
+            error = "missing-strategy-party-model";
+            return false;
+        }
+
+        string[] parameterMembers =
+        {
+            "BasicParameters",
+            "BondParameters",
+            "BuildingMultiplicationParameters",
+            "CharacterAbilityAdditionParameters",
+            "CharacterAbilityMultiplicationParameters",
+            "EquipmentAbilityAdditionParameters",
+            "EquipmentAbilityMultiplicationParameters",
+            "WeaponBasicParameters",
+            "ArmorBasicParameters",
+            "AccessoryBasicParameters",
+        };
+        if (!NetherRuntimeEnumerableReader.TryRead(
+                rawCharacters,
+                out List<object> characters,
+                out string characterEnumerationError
+            ))
+        {
+            error = "strategy-party-characters-enumeration:" + characterEnumerationError;
+            return false;
+        }
+
+        var mapped = new List<NetherStrategyPartyMember>();
+        foreach (object character in characters)
+        {
+            if (!TryReadInt(character, "MCharacterId", out long characterId)
+                || !TryReadInt32(character, "PartyIndex", out int partyIndex)
+                || !TryReadInt32(character, "PartyPosition", out int partyPosition)
+                || !TryReadInt32(character, "ElementType", out int elementType)
+                || !TryReadInt32(character, "ManaType", out int manaType)
+                || !TryReadDouble(character, "HpRatio", out double hpRatio)
+                || !TryReadBoolean(character, "IsAlive", out bool isAlive)
+                || !TryReadInt32(character, "Level", out int level)
+                || !TryReadInt32(character, "LimitBreakCount", out int limitBreakCount))
+            {
+                error = "missing-strategy-party-member";
+                return false;
+            }
+            if (characterId <= 0
+                || partyIndex < 0
+                || !NetherHpRatioPermilleQuantizer.TryQuantize(hpRatio, out int hpPermille))
+            {
+                error = "invalid-strategy-party-member:" + characterId;
+                return false;
+            }
+
+            var parameters = new List<NetherStrategyNamedValue>();
+            foreach (string parameterMember in parameterMembers)
+            {
+                if (!TryReadMember(character, parameterMember, out object? parameterSet)
+                    || parameterSet == null
+                    || !TryReadMember(parameterSet, "Table", out object? table)
+                    || table == null)
+                {
+                    error = "missing-strategy-character-parameters:"
+                        + characterId
+                        + ":"
+                        + parameterMember;
+                    return false;
+                }
+                if (!NetherRuntimeEnumerableReader.TryRead(
+                        table,
+                        out List<object> parameterEntries,
+                        out string parameterEnumerationError
+                    ))
+                {
+                    error = "strategy-character-parameter-table-enumeration:"
+                        + characterId
+                        + ":"
+                        + parameterMember
+                        + ":"
+                        + parameterEnumerationError;
+                    return false;
+                }
+                foreach (object entry in parameterEntries)
+                {
+                    if (!TryReadMember(entry, "Key", out object? key)
+                        || key == null
+                        || !TryReadMember(entry, "Value", out object? rawValue)
+                        || rawValue == null
+                        || !TryConvertInt64(rawValue, out long value))
+                    {
+                        error = "invalid-strategy-character-parameter-table:"
+                            + characterId
+                            + ":"
+                            + parameterMember;
+                        return false;
+                    }
+                    parameters.Add(new NetherStrategyNamedValue(
+                        parameterMember + "." + key,
+                        value
+                    ));
+                }
+            }
+
+            if (!TryMapStrategyAbilityEffects(
+                    character,
+                    "CharacterAbilityEffectModels",
+                    out IReadOnlyList<NetherStrategyAbilityEffect>? characterEffects,
+                    out error
+                )
+                || !TryMapStrategyAbilityEffects(
+                    character,
+                    "EquipmentAbilityEffectModels",
+                    out IReadOnlyList<NetherStrategyAbilityEffect>? equipmentEffects,
+                    out error
+                )
+                || !TryMapStrategyAbilityEffects(
+                    character,
+                    "GeneralAbilityEffectModels",
+                    out IReadOnlyList<NetherStrategyAbilityEffect>? generalEffects,
+                    out error
+                ))
+            {
+                return false;
+            }
+
+            mapped.Add(new NetherStrategyPartyMember(
+                characterId,
+                partyIndex,
+                partyPosition,
+                elementType,
+                manaType,
+                hpPermille,
+                isAlive,
+                level,
+                limitBreakCount
+            )
+            {
+                NativeParameters = parameters,
+                CharacterAbilityEffects = characterEffects!,
+                EquipmentAbilityEffects = equipmentEffects!,
+                GeneralAbilityEffects = generalEffects!,
+            });
+        }
+        if (mapped.Count == 0)
+        {
+            error = "empty-strategy-party";
+            return false;
+        }
+        members = mapped;
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryMapStrategyAbilityEffects(
+        object character,
+        string memberName,
+        out IReadOnlyList<NetherStrategyAbilityEffect>? effects,
+        out string error
+    )
+    {
+        effects = null;
+        if (!TryReadMember(character, memberName, out object? rawEffects) || rawEffects == null)
+        {
+            error = "missing-strategy-ability-effects:" + memberName;
+            return false;
+        }
+        if (!NetherRuntimeEnumerableReader.TryRead(
+                rawEffects,
+                out List<object> abilityEffects,
+                out string enumerationError
+            ))
+        {
+            error = "strategy-ability-effects-enumeration:"
+                + memberName
+                + ":"
+                + enumerationError;
+            return false;
+        }
+
+        var mapped = new List<NetherStrategyAbilityEffect>();
+        foreach (object model in abilityEffects)
+        {
+            if (!TryReadMember(model, "Effect", out object? effect) || effect == null
+                || !TryReadInt(effect, "ID", out long effectId)
+                || !TryReadInt32(model, "Level", out int level)
+                || !TryReadInt32(model, "AwakeningLevel", out int awakeningLevel)
+                || !TryReadInt32(model, "Type", out int abilityType)
+                || !TryReadInt32(model, "Value", out int value)
+                || effectId <= 0)
+            {
+                error = "invalid-strategy-ability-effect:" + memberName;
+                return false;
+            }
+            mapped.Add(new NetherStrategyAbilityEffect(effectId, level, abilityType, value)
+            {
+                AwakeningLevel = awakeningLevel,
+            });
+        }
+        effects = mapped;
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryMapStrategyCodes(
+        NetherSnapshot snapshot,
+        MasterDataStore masterDataStore,
+        out NetherStrategyOwnedCodeEvidence? evidence,
+        out string error
+    )
+    {
+        evidence = null;
+        MNetherCodeCategorySkills[]? rows = masterDataStore.GetCache<MNetherCodeCategorySkills>();
+        if (rows == null)
+        {
+            error = "missing-m-nether-code-category-skills-cache";
+            return false;
+        }
+        var skills = new List<NetherStrategyCategorySkill>();
+        foreach (MNetherCodeCategorySkills row in rows)
+        {
+            if (row == null || row.m_nether_id != snapshot.NetherId)
+                continue;
+            int rawFamily = checked((int)row.category);
+            NetherCodeFamily family = Enum.IsDefined(typeof(NetherCodeFamily), rawFamily)
+                ? (NetherCodeFamily)rawFamily
+                : NetherCodeFamily.Unknown;
+            skills.Add(new NetherStrategyCategorySkill(
+                row.id,
+                checked((int)row.counter),
+                family,
+                checked((int)row.effect_type),
+                row.effect_parameter_1,
+                row.effect_parameter_2,
+                row.effect_parameter_3
+            ));
+        }
+        evidence = new NetherStrategyOwnedCodeEvidence(
+            snapshot.Codes,
+            snapshot.CodeCapacity,
+            snapshot.CodeReloadCount
+        )
+        {
+            CategorySkills = skills,
+        };
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryMapStrategyResearch(
+        NetherPointData pointData,
+        IReadOnlyList<NetherCodeState> codes,
+        out IReadOnlyList<NetherStrategyResearchFamilyState>? research,
+        out string error
+    )
+    {
+        research = null;
+        if (codes == null)
+        {
+            error = "missing-strategy-research-owned-codes";
+            return false;
+        }
+        int Count(NetherCodeFamily family) => codes
+            .Where(code => code != null && code.PossessionAmount > 0 && code.Family == family)
+            .Select(code => code.CodeId)
+            .Distinct()
+            .Count();
+        const string ProjectionReason =
+            "normal-result-nether-code-points-not-server-authoritative-before-settlement";
+        research = new[]
+        {
+            new NetherStrategyResearchFamilyState(
+                NetherCodeFamily.Rush,
+                pointData.SphereSkillPoint,
+                0,
+                pointData.SpherePointRatio
+            )
+            {
+                SettlementAcquiredCodeCount = Count(NetherCodeFamily.Rush),
+                IsProjectedNormalSettlementKnown = false,
+                ProjectionUnknownReason = ProjectionReason,
+            },
+            new NetherStrategyResearchFamilyState(
+                NetherCodeFamily.Impact,
+                pointData.SphereAttackPoint,
+                0,
+                pointData.SpherePointRatio
+            )
+            {
+                SettlementAcquiredCodeCount = Count(NetherCodeFamily.Impact),
+                IsProjectedNormalSettlementKnown = false,
+                ProjectionUnknownReason = ProjectionReason,
+            },
+            new NetherStrategyResearchFamilyState(
+                NetherCodeFamily.Safe,
+                pointData.SphereErosionResistPoint,
+                0,
+                pointData.SpherePointRatio
+            )
+            {
+                SettlementAcquiredCodeCount = Count(NetherCodeFamily.Safe),
+                IsProjectedNormalSettlementKnown = false,
+                ProjectionUnknownReason = ProjectionReason,
+            },
+            new NetherStrategyResearchFamilyState(
+                NetherCodeFamily.Risk,
+                pointData.SphereErosionUpPoint,
+                0,
+                pointData.SpherePointRatio
+            )
+            {
+                SettlementAcquiredCodeCount = Count(NetherCodeFamily.Risk),
+                IsProjectedNormalSettlementKnown = false,
+                ProjectionUnknownReason = ProjectionReason,
+            },
+        };
+        error = string.Empty;
+        return true;
+    }
+
+
+    private static bool TryMapStrategyVisibleEvidence(
+        NetherSnapshot snapshot,
+        NetherRuntimeInteractivePreEntryInputsResult interactive,
+        NetherRuntimePopupResult activeStrategyPopup,
+        MasterDataStore masterDataStore,
+        out NetherStrategyVisibleMapEvidence? evidence,
+        out string error
+    )
+    {
+        evidence = null;
+        MNetherFloorBattles[]? nativeBattles = masterDataStore.GetCache<MNetherFloorBattles>();
+        MNetherFloorTreasures[]? nativeTreasures = masterDataStore.GetCache<MNetherFloorTreasures>();
+        MNetherFloorEvents[]? nativeEvents = masterDataStore.GetCache<MNetherFloorEvents>();
+        MNetherFloorEventParts[]? nativeParts = masterDataStore.GetCache<MNetherFloorEventParts>();
+        MItems[]? nativeItems = masterDataStore.GetCache<MItems>();
+        if (nativeBattles == null
+            || nativeTreasures == null
+            || nativeEvents == null
+            || nativeParts == null
+            || nativeItems == null)
+        {
+            error = "strategy-visible-master-cache-unavailable";
+            return false;
+        }
+
+        NetherStrategyVisibleEvidenceCaptureResult mapped =
+            NetherStrategyVisibleEvidenceAssembler.Assemble(
+                new NetherStrategyVisibleEvidenceAssemblyRequest(
+                    snapshot,
+                    interactive,
+                    activeStrategyPopup,
+                    new NetherStrategyVisibleEvidenceCaptureRequest(
+                snapshot.Floors,
+                nativeBattles.Where(row => row != null).Select(row =>
+                    new NetherStrategyBattleMasterRow(
+                        row.id,
+                        row.m_nether_map_floor_id,
+                        row.type,
+                        row.m_nether_battle_stage_id,
+                        row.code_drop_ratio
+                    )
+                ).ToArray(),
+                nativeTreasures.Where(row => row != null).Select(row =>
+                    new NetherStrategyTreasureMasterRow(row.id, row.m_nether_map_floor_id)
+                ).ToArray(),
+                nativeEvents.Where(row => row != null).Select(row =>
+                    new NetherFloorEventMasterRow(
+                        row.id,
+                        row.m_nether_map_floor_id,
+                        row.weight,
+                        row.m_nether_floor_event_part_id_1,
+                        row.m_nether_floor_event_part_id_2,
+                        row.m_nether_floor_event_part_id_3,
+                        row.m_nether_floor_event_part_id_4
+                    )
+                    {
+                        Type = row.type,
+                    }
+                ).ToArray(),
+                nativeParts.Where(row => row != null).Select(row =>
+                    new NetherFloorEventPartMasterRow(
+                        row.id,
+                        row.target_type_1,
+                        row.select_parameter_1,
+                        row.target_type_2,
+                        row.select_parameter_2,
+                        row.target_type_3,
+                        row.select_parameter_3,
+                        row.content_type,
+                        row.content_id,
+                        row.amount
+                    )
+                ).ToArray(),
+                nativeItems.Where(row => row != null).Select(row =>
+                    new NetherStrategyItemMasterRow(
+                        row.id,
+                        row.type,
+                        row.rarity,
+                        row.value,
+                        row.possession_limit
+                    )
+                ).ToArray()
+                    )
+                )
+            );
+        evidence = mapped.Evidence;
+        error = mapped.Detail;
+        return mapped.IsSuccess;
+    }
+
     private static bool TryMapCharacters(
         object model,
         out IReadOnlyList<NetherCharacterState>? characters,
@@ -7791,18 +8442,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         foreach (object character in Enumerate(rawCharacters))
         {
             if (!TryReadInt(character, "MCharacterId", out long characterId)
-                || !TryReadDouble(character, "HpRatio", out double ratio))
+                || !TryReadDouble(character, "HpRatio", out double ratio)
+                || !TryReadBoolean(character, "IsAlive", out bool active))
             {
                 error = "missing-nether-character-member";
                 return false;
             }
-            if (characterId <= 0 || ratio is < 0d or > 1d)
+            if (characterId <= 0
+                || !NetherHpRatioPermilleQuantizer.TryQuantize(ratio, out int hpPermille))
             {
                 error = "invalid-nether-character-state:" + characterId;
                 return false;
             }
-            bool active = !TryReadBoolean(character, "IsAlive", out bool alive) || alive;
-            int hpPermille = checked((int)Math.Round(ratio * 1000d, MidpointRounding.AwayFromZero));
             mapped.Add(new NetherCharacterState(characterId, hpPermille, active));
         }
 
@@ -7825,17 +8476,36 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         rows = null;
         MNetherMaps[]? maps = masterDataStore.GetCache<MNetherMaps>();
+        MNetherMapFloors[]? floors = masterDataStore.GetCache<MNetherMapFloors>();
         MNetherCodes[]? codes = masterDataStore.GetCache<MNetherCodes>();
         MItems[]? items = masterDataStore.GetCache<MItems>();
-        if (maps == null || codes == null || items == null)
+        if (maps == null || floors == null || codes == null || items == null)
         {
             error = "missing-nether-master-cache";
             return false;
         }
-        MNetherMaps? map = maps.FirstOrDefault(row => row != null && row.id == mapId);
-        if (map == null || map.max_floor_num < 1)
+        NetherRunBoundaryMasterMapResult runBoundary = NetherRunBoundaryMasterMapper.Map(
+            mapId,
+            maps.Select(row => row == null
+                ? new NetherRunBoundaryMapMasterRow(0, 0, 0)
+                : new NetherRunBoundaryMapMasterRow(
+                    row.id,
+                    row.m_nether_id,
+                    row.max_floor_num
+                )).ToArray(),
+            floors.Select(row => row == null
+                ? new NetherRunBoundaryFloorMasterRow(0, 0, 0, 0, 0)
+                : new NetherRunBoundaryFloorMasterRow(
+                    row.id,
+                    row.m_nether_map_id,
+                    row.min_order,
+                    row.max_order,
+                    row.type
+                )).ToArray()
+        );
+        if (!runBoundary.IsMapped)
         {
-            error = "missing-m-nether-map:" + mapId;
+            error = "run-boundary-master:" + runBoundary.Detail;
             return false;
         }
 
@@ -7857,7 +8527,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return false;
         }
 
-        rows = new MasterRows(new MapMaster(map.max_floor_num), codeById, itemById);
+        rows = new MasterRows(runBoundary, codeById, itemById);
         error = string.Empty;
         return true;
     }
@@ -8927,6 +9597,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     }
 
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+    private static readonly BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
     private enum EventFlowKind
     {
         Event,
@@ -8969,10 +9640,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         object? ParentPopup
     );
 
-    private readonly record struct MapMaster(int MaxFloorFloorNumber);
-
     private sealed record MasterRows(
-        MapMaster Map,
+        NetherRunBoundaryMasterMapResult RunBoundary,
         IReadOnlyDictionary<long, MNetherCodes> CodeById,
         IReadOnlyDictionary<long, MItems> ItemById
     );
