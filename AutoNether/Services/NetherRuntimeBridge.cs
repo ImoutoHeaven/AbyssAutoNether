@@ -7808,30 +7808,45 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return false;
         }
 
-        var mapped = new List<NetherCharacterState>();
+        var observations = new List<NetherActiveBattleMemberHp>();
         foreach (object character in Enumerate(rawCharacters))
         {
             if (!TryReadInt(character, "MCharacterId", out long characterId)
-                || !TryReadDouble(character, "HpRatio", out double ratio))
+                || !TryReadDouble(character, "HpRatio", out double ratio)
+                || !TryReadBoolean(character, "IsAlive", out bool isAlive))
             {
                 error = "missing-nether-character-member";
                 return false;
             }
-            if (characterId <= 0 || ratio is < 0d or > 1d)
-            {
-                error = "invalid-nether-character-state:" + characterId;
-                return false;
-            }
-            bool active = !TryReadBoolean(character, "IsAlive", out bool alive) || alive;
-            int hpPermille = checked((int)Math.Round(ratio * 1000d, MidpointRounding.AwayFromZero));
-            mapped.Add(new NetherCharacterState(characterId, hpPermille, active));
+            observations.Add(new NetherActiveBattleMemberHp(characterId, ratio, isAlive));
         }
 
-        if (mapped.Count == 0)
+        // Use the same fresh-decompile-backed contract as battle route safety. Native IsAlive is
+        // exactly HpRatio > 0; CharacterModels can retain zero-HP nonliving roster rows. The
+        // server's integer current_hp_ratio is stored through PerMilleToFloat, so the shared
+        // decoder reverses only that Single representation error and preserves exact HP deltas.
+        NetherActivePartyHpSafety hpSafety = new NetherActivePartyHpSafetyMapper().Map(observations);
+        if (!hpSafety.IsKnown)
         {
-            error = "empty-nether-party";
+            error = "invalid-nether-character-state:" + hpSafety.Detail;
             return false;
         }
+
+        var mapped = new List<NetherCharacterState>(observations.Count);
+        foreach (NetherActiveBattleMemberHp observation in observations)
+        {
+            if (!NetherNativeHpPermille.TryDecode(observation.HpRatio, out int hpPermille))
+            {
+                error = "invalid-nether-character-hp-permille:" + observation.CharacterId;
+                return false;
+            }
+            mapped.Add(new NetherCharacterState(
+                observation.CharacterId,
+                hpPermille,
+                observation.IsAlive
+            ));
+        }
+
         characters = mapped;
         error = string.Empty;
         return true;

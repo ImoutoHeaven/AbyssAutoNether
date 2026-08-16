@@ -51,7 +51,7 @@ public static class Config
             "AutoNether",
             "TreasureMode",
             NetherTreasureMode.KeyOnly,
-            "Treasure strategy. KeyOnly accepts only a verified one-key native option; Off pauses safely."
+            "Treasure strategy. KeyOnly is kept for config compatibility: prefer a verified one-key option, otherwise allow an exact native HP payment only at or above MinimumCharacterHpPermille; Off pauses safely."
         );
         NetherAutoClimbShopMode = Plugin.ConfigFile.Bind(
             "AutoNether",

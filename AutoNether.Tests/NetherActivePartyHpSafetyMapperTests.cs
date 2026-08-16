@@ -10,12 +10,31 @@ public class NetherActivePartyHpSafetyMapperTests
     [Theory]
     [InlineData(0.299d, 299)]
     [InlineData(0.300d, 300)]
-    public void AuthoritativeRatio_UsesCheckedFloorPermille(double hpRatio, int expectedPermille)
+    public void AuthoritativeRatio_UsesCheckedServerPermilleInverse(double hpRatio, int expectedPermille)
     {
         NetherActivePartyHpSafety safety = Map(Member(1, hpRatio));
 
         Assert.True(safety.IsKnown);
         Assert.Equal(expectedPermille, safety.MinimumHpPermille);
+    }
+
+    [Fact]
+    public void ServerPermilleEncodedAsSingle_RoundTripsToTheAuthoritativeInteger()
+    {
+        NetherActivePartyHpSafety safety = Map(Member(1, (double)(float)0.704f));
+
+        Assert.True(safety.IsKnown);
+        Assert.Equal(704, safety.MinimumHpPermille);
+    }
+
+    [Fact]
+    public void RatioThatCannotComeFromAnIntegerServerPermille_IsUnknown()
+    {
+        NetherActivePartyHpSafety safety = Map(Member(1, 0.3004d));
+
+        Assert.False(safety.IsKnown);
+        Assert.Null(safety.MinimumHpPermille);
+        Assert.Contains("permille", safety.Detail);
     }
 
     [Fact]
@@ -32,7 +51,7 @@ public class NetherActivePartyHpSafetyMapperTests
     }
 
     [Fact]
-    public void DeadMember_IsAnExplicitZeroPermille()
+    public void ZeroHpNonLivingRosterMember_IsExcludedFromTheLivingMinimum()
     {
         NetherActivePartyHpSafety safety = Map(
             Member(1, 0.800d),
@@ -40,19 +59,30 @@ public class NetherActivePartyHpSafetyMapperTests
         );
 
         Assert.True(safety.IsKnown);
-        Assert.Equal(0, safety.MinimumHpPermille);
+        Assert.Equal(800, safety.MinimumHpPermille);
     }
 
     [Fact]
-    public void EveryRuntimePartyMember_ContributesToTheMinimum()
+    public void AliveFlagContradictingTheNativeHpGetter_IsUnknown()
     {
         NetherActivePartyHpSafety safety = Map(
             Member(1, 0.800d),
             Member(2, 0d)
         );
 
-        Assert.True(safety.IsKnown);
-        Assert.Equal(0, safety.MinimumHpPermille);
+        Assert.False(safety.IsKnown);
+        Assert.Null(safety.MinimumHpPermille);
+        Assert.Contains("contradictory", safety.Detail);
+    }
+
+    [Fact]
+    public void PartyWithNoLivingMembers_IsUnknown()
+    {
+        NetherActivePartyHpSafety safety = Map(Member(1, 0d, isAlive: false));
+
+        Assert.False(safety.IsKnown);
+        Assert.Null(safety.MinimumHpPermille);
+        Assert.Contains("empty-living", safety.Detail);
     }
 
     [Theory]

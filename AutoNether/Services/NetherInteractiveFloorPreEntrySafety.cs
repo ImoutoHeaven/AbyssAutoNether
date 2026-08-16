@@ -154,10 +154,9 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
 
         return input.FloorKind switch
         {
-            NetherFloorNodeType.Event => EvaluatePossibleEventRows(input, snapshot!, isRecovery: false),
-            NetherFloorNodeType.Recovery => EvaluatePossibleEventRows(input, snapshot!, isRecovery: true),
+            NetherFloorNodeType.Event or NetherFloorNodeType.Recovery or NetherFloorNodeType.Treasure =>
+                EvaluatePossibleEventRows(input, snapshot!, input.FloorKind),
             NetherFloorNodeType.Shop => EvaluateShopOff(input),
-            NetherFloorNodeType.Treasure => EvaluateTreasureKeyOnly(input, snapshot!),
             _ => NetherInteractiveFloorPreEntrySafetyResult.Pause(
                 NetherPauseReason.UnknownFloor,
                 "unsupported-interactive-floor-kind:" + ((int)input.FloorKind).ToString(CultureInfo.InvariantCulture)
@@ -242,7 +241,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
     private NetherInteractiveFloorPreEntrySafetyResult EvaluatePossibleEventRows(
         NetherInteractiveFloorPreEntrySafetyInput input,
         NetherSnapshot snapshot,
-        bool isRecovery
+        NetherFloorNodeType floorKind
     )
     {
         if (!TryIndexEventMasters(
@@ -270,7 +269,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     snapshot,
                     options!,
                     input.Settings!,
-                    isRecovery,
+                    floorKind,
                     out int optionNumber,
                     out NetherInteractiveOptionProjection projection,
                     out NetherPauseReason rejection,
@@ -542,7 +541,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
-        bool isRecovery,
+        NetherFloorNodeType floorKind,
         out int selectedOptionNumber,
         out NetherInteractiveOptionProjection selectedProjection,
         out NetherPauseReason rejection,
@@ -556,9 +555,12 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         var safeOptions = new List<NetherEventOption>();
         foreach (NetherEventOption option in options)
         {
-            NetherEventDecision decision = isRecovery
-                ? _eventPolicy.DecideRecovery(snapshot, [option], settings)
-                : _eventPolicy.DecideEvent(snapshot, [option], settings);
+            NetherEventDecision decision = DecideInteractiveOption(
+                floorKind,
+                snapshot,
+                [option],
+                settings
+            );
             if (decision.Kind != NetherEventDecisionKind.Select)
             {
                 CaptureMoreSpecificRejection(decision, ref rejection, ref detail);
@@ -582,9 +584,12 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         if (safeOptions.Count == 0)
             return false;
 
-        NetherEventDecision selected = isRecovery
-            ? _eventPolicy.DecideRecovery(snapshot, safeOptions, settings)
-            : _eventPolicy.DecideEvent(snapshot, safeOptions, settings);
+        NetherEventDecision selected = DecideInteractiveOption(
+            floorKind,
+            snapshot,
+            safeOptions,
+            settings
+        );
         if (selected.Kind != NetherEventDecisionKind.Select || selected.StartsBattleAfterSelection)
         {
             rejection = selected.Kind == NetherEventDecisionKind.Pause ? selected.PauseReason : NetherPauseReason.NoSafeRoute;
@@ -609,6 +614,19 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         }
         return true;
     }
+
+    private NetherEventDecision DecideInteractiveOption(
+        NetherFloorNodeType floorKind,
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings
+    ) => floorKind switch
+    {
+        NetherFloorNodeType.Event => _eventPolicy.DecideEvent(snapshot, options, settings),
+        NetherFloorNodeType.Recovery => _eventPolicy.DecideRecovery(snapshot, options, settings),
+        NetherFloorNodeType.Treasure => _eventPolicy.DecideTreasure(snapshot, options, settings),
+        _ => throw new ArgumentOutOfRangeException(nameof(floorKind), floorKind, "Unsupported interactive floor kind."),
+    };
 
     private static bool HasSafeHpFloor(NetherSnapshot snapshot, int hpDelta, int minimumHpPermille)
     {
@@ -667,28 +685,6 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             return NetherInteractiveFloorPreEntrySafetyResult.Pause(
                 NetherPauseReason.InvalidConfiguration,
                 "interactive-shop-mode-invalid"
-            );
-        }
-        return NetherInteractiveFloorPreEntrySafetyResult.SafeNeutral();
-    }
-
-    private static NetherInteractiveFloorPreEntrySafetyResult EvaluateTreasureKeyOnly(
-        NetherInteractiveFloorPreEntrySafetyInput input,
-        NetherSnapshot snapshot
-    )
-    {
-        if (input.Settings!.TreasureMode != NetherTreasureMode.KeyOnly)
-        {
-            return NetherInteractiveFloorPreEntrySafetyResult.Pause(
-                NetherPauseReason.NoSafeRoute,
-                "interactive-treasure-mode-not-key-only"
-            );
-        }
-        if (snapshot.TreasureKeyCount < 1)
-        {
-            return NetherInteractiveFloorPreEntrySafetyResult.Pause(
-                NetherPauseReason.NoSafeRoute,
-                "interactive-treasure-key-unavailable"
             );
         }
         return NetherInteractiveFloorPreEntrySafetyResult.SafeNeutral();

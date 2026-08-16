@@ -258,20 +258,49 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
-    public void Treasure_key_only_requires_a_key_and_known_safe_master_bounds()
+    public void Treasure_prefers_an_exact_key_payment_and_rejects_it_when_unavailable()
     {
+        NetherFloorEventMasterRow[] events = [Event(100, 1001)];
+        NetherFloorEventPartMasterRow[] parts =
+        [
+            Part(1001, targetType1: (int)NetherEffectKind.TreasureKeyUsed, parameter1: 1),
+        ];
         NetherInteractiveFloorPreEntrySafetyResult key = Evaluate(Input(
             NetherFloorNodeType.Treasure,
+            events: events,
+            parts: parts,
             keys: 1
         ));
         NetherInteractiveFloorPreEntrySafetyResult noKey = Evaluate(Input(
             NetherFloorNodeType.Treasure,
+            events: events,
+            parts: parts,
             keys: 0
         ));
 
         Assert.True(key.IsSafe);
         Assert.False(noKey.IsSafe);
         Assert.Equal(NetherPauseReason.NoSafeRoute, noKey.PauseReason);
+    }
+
+    [Fact]
+    public void Treasure_without_key_accepts_native_hp_payment_above_the_configured_floor()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Treasure,
+            events: [Event(100, 1001, 1002)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.TreasureKeyUsed, parameter1: 1),
+                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 300),
+            ],
+            hp: 704,
+            keys: 0
+        ));
+
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(2, result.SafeOptionNumberByEventId[100]);
+        Assert.Equal(-300, result.WorstCaseProjection!.Value.HpDelta);
     }
 
     [Fact]

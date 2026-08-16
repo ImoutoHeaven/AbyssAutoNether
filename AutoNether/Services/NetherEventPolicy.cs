@@ -121,27 +121,119 @@ internal sealed class NetherEventPolicy
         if (settings.TreasureMode != NetherTreasureMode.KeyOnly)
             return Pause(NetherPauseReason.NoSafeRoute, "treasure-mode-off");
 
-        var candidates = new List<EventCandidate>();
+        var keyCandidates = new List<EventCandidate>();
+        var hpCandidates = new List<EventCandidate>();
+        bool hpPaymentRejectedByFloor = false;
+        NetherEventDecision? firstSpecificRejection = null;
         foreach (NetherEventOption option in options)
         {
-            if (!TryValidateOption(option, snapshot, settings, modifiers, out EventCandidate candidate, out _))
+            bool isKeyPayment = IsVerifiedTreasureKeyPayment(option);
+            bool isHpPayment = IsVerifiedTreasureHpPayment(option);
+            if (!isKeyPayment && !isHpPayment)
                 continue;
-            int exactKeyCosts = option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount == 1);
-            bool hasOnlySafePayments = option.Effects.All(effect => effect.Kind is not NetherEffectKind.Damage and not NetherEffectKind.Erosion);
-            bool hasNoOtherKeyCost = option.Effects.All(effect => effect.Kind != NetherEffectKind.TreasureKeyUsed || effect.Amount == 1);
-            if (exactKeyCosts != 1 || !hasNoOtherKeyCost || !hasOnlySafePayments || snapshot.TreasureKeyCount < 1)
+
+            if (!TryValidateOption(
+                    option,
+                    snapshot,
+                    settings,
+                    modifiers,
+                    out EventCandidate candidate,
+                    out NetherEventDecision rejection
+                ))
+            {
+                if (rejection.PauseReason != NetherPauseReason.NoSafeRoute && firstSpecificRejection == null)
+                    firstSpecificRejection = rejection;
                 continue;
-            candidates.Add(candidate);
+            }
+
+            if (isKeyPayment)
+            {
+                keyCandidates.Add(candidate);
+                continue;
+            }
+
+            if (!HasMinimumActiveHpAfterDelta(snapshot, candidate.HpDelta, settings.MinimumCharacterHpPermille))
+            {
+                hpPaymentRejectedByFloor = true;
+                continue;
+            }
+            hpCandidates.Add(candidate);
         }
 
-        if (candidates.Count == 0)
-            return Pause(NetherPauseReason.NoSafeRoute, "no-key-only-treasure-option");
+        // The persisted enum value remains KeyOnly for configuration compatibility. Its runtime
+        // contract is key-preferred: a verified one-key option wins, while a native HP-payment
+        // option is an allowed fallback only when every living member stays above the configured
+        // route floor.
+        if (keyCandidates.Count > 0)
+        {
+            EventCandidate selectedKey = keyCandidates
+                .OrderByDescending(candidate => candidate.Benefit)
+                .ThenBy(candidate => candidate.Option.OptionNumber)
+                .First();
+            return Select(selectedKey);
+        }
 
-        EventCandidate selected = candidates
-            .OrderByDescending(candidate => candidate.Benefit)
-            .ThenBy(candidate => candidate.Option.OptionNumber)
-            .First();
-        return Select(selected);
+        if (hpCandidates.Count > 0)
+        {
+            EventCandidate selectedHp = hpCandidates
+                .OrderByDescending(candidate => candidate.HpDelta)
+                .ThenByDescending(candidate => candidate.Benefit)
+                .ThenBy(candidate => candidate.Option.OptionNumber)
+                .First();
+            return Select(selectedHp);
+        }
+
+        if (hpPaymentRejectedByFloor)
+            return Pause(NetherPauseReason.UnsafeHp, "treasure-hp-payment-below-minimum");
+        if (firstSpecificRejection != null)
+            return firstSpecificRejection;
+        return Pause(NetherPauseReason.NoSafeRoute, "no-verified-key-or-safe-hp-treasure-option");
+    }
+
+    private static bool IsVerifiedTreasureKeyPayment(NetherEventOption? option) =>
+        option?.Effects != null
+        && option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount == 1) == 1
+        && option.Effects.All(effect =>
+            (effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount == 1)
+            || IsVerifiedTreasureBenefit(effect.Kind));
+
+    private static bool IsVerifiedTreasureHpPayment(NetherEventOption? option) =>
+        option?.Effects != null
+        && option.Effects.Count(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount > 0) == 1
+        && option.Effects.All(effect =>
+            (effect.Kind == NetherEffectKind.Damage && effect.Amount > 0)
+            || IsVerifiedTreasureBenefit(effect.Kind));
+
+    private static bool IsVerifiedTreasureBenefit(NetherEffectKind kind) => kind is
+        NetherEffectKind.ErosionHeal
+        or NetherEffectKind.Item
+        or NetherEffectKind.NetherGoldGain
+        or NetherEffectKind.TreasureKeyGain
+        or NetherEffectKind.AbyssCodeOffer;
+
+    private static bool HasMinimumActiveHpAfterDelta(
+        NetherSnapshot snapshot,
+        int hpDelta,
+        int minimumHpPermille
+    )
+    {
+        bool foundActive = false;
+        try
+        {
+            foreach (NetherCharacterState character in snapshot.Characters)
+            {
+                if (!character.IsActive)
+                    continue;
+                foundActive = true;
+                if (checked(character.HpPermille + hpDelta) < minimumHpPermille)
+                    return false;
+            }
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+        return foundActive;
     }
 
     public NetherShopDecision DecideShop(

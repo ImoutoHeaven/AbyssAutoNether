@@ -257,6 +257,10 @@ internal enum NetherCombatLane
 internal enum NetherTreasureMode
 {
     Off,
+    /// <summary>
+    /// Backward-compatible persisted name: prefer an exact one-key native option, then permit an
+    /// exact native HP payment only when every living member remains at or above the configured floor.
+    /// </summary>
     KeyOnly,
 }
 

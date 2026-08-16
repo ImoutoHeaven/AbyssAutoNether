@@ -24,6 +24,24 @@ public class NetherRuntimeActivePartyHpExtractorTests
     }
 
     [Fact]
+    public void ZeroHpNonLivingRosterMember_DoesNotLowerTheLivingPartyMinimum()
+    {
+        var netherModel = new FakeNetherModel(
+            new FakePartyModel(
+                new FakePartyCharacter(10, 0.700d, isAlive: true),
+                new FakePartyCharacter(20, 0.515d, isAlive: true),
+                new FakePartyCharacter(30, 0d, isAlive: false),
+                new FakePartyCharacter(40, 1d, isAlive: true)
+            )
+        );
+
+        NetherActivePartyHpSafety safety = new NetherRuntimeActivePartyHpExtractor().Extract(netherModel);
+
+        Assert.True(safety.IsKnown);
+        Assert.Equal(515, safety.MinimumHpPermille);
+    }
+
+    [Fact]
     public void MissingPartyOrCharacters_IsUnknown()
     {
         NetherActivePartyHpSafety safety = new NetherRuntimeActivePartyHpExtractor().Extract(

@@ -98,6 +98,33 @@ public class NetherPopupDispatchPolicyTests
     }
 
     [Fact]
+    public void Treasure_popup_dispatches_verified_hp_payment_when_no_key_is_available()
+    {
+        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
+            Snapshot(keys: 0, hp: 704),
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Treasure,
+                Options =
+                [
+                    new NetherEventOption(1, [new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1)]),
+                    new NetherEventOption(2,
+                    [
+                        new NetherEffect(NetherEffectKind.Damage, 300),
+                        new NetherEffect(NetherEffectKind.ErosionHeal, 30),
+                    ]),
+                ],
+            },
+            Settings()
+        );
+
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, decision.Kind);
+        Assert.Equal(NetherActionKind.SelectEventOption, decision.Action.Kind);
+        Assert.Equal(2, decision.Action.OptionNumber);
+        Assert.Contains(decision.Action.ExpectedEffects, effect => effect.Kind == NetherEffectKind.Damage && effect.Amount == 300);
+    }
+
+    [Fact]
     public void Shop_off_leaves_through_native_close_callback()
     {
         NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
@@ -110,12 +137,12 @@ public class NetherPopupDispatchPolicyTests
         Assert.Equal(NetherActionKind.LeaveShop, decision.Action.Kind);
     }
 
-    private static NetherSnapshot Snapshot(int keys = 0) => new()
+    private static NetherSnapshot Snapshot(int keys = 0, int hp = 1000) => new()
     {
         ErosionPoint = 20,
         NetherGold = 100,
         TreasureKeyCount = keys,
-        Characters = [new NetherCharacterState(1, 1000)],
+        Characters = [new NetherCharacterState(1, hp)],
     };
 
     private static NetherAutoClimbSettings Settings(NetherShopMode shop = NetherShopMode.Off) => new()

@@ -411,7 +411,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
         if (safety.WorstCaseProjection is not NetherInteractiveWorstCaseProjection captured)
             return false;
 
-        if (floorKind is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery)
+        if (floorKind is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery or NetherFloorNodeType.Treasure)
         {
             if (safety.SafeOptionNumberByEventId == null
                 || safety.SafeOptionProjectionByEventId == null
@@ -432,7 +432,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 }
             }
         }
-        else if (floorKind is not NetherFloorNodeType.Shop and not NetherFloorNodeType.Treasure)
+        else if (floorKind != NetherFloorNodeType.Shop)
         {
             return false;
         }

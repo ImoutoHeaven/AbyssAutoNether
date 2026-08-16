@@ -3378,7 +3378,18 @@ public class NetherAutoClimbControllerEndToEndTests
                 Kind = NetherRuntimePopupKind.Treasure,
                 Options = new[] { new NetherEventOption(1, new[] { new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1) }) },
             },
-            null,
+            new NetherFloorEventPartMasterRow(
+                1001,
+                (int)NetherEffectKind.TreasureKeyUsed,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ),
             after,
             NetherActionKind.SelectEventOption
         );
@@ -5171,7 +5182,7 @@ public class NetherAutoClimbControllerEndToEndTests
         {
             IReadOnlyList<NetherFloorEventMasterRow>? eventRows = null;
             IReadOnlyList<NetherFloorEventPartMasterRow>? parts = null;
-            if (kind is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery)
+            if (kind is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery or NetherFloorNodeType.Treasure)
             {
                 if (eventPart is not NetherFloorEventPartMasterRow part)
                     return NetherRuntimeInteractivePreEntryInputsResult.Failure("missing-e2e-event-part");

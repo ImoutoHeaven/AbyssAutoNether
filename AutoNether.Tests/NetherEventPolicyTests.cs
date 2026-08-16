@@ -130,7 +130,7 @@ public class NetherEventPolicyTests
     }
 
     [Fact]
-    public void Treasure_never_selects_hp_or_erosion_payment()
+    public void Treasure_prefers_the_key_over_hp_or_erosion_payment()
     {
         NetherEventDecision decision = EventPolicy().DecideTreasure(
             Snapshot(keys: 1),
@@ -144,6 +144,58 @@ public class NetherEventPolicyTests
 
         Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
         Assert.Equal(3, decision.OptionNumber);
+    }
+
+    [Fact]
+    public void Treasure_without_a_key_selects_native_hp_payment_above_the_configured_floor()
+    {
+        NetherEventDecision decision = EventPolicy().DecideTreasure(
+            Snapshot(hp: 704, keys: 0),
+            [
+                Option(1, new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1)),
+                Option(
+                    2,
+                    new NetherEffect(NetherEffectKind.Damage, 300),
+                    new NetherEffect(NetherEffectKind.ErosionHeal, 30)
+                ),
+            ],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        Assert.Equal(2, decision.OptionNumber);
+        Assert.Equal(-300, decision.HpDelta);
+    }
+
+    [Fact]
+    public void Treasure_hp_payment_below_the_configured_floor_is_rejected()
+    {
+        NetherEventDecision decision = EventPolicy().DecideTreasure(
+            Snapshot(hp: 515, keys: 0),
+            [Option(1, new NetherEffect(NetherEffectKind.Damage, 300))],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Pause, decision.Kind);
+        Assert.Equal(NetherPauseReason.UnsafeHp, decision.PauseReason);
+        Assert.Contains("below-minimum", decision.Detail);
+    }
+
+    [Fact]
+    public void Treasure_hp_fallback_does_not_accept_mixed_or_non_hp_payments()
+    {
+        NetherEventDecision decision = EventPolicy().DecideTreasure(
+            Snapshot(hp: 704, keys: 0, gold: 100),
+            [
+                Option(1, new NetherEffect(NetherEffectKind.Damage, 300), new NetherEffect(NetherEffectKind.Heal, 300)),
+                Option(2, new NetherEffect(NetherEffectKind.Erosion, 1)),
+                Option(3, new NetherEffect(NetherEffectKind.NetherGoldUsed, 1)),
+            ],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Pause, decision.Kind);
+        Assert.Equal(NetherPauseReason.NoSafeRoute, decision.PauseReason);
     }
 
     [Fact]

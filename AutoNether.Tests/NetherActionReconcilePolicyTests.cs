@@ -754,6 +754,38 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
+    public void SingleEncodedServerHp_PreservesExactDamageDeltaForReconciliation()
+    {
+        int beforeHp = MapNativeHp((double)(float)0.704f);
+        int afterHp = MapNativeHp((double)(float)0.404f);
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            Characters = [new NetherCharacterState(101, beforeHp)],
+            CharacterHpHash = "101:" + beforeHp + ":1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            Characters = [new NetherCharacterState(101, afterHp)],
+            CharacterHpHash = "101:" + afterHp + ":1",
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Treasure,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 2,
+            ExpectedEffects = [new NetherEffect(NetherEffectKind.Damage, 300)],
+        };
+
+        Assert.Equal(704, beforeHp);
+        Assert.Equal(404, afterHp);
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(action, before, after)
+        );
+    }
+
+    [Fact]
     public void Live_floor_event_damage_and_erosion_heal_accept_one_exact_character_update()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
@@ -1299,6 +1331,15 @@ public class NetherActionReconcilePolicyTests
         ReplaceCodeId: 0,
         DecisionEpoch: epoch
     );
+
+    private static int MapNativeHp(double hpRatio)
+    {
+        NetherActivePartyHpSafety safety = new NetherActivePartyHpSafetyMapper().Map(
+            [new NetherActiveBattleMemberHp(101, hpRatio, IsAlive: true)]
+        );
+        Assert.True(safety.IsKnown, safety.Detail);
+        return Assert.IsType<int>(safety.MinimumHpPermille);
+    }
 
     private static NetherSnapshot Snapshot(
         long floorId = 10,

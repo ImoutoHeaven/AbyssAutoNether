@@ -29,7 +29,7 @@
 - `MinimumCharacterHpPermille = 300`：活动角色最低安全 HP，300 表示 30%。
 - `CombatLane = Auto`：深渊代码流派，可为 `Auto`、`Rush`、`Impact`。
 - `CodeReloadReserve = 1`：保留的深渊代码重抽次数。
-- `TreasureMode = KeyOnly`：默认只接受已验证的单钥匙开箱选项；`Off` 会安全暂停。
+- `TreasureMode = KeyOnly`：保留原配置名以兼容已有配置；优先使用已验证的单钥匙选项，无钥匙时仅在所有存活角色支付后仍不低于 `MinimumCharacterHpPermille` 时使用精确的原生 HP 支付选项；`Off` 会安全暂停。
 - `ShopMode = Off`：默认通过原生关闭流程离店；`EquipmentBags` 购买已验证且买得起的装备袋。
 - `DetailedLogging = true`：输出有界的 `[F12][AutoNether]` 诊断日志。
 - `CheckpointPreserveItemIds =`：十层 checkpoint 优先送回的十进制物品 ID；可用逗号、分号或空格分隔，留空走安全默认策略。

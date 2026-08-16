@@ -102,19 +102,66 @@ public class NetherInteractiveRouteSafetyWiringTests
     [Theory]
     [InlineData(1, true)]
     [InlineData(0, false)]
-    public void ControllerRouteWiring_RequiresAuthoritativeKeyForKeyOnlyTreasure(int keys, bool expectedSelection)
+    public void ControllerRouteWiring_UsesVerifiedKeyTreasureOptionWhenAvailable(int keys, bool expectedSelection)
     {
         NetherRuntimeInteractivePreEntryCaptureResult capture = Capture(
             NetherFloorNodeType.Treasure,
-            events: [],
-            parts: [],
+            events: [Event(42, 2, 1, 1001)],
+            parts: [Part(1001, (int)NetherEffectKind.TreasureKeyUsed, 1)],
             keys: keys
         );
 
-        NetherAutoClimbRouteSafetyDecision decision = Decide(NetherFloorNodeType.Treasure, capture);
+        NetherAutoClimbRouteSafetyDecision decision = Decide(
+            NetherFloorNodeType.Treasure,
+            capture,
+            keys: keys
+        );
 
         Assert.Equal(expectedSelection, decision.Route.HasSelection);
         Assert.Equal(expectedSelection, decision.Context.KnownNodeByFloorId[2]);
+    }
+
+    [Fact]
+    public void ControllerRouteWiring_KeepsShopToTreasureRouteWhenNativeHpPaymentIsSafe()
+    {
+        NetherRuntimeInteractivePreEntryCaptureResult shop = Capture(
+            NetherFloorNodeType.Shop,
+            events: [],
+            parts: [],
+            keys: 0,
+            canCloseShop: true,
+            hp: 704,
+            floorMasterId: 2
+        );
+        NetherRuntimeInteractivePreEntryCaptureResult treasure = Capture(
+            NetherFloorNodeType.Treasure,
+            events: [Event(42, 3, 1, 1001, 1002)],
+            parts:
+            [
+                Part(1001, (int)NetherEffectKind.TreasureKeyUsed, 1),
+                Part(
+                    1002,
+                    (int)NetherEffectKind.Damage,
+                    300,
+                    targetType2: (int)NetherEffectKind.ErosionHeal,
+                    parameter2: 30
+                ),
+            ],
+            keys: 0,
+            hp: 704,
+            floorMasterId: 3
+        );
+
+        NetherAutoClimbRouteSafetyDecision decision = DecideShopThenTreasure(shop, treasure);
+
+        Assert.True(shop.Safety.IsSafe, shop.Safety.PauseReason + ":" + shop.Safety.Detail);
+        Assert.True(treasure.Safety.IsSafe, treasure.Safety.PauseReason + ":" + treasure.Safety.Detail);
+        Assert.Equal(2, treasure.Safety.SafeOptionNumberByEventId[42]);
+        Assert.Equal(-300, treasure.Safety.WorstCaseProjection!.Value.HpDelta);
+        Assert.True(decision.Route.HasSelection, decision.Route.PauseReason + ":" + decision.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(decision.Route.SelectedNode).FloorId);
+        Assert.True(decision.Context.KnownNodeByFloorId[2]);
+        Assert.True(decision.Context.KnownNodeByFloorId[3]);
     }
 
     [Fact]
@@ -200,7 +247,9 @@ public class NetherInteractiveRouteSafetyWiringTests
 
     private static NetherAutoClimbRouteSafetyDecision Decide(
         NetherFloorNodeType interactiveKind,
-        NetherRuntimeInteractivePreEntryCaptureResult capture
+        NetherRuntimeInteractivePreEntryCaptureResult capture,
+        int keys = 1,
+        int hp = 500
     ) => new NetherAutoClimbRouteSafetyWiring().Plan(
         new NetherSnapshot
         {
@@ -209,8 +258,8 @@ public class NetherInteractiveRouteSafetyWiringTests
             CurrentFloorId = 1,
             ErosionPoint = 20,
             NetherGold = 100,
-            TreasureKeyCount = 1,
-            Characters = [new NetherCharacterState(1, 500) { IsActive = true }],
+            TreasureKeyCount = keys,
+            Characters = [new NetherCharacterState(1, hp) { IsActive = true }],
             Floors =
             [
                 Floor(1, 1, NetherFloorNodeType.Recovery),
@@ -226,7 +275,7 @@ public class NetherInteractiveRouteSafetyWiringTests
             {
                 [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
             },
-            ActivePartyHp = new NetherActivePartyHpSafety(true, 500, string.Empty),
+            ActivePartyHp = new NetherActivePartyHpSafety(true, hp, string.Empty),
             ActiveCodeErosion = new NetherActiveCodeErosionProjection
             {
                 ErosionProjectionKnown = true,
@@ -236,6 +285,52 @@ public class NetherInteractiveRouteSafetyWiringTests
         },
         interactivePreEntry: NetherRuntimeInteractivePreEntryInputsResult.Success(
             new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> { [2] = capture }
+        )
+    );
+
+    private static NetherAutoClimbRouteSafetyDecision DecideShopThenTreasure(
+        NetherRuntimeInteractivePreEntryCaptureResult shop,
+        NetherRuntimeInteractivePreEntryCaptureResult treasure
+    ) => new NetherAutoClimbRouteSafetyWiring().Plan(
+        new NetherSnapshot
+        {
+            Status = NetherSessionStatus.Play,
+            MapId = 1,
+            CurrentFloorId = 1,
+            ErosionPoint = 20,
+            NetherGold = 100,
+            TreasureKeyCount = 0,
+            Characters = [new NetherCharacterState(1, 704) { IsActive = true }],
+            Floors =
+            [
+                Floor(1, 114, NetherFloorNodeType.MiniBoss),
+                Floor(2, 115, NetherFloorNodeType.Shop, previous: [1]),
+                Floor(3, 116, NetherFloorNodeType.Treasure, previous: [2]),
+                Floor(4, 117, NetherFloorNodeType.Boss, previous: [3]),
+            ],
+        },
+        Settings(),
+        effectiveMaximumDepth: 130,
+        runtime: new NetherRuntimeRouteSafetyData
+        {
+            FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+            {
+                [4] = new NetherFloorMasterBounds(4, 0, 0, IsKnown: true, Detail: string.Empty),
+            },
+            ActivePartyHp = new NetherActivePartyHpSafety(true, 704, string.Empty),
+            ActiveCodeErosion = new NetherActiveCodeErosionProjection
+            {
+                ErosionProjectionKnown = true,
+                CodeHash = "nether-codes:none",
+                ErosionEffects = Array.Empty<NetherCodeEffect>(),
+            },
+        },
+        interactivePreEntry: NetherRuntimeInteractivePreEntryInputsResult.Success(
+            new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
+            {
+                [2] = shop,
+                [3] = treasure,
+            }
         )
     );
 
@@ -326,16 +421,17 @@ public class NetherInteractiveRouteSafetyWiringTests
         object[]? parts = null,
         int keys = 1,
         bool canCloseShop = false,
-        int hp = 500
+        int hp = 500,
+        long floorMasterId = 2
     ) => new NetherRuntimeInteractivePreEntryInputCapture().Capture(new NetherRuntimeInteractivePreEntryCaptureRequest(
         FloorModel: new FloorFixture
         {
-            MNetherMapFloorId = 2,
+            MNetherMapFloorId = floorMasterId,
             ExtendId = kind is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery ? 42 : 0,
             FloorType = (int)kind,
         },
-        MapFloorRows: mapRows ?? [new MapFloorFixture { id = 2, min_erosion_point = 0, max_erosion_point = 10 }],
-        EventRows: events ?? [Event(42, 2, 1, 1001)],
+        MapFloorRows: mapRows ?? [new MapFloorFixture { id = floorMasterId, min_erosion_point = 0, max_erosion_point = 10 }],
+        EventRows: events ?? [Event(42, floorMasterId, 1, 1001)],
         EventPartRows: parts ?? [Part(1001, (int)NetherEffectKind.Heal, 1)],
         CurrentErosion: 20,
         ActiveHpPermille: [hp],
@@ -345,20 +441,31 @@ public class NetherInteractiveRouteSafetyWiringTests
         CanCloseShop: canCloseShop
     ));
 
-    private static EventFixture Event(long id, long floorMasterId, int weight, long part1) => new()
+    private static EventFixture Event(long id, long floorMasterId, int weight, params long[] partIds) => new()
     {
         id = id,
         m_nether_map_floor_id = floorMasterId,
         weight = weight,
         type = 4,
-        m_nether_floor_event_part_id_1 = part1,
+        m_nether_floor_event_part_id_1 = partIds.ElementAtOrDefault(0),
+        m_nether_floor_event_part_id_2 = partIds.ElementAtOrDefault(1),
+        m_nether_floor_event_part_id_3 = partIds.ElementAtOrDefault(2),
+        m_nether_floor_event_part_id_4 = partIds.ElementAtOrDefault(3),
     };
 
-    private static PartFixture Part(long id, int targetType, long parameter) => new()
+    private static PartFixture Part(
+        long id,
+        int targetType,
+        long parameter,
+        int targetType2 = 0,
+        long parameter2 = 0
+    ) => new()
     {
         id = id,
         target_type_1 = targetType,
         select_parameter_1 = parameter,
+        target_type_2 = targetType2,
+        select_parameter_2 = parameter2,
     };
 
     private static NetherFloorNode Floor(long id, int level, NetherFloorNodeType type, long[]? previous = null) => new(id, level, (int)id, type)
