@@ -437,7 +437,7 @@ internal sealed class NetherContinueSceneCoordinator
             if (after.CurrentFloorId != _contract.ExpectedFloorId)
                 return TerminalPause("continue-settlement-wrong-floor");
         }
-        else if (after.MapId <= 0 || after.CurrentFloorId <= 0)
+        else if (!HasValidServerAssignedDestination(after))
         {
             return TerminalPause("continue-settlement-wrong-destination");
         }
@@ -479,24 +479,58 @@ internal sealed class NetherContinueSceneCoordinator
     private static bool HasConvergedPresentation(
         NetherSnapshot applied,
         NetherSnapshot presentation
-    ) => presentation.NetherId == applied.NetherId
-        && presentation.Status == applied.Status
-        && presentation.MapId == applied.MapId
-        && presentation.CurrentFloorId == applied.CurrentFloorId
-        && presentation.FloorLevel == applied.FloorLevel
-        && presentation.FloorIndex == applied.FloorIndex
-        && presentation.ErosionPoint == applied.ErosionPoint
-        && presentation.TreasureKeyCount == applied.TreasureKeyCount
-        && presentation.NetherGold == applied.NetherGold
-        && presentation.TicketCount == applied.TicketCount;
+    )
+    {
+        bool floorIdentityConverged = applied.CurrentFloorId > 0
+            ? presentation.CurrentFloorId == applied.CurrentFloorId
+            : HasResolvedCoordinateOnlyPresentation(applied, presentation);
+        return presentation.NetherId == applied.NetherId
+            && presentation.Status == applied.Status
+            && presentation.MapId == applied.MapId
+            && floorIdentityConverged
+            && presentation.FloorLevel == applied.FloorLevel
+            && presentation.FloorIndex == applied.FloorIndex
+            && presentation.ErosionPoint == applied.ErosionPoint
+            && presentation.TreasureKeyCount == applied.TreasureKeyCount
+            && presentation.NetherGold == applied.NetherGold
+            && presentation.TicketCount == applied.TicketCount;
+    }
+
+    private static bool HasResolvedCoordinateOnlyPresentation(
+        NetherSnapshot applied,
+        NetherSnapshot presentation
+    )
+    {
+        if (!IsCoordinateOnlyPlayEntry(applied)
+            || presentation.CurrentFloorId <= 0
+            || presentation.CurrentNodeId <= 0
+            || presentation.Floors.Count == 0)
+        {
+            return false;
+        }
+
+        int matchingCurrentNodes = 0;
+        foreach (NetherFloorNode floor in presentation.Floors)
+        {
+            if (floor.NodeId != presentation.CurrentNodeId)
+                continue;
+            matchingCurrentNodes++;
+            if (floor.FloorId != presentation.CurrentFloorId
+                || floor.FloorLevel != presentation.FloorLevel
+                || floor.ApiFloorIndex != presentation.FloorIndex)
+            {
+                return false;
+            }
+        }
+        return matchingCurrentNodes == 1;
+    }
 
     private bool IsExactSettlement(NetherSnapshot before, NetherSnapshot after)
     {
         bool destinationMatches = HasPredictedDestination(_contract)
             ? after.MapId == _contract.ExpectedMapId
                 && after.CurrentFloorId == _contract.ExpectedFloorId
-            : after.MapId > 0
-                && after.CurrentFloorId > 0;
+            : HasValidServerAssignedDestination(after);
         return after.TicketCount == before.TicketCount - _contract.TicketCost
             && destinationMatches
             && after.FloorLevel == _contract.ExpectedSegmentFloorLevel
@@ -527,8 +561,9 @@ internal sealed class NetherContinueSceneCoordinator
         // TryCaptureReadyFloorSceneSnapshot already proved a strictly newer generation, the
         // current controller, its matching SubScene.OnEntered, and an authoritative snapshot.
         // The server is therefore free to reuse map/floor identifiers while ticket/status fields
-        // propagate; positive identifiers are the only destination constraint available here.
-        return after.MapId > 0 && after.CurrentFloorId > 0;
+        // propagate. A Play response can also be the coordinate-only new-segment boundary before
+        // any node is selected; the Continue-specific cache proves that narrow zero-ID shape.
+        return HasValidServerAssignedDestination(after);
     }
 
     private NetherContinueSceneStep TerminalComplete(NetherSnapshot snapshot, string detail)
@@ -568,6 +603,18 @@ internal sealed class NetherContinueSceneCoordinator
 
     private static bool HasPredictedDestination(NetherContinueSceneContract contract) =>
         contract.ExpectedMapId > 0 && contract.ExpectedFloorId > 0;
+
+    private static bool HasValidServerAssignedDestination(NetherSnapshot snapshot) =>
+        snapshot.MapId > 0
+        && (snapshot.CurrentFloorId > 0 || IsCoordinateOnlyPlayEntry(snapshot));
+
+    private static bool IsCoordinateOnlyPlayEntry(NetherSnapshot snapshot) =>
+        snapshot.Status == NetherSessionStatus.Play
+        && snapshot.CurrentFloorId == 0
+        && snapshot.CurrentNodeId == 0
+        && snapshot.FloorLevel > 0
+        && snapshot.FloorIndex >= 0
+        && snapshot.Floors.Count == 0;
 
     private static bool HasValidDestinationContract(NetherContinueSceneContract contract) =>
         HasPredictedDestination(contract)

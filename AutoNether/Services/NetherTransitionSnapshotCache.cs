@@ -258,9 +258,16 @@ internal sealed class NetherTransitionSnapshotCache
                 + ":fresh=" + state.NetherId
             );
         }
+        // The packaged client can enter a new Continue segment before any node in that segment
+        // has been selected. NetherData.Apply preserves MNetherMapFloorId == 0 while the rebound
+        // NetherModel independently resolves CurrentFloorModel from (FloorLevel, FloorIndex).
+        // Keep this exception purpose-specific and status-specific: zero is mutation evidence for
+        // that Play boundary, never a graph/node identity and never valid for another status.
+        bool isCoordinateOnlyPlayEntry = state.Status == NetherSessionStatus.Play
+            && state.CurrentFloorId == 0;
         if (state.Status == NetherSessionStatus.Unknown
             || state.MapId <= 0
-            || state.CurrentFloorId <= 0
+            || (state.CurrentFloorId <= 0 && !isCoordinateOnlyPlayEntry)
             || state.FloorLevel <= 0
             || state.FloorIndex < 0
             || state.TicketCount < 0)

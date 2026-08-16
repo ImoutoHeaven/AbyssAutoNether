@@ -108,6 +108,192 @@ public class NetherContinueSceneCoordinatorTests
     }
 
     [Fact]
+    public void Server_assigned_zero_floor_settlement_converges_by_coordinate_to_full_new_presentation()
+    {
+        const long completedNodeId = 90194313218;
+        const long entryNodeId = 94489280513;
+        const long nextNodeId = 98784247810;
+        NetherSnapshot before = Snapshot(
+            NetherSessionStatus.Sleep,
+            mapId: 1,
+            floorId: 96,
+            floorLevel: 20,
+            ticketCount: 62,
+            mapHash: "completed-segment-20"
+        ) with
+        {
+            CurrentNodeId = completedNodeId,
+            FloorIndex = 1,
+            Characters = new[] { new NetherCharacterState(1100012, 954, true) },
+            Floors = new[]
+            {
+                new NetherFloorNode(96, 20, 1, NetherFloorNodeType.Boss)
+                {
+                    NodeId = completedNodeId,
+                    ApiFloorIndex = 1,
+                    IsUnlocked = true,
+                },
+            },
+        };
+        NetherSnapshot presentation = Snapshot(
+            NetherSessionStatus.Play,
+            mapId: 1,
+            floorId: 101,
+            floorLevel: 20,
+            ticketCount: 61,
+            mapHash: "new-segment-21"
+        ) with
+        {
+            CurrentNodeId = entryNodeId,
+            FloorIndex = 1,
+            Characters = before.Characters,
+            Floors = new[]
+            {
+                new NetherFloorNode(101, 20, 1, NetherFloorNodeType.Event)
+                {
+                    NodeId = entryNodeId,
+                    ApiFloorIndex = 1,
+                    IsUnlocked = true,
+                },
+                new NetherFloorNode(102, 21, 0, NetherFloorNodeType.Boss)
+                {
+                    NodeId = nextNodeId,
+                    ApiFloorIndex = 0,
+                    IsUnlocked = true,
+                    PreviousFloorIds = new[] { entryNodeId },
+                },
+            },
+        };
+        var cache = new NetherTransitionSnapshotCache();
+        cache.ObserveFullSnapshot(before);
+        var driver = new FakeDriver(
+            parent: new[] { NetherNativeActionResult.Completed("continue-parent-terminal") },
+            appliedSnapshot: presentation,
+            continueSnapshotCache: cache,
+            continueAuthoritativeState: new NetherAuthoritativeTransitionState
+            {
+                Status = NetherSessionStatus.Play,
+                NetherId = 1,
+                MapId = 1,
+                CurrentFloorId = 0,
+                FloorLevel = 20,
+                FloorIndex = 1,
+                MaxFloorLevel = 130,
+                ContinuanceFloorLevel = 20,
+                MasterMaxFloorLevel = 130,
+                ErosionPoint = presentation.ErosionPoint,
+                TicketCount = 61,
+                TreasureKeyCount = presentation.TreasureKeyCount,
+                NetherGold = presentation.NetherGold,
+                CodeReloadCount = presentation.CodeReloadCount,
+                LockReward = presentation.LockReward,
+                Codes = Array.Empty<NetherCodeState>(),
+                AcquiredItems = Array.Empty<NetherRewardItem>(),
+            }
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+        var contract = new NetherContinueSceneContract(
+            ExpectedMapId: 0,
+            ExpectedFloorId: 0,
+            ExpectedSegmentFloorLevel: 20,
+            TicketCost: 1,
+            ExpectedStatus: NetherSessionStatus.Play
+        );
+
+        Assert.True(coordinator.Begin(contract, before, ownerGeneration: 10));
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+        driver.FloorOwnerTerminated = true;
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, coordinator.Pump().Kind);
+        driver.CurrentRuntimeGeneration = 11;
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
+        Assert.Equal(101, terminal.Snapshot!.CurrentFloorId);
+        Assert.Equal(entryNodeId, terminal.Snapshot.CurrentNodeId);
+        Assert.Equal(2, terminal.Snapshot.Floors.Count);
+        Assert.Equal("new-segment-21", terminal.Snapshot.MapHash);
+        Assert.Equal(1, driver.ContinueAppliedSnapshotReads);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+
+        NetherRoutePlan route = new NetherRoutePlanner().Plan(
+            terminal.Snapshot,
+            new NetherRouteSafetyContext()
+        );
+        Assert.True(route.HasSelection, route.PauseDetail);
+        Assert.Equal(nextNodeId, route.SelectedNode!.NodeId);
+    }
+
+    [Fact]
+    public void Coordinate_only_settlement_waits_for_a_graph_resolved_current_node()
+    {
+        NetherSnapshot applied = AppliedSnapshot() with
+        {
+            CurrentFloorId = 0,
+            CurrentNodeId = 0,
+            Floors = Array.Empty<NetherFloorNode>(),
+            MapHash = string.Empty,
+        };
+        NetherSnapshot unresolvedPresentation = AppliedSnapshot() with
+        {
+            CurrentNodeId = 141733920769,
+            Floors = Array.Empty<NetherFloorNode>(),
+        };
+        var driver = new FakeDriver(
+            parent: new[] { NetherNativeActionResult.Completed("continue-parent-terminal") },
+            appliedSnapshot: unresolvedPresentation,
+            continueAppliedSnapshots: new[]
+            {
+                NetherReadOnlySnapshotResult.Success(applied),
+            }
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+        var contract = new NetherContinueSceneContract(
+            ExpectedMapId: 0,
+            ExpectedFloorId: 0,
+            ExpectedSegmentFloorLevel: 10,
+            TicketCost: 1,
+            ExpectedStatus: NetherSessionStatus.Play
+        );
+
+        NetherContinueSceneStep waiting = DriveToTerminal(coordinator, driver, contract);
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForPresentation, waiting.Kind);
+        Assert.Contains("applied-awaiting-presentation", waiting.Detail);
+        Assert.Equal(1, driver.ContinueAppliedSnapshotReads);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
+    public void Predicted_destination_does_not_accept_coordinate_only_zero_floor()
+    {
+        NetherSnapshot coordinateOnly = AppliedSnapshot() with
+        {
+            CurrentFloorId = 0,
+            CurrentNodeId = 0,
+            Floors = Array.Empty<NetherFloorNode>(),
+            MapHash = string.Empty,
+        };
+        var driver = ReadyForReconcileDriver(coordinateOnly);
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+
+        NetherContinueSceneStep terminal = DriveToTerminal(coordinator, driver, Contract());
+
+        Assert.Equal(NetherContinueSceneStepKind.Pause, terminal.Kind);
+        Assert.Contains("wrong-floor", terminal.Detail);
+    }
+
+    [Fact]
     public void Exact_scene_transition_completes_handoff_when_recovered_parent_stays_pending()
     {
         var driver = new FakeDriver(
@@ -741,15 +927,25 @@ public class NetherContinueSceneCoordinatorTests
         private readonly Queue<NetherReadOnlySnapshotResult> _continueAppliedSnapshots;
         private readonly Queue<NetherFloorSceneSnapshotResult> _readySnapshots;
         private readonly NetherSnapshot _defaultReadySnapshot;
+        private readonly NetherTransitionSnapshotCache? _continueSnapshotCache;
+        private readonly NetherAuthoritativeTransitionState? _continueAuthoritativeState;
 
         public FakeDriver(
             IEnumerable<NetherNativeActionResult> parent,
             NetherSnapshot appliedSnapshot,
             IEnumerable<NetherReadOnlySnapshotResult>? appliedSnapshots = null,
             IEnumerable<NetherFloorSceneSnapshotResult>? readySnapshots = null,
-            IEnumerable<NetherReadOnlySnapshotResult>? continueAppliedSnapshots = null
+            IEnumerable<NetherReadOnlySnapshotResult>? continueAppliedSnapshots = null,
+            NetherTransitionSnapshotCache? continueSnapshotCache = null,
+            NetherAuthoritativeTransitionState? continueAuthoritativeState = null
         )
         {
+            if ((continueSnapshotCache == null) != (continueAuthoritativeState == null))
+            {
+                throw new ArgumentException(
+                    "Continue snapshot cache and authoritative state must be supplied together."
+                );
+            }
             _parent = new Queue<NetherNativeActionResult>(parent);
             _polls = new Queue<NetherNativeActionResult>(new[]
             {
@@ -765,6 +961,8 @@ public class NetherContinueSceneCoordinatorTests
                 readySnapshots ?? Array.Empty<NetherFloorSceneSnapshotResult>()
             );
             _defaultReadySnapshot = appliedSnapshot;
+            _continueSnapshotCache = continueSnapshotCache;
+            _continueAuthoritativeState = continueAuthoritativeState;
         }
 
         public bool FloorOwnerTerminated { get; set; }
@@ -804,6 +1002,19 @@ public class NetherContinueSceneCoordinatorTests
         public NetherReadOnlySnapshotResult TryCaptureContinueAppliedSnapshot()
         {
             ContinueAppliedSnapshotReads++;
+            if (_continueSnapshotCache != null && _continueAuthoritativeState != null)
+            {
+                NetherRuntimeSnapshotResult composed =
+                    NetherTransitionSnapshotCompositionPolicy.Compose(
+                        _continueSnapshotCache,
+                        _continueAuthoritativeState,
+                        requireFreshBattleCharacters: false,
+                        purpose: NetherTransitionSnapshotPurpose.ContinueSettlement
+                    );
+                return composed.IsSuccess
+                    ? NetherReadOnlySnapshotResult.Success(composed.Snapshot!)
+                    : NetherReadOnlySnapshotResult.Failure(composed.Detail);
+            }
             return _continueAppliedSnapshots.Dequeue();
         }
 

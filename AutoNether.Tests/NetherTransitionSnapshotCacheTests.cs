@@ -405,6 +405,115 @@ public sealed class NetherTransitionSnapshotCacheTests
         Assert.Equal(string.Empty, result.Snapshot.MapHash);
     }
 
+    [Fact]
+    public void Continue_composition_accepts_coordinate_only_play_entry_with_zero_master_floor()
+    {
+        var cache = new NetherTransitionSnapshotCache();
+        NetherSnapshot stalePresentation = Snapshot(
+            NetherSessionStatus.Sleep,
+            floorId: 96,
+            floorLevel: 20,
+            apiFloorIndex: 1
+        ) with
+        {
+            MapId = 1,
+            CurrentNodeId = 90194313218,
+            Floors = new[]
+            {
+                new NetherFloorNode(96, 20, 1, NetherFloorNodeType.Boss)
+                {
+                    NodeId = 90194313218,
+                    ApiFloorIndex = 1,
+                    IsUnlocked = true,
+                },
+            },
+            TicketCount = 62,
+            MapHash = "completed-segment-20",
+        };
+        cache.ObserveFullSnapshot(stalePresentation);
+
+        NetherRuntimeSnapshotResult result = NetherTransitionSnapshotCompositionPolicy.Compose(
+            cache,
+            new NetherAuthoritativeTransitionState
+            {
+                Status = NetherSessionStatus.Play,
+                NetherId = 1,
+                MapId = 1,
+                CurrentFloorId = 0,
+                FloorLevel = 20,
+                FloorIndex = 1,
+                MaxFloorLevel = 130,
+                ContinuanceFloorLevel = 20,
+                MasterMaxFloorLevel = 130,
+                TicketCount = 61,
+                CodeCapacity = 28,
+                Codes = Array.Empty<NetherCodeState>(),
+                AcquiredItems = Array.Empty<NetherRewardItem>(),
+            },
+            requireFreshBattleCharacters: false,
+            purpose: NetherTransitionSnapshotPurpose.ContinueSettlement
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.Equal(NetherSessionStatus.Play, result.Snapshot!.Status);
+        Assert.Equal(1, result.Snapshot.MapId);
+        Assert.Equal(0, result.Snapshot.CurrentFloorId);
+        Assert.Equal(0, result.Snapshot.CurrentNodeId);
+        Assert.Equal(20, result.Snapshot.FloorLevel);
+        Assert.Equal(1, result.Snapshot.FloorIndex);
+        Assert.Equal(61, result.Snapshot.TicketCount);
+        Assert.Empty(result.Snapshot.Floors);
+        Assert.Equal(string.Empty, result.Snapshot.MapHash);
+    }
+
+    [Theory]
+    [InlineData((int)NetherSessionStatus.Sleep)]
+    [InlineData((int)NetherSessionStatus.Battle)]
+    public void Continue_composition_rejects_zero_master_floor_outside_play_entry(
+        int rawStatus
+    )
+    {
+        var status = (NetherSessionStatus)rawStatus;
+        var cache = new NetherTransitionSnapshotCache();
+        cache.ObserveFullSnapshot(
+            Snapshot(NetherSessionStatus.Sleep, floorId: 96, floorLevel: 20, apiFloorIndex: 1)
+        );
+
+        NetherRuntimeSnapshotResult result = NetherTransitionSnapshotCompositionPolicy.Compose(
+            cache,
+            TransitionState(status, floorId: 0, floorLevel: 20, apiFloorIndex: 1),
+            requireFreshBattleCharacters: false,
+            purpose: NetherTransitionSnapshotPurpose.ContinueSettlement
+        );
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid-authoritative-continue-state", result.Detail);
+    }
+
+    [Fact]
+    public void Continue_composition_rejects_negative_master_floor_in_play()
+    {
+        var cache = new NetherTransitionSnapshotCache();
+        cache.ObserveFullSnapshot(
+            Snapshot(NetherSessionStatus.Sleep, floorId: 96, floorLevel: 20, apiFloorIndex: 1)
+        );
+
+        NetherRuntimeSnapshotResult result = NetherTransitionSnapshotCompositionPolicy.Compose(
+            cache,
+            TransitionState(
+                NetherSessionStatus.Play,
+                floorId: -1,
+                floorLevel: 20,
+                apiFloorIndex: 1
+            ),
+            requireFreshBattleCharacters: false,
+            purpose: NetherTransitionSnapshotPurpose.ContinueSettlement
+        );
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid-authoritative-continue-state", result.Detail);
+    }
+
     private static NetherAuthoritativeTransitionState TransitionState(
         NetherSessionStatus status,
         long floorId,
