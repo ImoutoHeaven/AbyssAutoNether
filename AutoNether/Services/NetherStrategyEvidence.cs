@@ -83,22 +83,136 @@ internal sealed record NetherStrategyServerEvidence
 
 internal readonly record struct NetherStrategyNamedValue(string Name, long Value);
 
+[Flags]
+internal enum NetherPartyPositionFlags
+{
+    None = 0,
+    Forward = 2,
+    Back = 4,
+    Assist = 8,
+}
+
+internal enum NetherKnownBuffType
+{
+    AttackUp1 = 10,
+    AttackUp2 = 14,
+    DefenceUp = 20,
+    CriticalUp = 30,
+    DamageUp = 41,
+    DamageDown = 42,
+    TakenDamageUp = 51,
+    TakenDamageDown = 52,
+    MaxHpRateUp = 80,
+    MaxHpRateDown = 81,
+    ContinuousAttackProbabilityUp = 90,
+    SkillChargeEfficiency = 120,
+    DebuffResistProbabilityUp = 200,
+    AbnormalResistProbabilityUp = 1003,
+    AbnormalBurntResistProbabilityUp = 1013,
+    AbnormalFrozenResistProbabilityUp = 1023,
+    AbnormalParalysisResistProbabilityUp = 1033,
+    AbnormalStonedResistProbabilityUp = 1043,
+    AbnormalCharmedResistProbabilityUp = 1053,
+    AbnormalLossResistProbabilityUp = 1063,
+    ElementArtifactTargetDamageUp = 3000,
+    ElementFireTargetDamageUp = 3002,
+    ElementWaterTargetDamageUp = 3004,
+    ElementEarthTargetDamageUp = 3006,
+    ElementLightTargetDamageUp = 3008,
+    ElementDarkTargetDamageUp = 3010,
+    CrestPassion = 10_000_001,
+    CrestImpact = 10_000_002,
+}
+
 /// <summary>
-/// Exact values exposed by the current NetherPartyCharacterModel.  Raw enum values are retained
-/// so update-tolerance never invents a renamed position, element, or ManaType.
+/// Stable current Project.Master.ParameterType values consumed by
+/// NetherPartyCharacterParametersCalculator.CalculateUnitParametersMap. The native enum is copied
+/// as a tagged domain value so policy never infers combat semantics from parameter names.
+/// </summary>
+internal enum NetherCharacterParameterKind
+{
+    None = 0,
+    Hp = 1,
+    Attack = 2,
+    Defence = 3,
+    CriticalProbability = 4,
+    CriticalDamageRate = 5,
+    ContinuousAttackProbability = 6,
+    AvoidProbability = 7,
+    ResistBurnt = 8,
+    ResistFreeze = 9,
+    ResistStone = 10,
+    ResistParalyze = 11,
+    ResistCharmed = 12,
+    ResistLoss = 13,
+    ResistFire = 14,
+    ResistWater = 15,
+    ResistEarth = 16,
+    ResistLight = 17,
+    ResistDark = 18,
+    ResistArtifact = 19,
+    ElementAdvantageCorrection = 20,
+    SkillCharge = 21,
+}
+
+internal readonly record struct NetherStrategyEffectiveParameter(
+    NetherCharacterParameterKind Kind,
+    int Value
+);
+
+/// <summary>
+/// Exact inputs to the current native
+/// <c>NetherPartyCharacterModel.CalculateUnitParameter</c> relationship. These values let policy
+/// project a candidate's additional all-target modifier without reverse-engineering a rounded
+/// effective parameter or carrying native Unity objects across the immutable evidence boundary.
+/// </summary>
+internal readonly record struct NetherStrategyParameterCalculationEvidence(
+    NetherCharacterParameterKind Kind,
+    int CharacterValue,
+    int SelfAbilityFixedValue,
+    int EquipmentValue,
+    int AllTargetAbilityFixedValue,
+    int SelfAbilityModifier,
+    int AllTargetAbilityModifier,
+    int EquipmentEnchantModifier,
+    int TotalBuildingModifier,
+    int SupportBuff
+);
+
+/// <summary>
+/// Exact values exposed by the current NetherPartyCharacterModel. Stable native PartyPositionType
+/// and ManaType members use typed domain values; update-tolerant mechanics remain explicit unknown.
 /// </summary>
 internal sealed record NetherStrategyPartyMember(
     long CharacterId,
     int PartyIndex,
-    int PartyPosition,
+    NetherPartyPosition PartyPosition,
     int ElementType,
-    int ManaType,
+    NetherCrestIdentity Crest,
     int HpPermille,
     bool IsAlive,
     int Level,
     int LimitBreakCount
 )
 {
+    public bool EffectiveParametersKnown { get; init; }
+    public IReadOnlyList<NetherStrategyEffectiveParameter> EffectiveParameters { get; init; } =
+        Array.Empty<NetherStrategyEffectiveParameter>();
+    public string EffectiveParametersUnknownReason { get; init; } =
+        "effective-party-parameters-unavailable";
+    public bool ParameterCalculationsKnown { get; init; }
+    public IReadOnlyList<NetherStrategyParameterCalculationEvidence> ParameterCalculations
+        { get; init; } = Array.Empty<NetherStrategyParameterCalculationEvidence>();
+    public string ParameterCalculationsUnknownReason { get; init; } =
+        "native-party-parameter-calculation-inputs-unavailable";
+    /// <summary>
+    /// Live ICharacterStatus.AttackContinuousCntMax. The current Code-offer party model does not
+    /// expose it, so production leaves this unknown unless an authoritative lifecycle owner does.
+    /// </summary>
+    public bool ContinuousAttackCountMaximumKnown { get; init; }
+    public int ContinuousAttackCountMaximum { get; init; }
+    public string ContinuousAttackCountMaximumUnknownReason { get; init; } =
+        "live-continuous-attack-count-maximum-unavailable";
     public IReadOnlyList<NetherStrategyNamedValue> NativeParameters { get; init; } =
         Array.Empty<NetherStrategyNamedValue>();
     public IReadOnlyList<NetherStrategyAbilityEffect> CharacterAbilityEffects { get; init; } =
@@ -528,8 +642,12 @@ internal static class NetherStrategyNativeMechanicCaptureMapper
         capture.ParameterReference
     )
     {
-        IsKnown = capture.IsKnown,
-        UnknownReason = capture.UnknownReason,
+        IsKnown = capture.IsKnown && capture.TargetFilter?.IsKnown != false,
+        UnknownReason = !capture.IsKnown
+            ? capture.UnknownReason
+            : capture.TargetFilter?.IsKnown == false
+                ? capture.TargetFilter.UnknownReason
+                : string.Empty,
     };
 }
 
@@ -548,9 +666,9 @@ internal enum NetherStrategyTargetKind
 
 internal readonly record struct NetherStrategyTargetEvidence(NetherStrategyTargetKind Kind)
 {
-    public bool IsKnown => Kind != NetherStrategyTargetKind.Unknown;
+    public bool IsKnown => Kind != NetherStrategyTargetKind.Unknown && ParametersKnown;
     public int ElementTypeFlags { get; init; }
-    public int PartyPositionFlags { get; init; }
+    public NetherPartyPositionFlags PartyPositionFlags { get; init; }
     public int UnionTypeFlags { get; init; }
     public int SearchType { get; init; }
     public int RandomCount { get; init; }
@@ -597,13 +715,18 @@ internal sealed record NetherStrategyBuffTargetFilterEvidence(
     bool IgnoreDeadUnit,
     int ElementTypeFlags,
     int ElementWeakTypeFlags,
-    int PartyPositionFlags,
+    NetherPartyPositionFlags PartyPositionFlags,
     int UnionTypeFlags,
     int JobGroupFlags,
     int JobSpeciesFlags,
     int CharacterSizeFlags,
     IReadOnlyList<NetherStrategyBuffType> RequiredBuffTypes
-);
+)
+{
+    public bool ParametersKnown { get; init; } = true;
+    public string UnknownReason { get; init; } = string.Empty;
+    public bool IsKnown => ParametersKnown;
+}
 
 internal readonly record struct NetherStrategyBuffParameterReferenceEvidence(
     NetherStrategyBuffParameterReferenceKind Kind,
@@ -1092,7 +1215,8 @@ internal static class NetherStrategyEvidenceMapper
         foreach (NetherStrategyPartyMember? member in source)
         {
             if (member == null || member.CharacterId <= 0 || member.PartyIndex < 0
-                || member.PartyPosition < 0 || member.ElementType < 0 || member.ManaType < 0
+                || member.PartyPosition == NetherPartyPosition.Unknown
+                || member.ElementType < 0 || member.Crest == NetherCrestIdentity.Unknown
                 || member.HpPermille is < 0 or > 1000 || member.Level < 1
                 || member.LimitBreakCount < 0 || !characterIds.Add(member.CharacterId)
                 || !partyIndexes.Add(member.PartyIndex))
@@ -1101,7 +1225,12 @@ internal static class NetherStrategyEvidenceMapper
                     "invalid-party-profile-member"
                 );
             }
-            if (!TryCopyNamed(member.NativeParameters, out IReadOnlyList<NetherStrategyNamedValue>? parameters)
+            if (!TryCopyEffectiveParameters(
+                    member,
+                    out IReadOnlyList<NetherStrategyEffectiveParameter>? effectiveParameters,
+                    out IReadOnlyList<NetherStrategyParameterCalculationEvidence>? calculations
+                )
+                || !TryCopyNamed(member.NativeParameters, out IReadOnlyList<NetherStrategyNamedValue>? parameters)
                 || !TryCopyEffects(member.CharacterAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? character)
                 || !TryCopyEffects(member.EquipmentAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? equipment)
                 || !TryCopyEffects(member.GeneralAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? general))
@@ -1112,6 +1241,8 @@ internal static class NetherStrategyEvidenceMapper
             }
             members.Add(member with
             {
+                EffectiveParameters = effectiveParameters!,
+                ParameterCalculations = calculations!,
                 NativeParameters = parameters!,
                 CharacterAbilityEffects = character!,
                 EquipmentAbilityEffects = equipment!,
@@ -1121,6 +1252,46 @@ internal static class NetherStrategyEvidenceMapper
         return NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Known(
             new NetherStrategyPartyProfile(ReadOnly(members.ToArray()))
         );
+    }
+
+    private static bool TryCopyEffectiveParameters(
+        NetherStrategyPartyMember member,
+        out IReadOnlyList<NetherStrategyEffectiveParameter>? copied,
+        out IReadOnlyList<NetherStrategyParameterCalculationEvidence>? calculations
+    )
+    {
+        copied = null;
+        calculations = null;
+        if (member.EffectiveParameters == null
+            || member.ParameterCalculations == null
+            || member.EffectiveParametersKnown
+                && (member.EffectiveParameters.Count == 0
+                    || member.EffectiveParameters.Any(row =>
+                        row.Kind == NetherCharacterParameterKind.None || row.Value < 0)
+                    || member.EffectiveParameters.GroupBy(row => row.Kind).Any(group => group.Count() != 1))
+            || !member.EffectiveParametersKnown
+                && string.IsNullOrWhiteSpace(member.EffectiveParametersUnknownReason)
+            || member.ParameterCalculationsKnown
+                && (member.ParameterCalculations.Count == 0
+                    || member.ParameterCalculations.Any(row =>
+                        row.Kind == NetherCharacterParameterKind.None
+                        || row.CharacterValue < 0
+                        || row.EquipmentValue < 0
+                        || row.SupportBuff < 0)
+                    || member.ParameterCalculations.GroupBy(row => row.Kind)
+                        .Any(group => group.Count() != 1))
+            || !member.ParameterCalculationsKnown
+                && string.IsNullOrWhiteSpace(member.ParameterCalculationsUnknownReason)
+            || member.ContinuousAttackCountMaximumKnown
+                && member.ContinuousAttackCountMaximum < 0
+            || !member.ContinuousAttackCountMaximumKnown
+                && string.IsNullOrWhiteSpace(member.ContinuousAttackCountMaximumUnknownReason))
+        {
+            return false;
+        }
+        copied = ReadOnly(member.EffectiveParameters.ToArray());
+        calculations = ReadOnly(member.ParameterCalculations.ToArray());
+        return true;
     }
 
     private static NetherStrategyEvidenceComponent<NetherStrategyOwnedCodeEvidence> MapCodes(

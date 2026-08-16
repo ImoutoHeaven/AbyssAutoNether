@@ -630,15 +630,24 @@ internal static class NetherNativeMechanicProductionCapture
             return UnknownStrategyTarget("unsupported-ability-target-type:" + identity);
         if (source is Project.AbilityTarget.AbilityTargetGroupBase group)
         {
+            int elementFlags = (int)group._elementTypeFlag;
+            int positionFlags = (int)group._partyPositionFlag;
+            int unionFlags = (int)group._unionTypeFlag;
+            bool flagsKnown = HasOnlyFlagBits(elementFlags, 0x7e)
+                && HasOnlyFlagBits(positionFlags, 0x0e)
+                && HasOnlyFlagBits(unionFlags, 0x3e);
             return new NetherStrategyTargetEvidence(kind)
             {
-                ElementTypeFlags = (int)group._elementTypeFlag,
-                PartyPositionFlags = (int)group._partyPositionFlag,
-                UnionTypeFlags = (int)group._unionTypeFlag,
+                ElementTypeFlags = elementFlags,
+                PartyPositionFlags = (NetherPartyPositionFlags)positionFlags,
+                UnionTypeFlags = unionFlags,
                 SearchType = (int)group._searchType,
                 RandomCount = group._randomNum,
-                ParametersKnown = true,
+                ParametersKnown = flagsKnown,
                 NativeTypeIdentity = identity,
+                UnknownReason = flagsKnown
+                    ? string.Empty
+                    : "ability-target-unknown-native-flag-bits:" + identity,
             };
         }
         return new NetherStrategyTargetEvidence(kind)
@@ -1065,20 +1074,41 @@ internal static class NetherNativeMechanicProductionCapture
                 required.Add(new NetherStrategyBuffType(value));
             }
         }
+        int elementFlags = (int)filter._elementTypeFlag;
+        int weakFlags = (int)filter._elementWeakTypeFlag;
+        int positionFlags = (int)filter._partyPositionFlag;
+        int unionFlags = (int)filter._unionTypeFlag;
+        int jobGroupFlags = (int)filter._jobGroupFlag;
+        int jobSpeciesFlags = (int)filter._jobSpeciesFlag;
+        bool flagsKnown = HasOnlyFlagBits(elementFlags, 0x7e)
+            && HasOnlyFlagBits(weakFlags, 0x7e)
+            && HasOnlyFlagBits(positionFlags, 0x0e)
+            && HasOnlyFlagBits(unionFlags, 0x3e)
+            && HasOnlyFlagBits(jobGroupFlags, 0x00ff_ffff)
+            && HasOnlyFlagBits(jobSpeciesFlags, 0x7e);
         evidence = new NetherStrategyBuffTargetFilterEvidence(
             filter._ignoreDeadUnit,
-            (int)filter._elementTypeFlag,
-            (int)filter._elementWeakTypeFlag,
-            (int)filter._partyPositionFlag,
-            (int)filter._unionTypeFlag,
-            (int)filter._jobGroupFlag,
-            (int)filter._jobSpeciesFlag,
+            elementFlags,
+            weakFlags,
+            (NetherPartyPositionFlags)positionFlags,
+            unionFlags,
+            jobGroupFlags,
+            jobSpeciesFlags,
             (int)filter._charaSizeFlag,
             required
-        );
+        )
+        {
+            ParametersKnown = flagsKnown,
+            UnknownReason = flagsKnown
+                ? string.Empty
+                : "buff-target-filter-unknown-native-flag-bits",
+        };
         error = string.Empty;
         return true;
     }
+
+    private static bool HasOnlyFlagBits(int value, int knownMask) =>
+        value >= 0 && (value & ~knownMask) == 0;
 
     private static NetherStrategyBuffParameterReferenceEvidence MapStrategyBuffParameterReference(
         Project.Ingame.IBuffParameterReference? source,

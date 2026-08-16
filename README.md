@@ -32,6 +32,7 @@
 - `MinimumCharacterHpPermille = 300`：战斗入场与后续路线偏好的 HP 软门槛，300 表示 30%。普通活动的确定性扣血只以“每名当前存活角色扣后仍大于 0”为硬资格；软门槛不会把仍存活的活动结果误判为死亡。
 - `CombatLane = Auto`：深渊代码流派，可为 `Auto`、`Rush`、`Impact`。
 - `CodeReloadReserve = 1`：保留的深渊代码重抽次数。
+- `EquipmentRecoveryCodeTransformEnabled = false`：装备模式下恢复层“代码转换”的显式开关。默认关闭；即使开启，也仅在休息与净化都没有实际收益、且当前持有精确识别的硬排除代码时才允许随机转换。研究模式始终拒绝此恢复动作。
 - `TreasureMode = KeyOnly`：优先选择已验证的单钥匙选项。没有钥匙时，HP 面板形状本身不构成放宽死亡规则的证明；只有该选项同时绑定权威、可达的 rank-5 宝箱目标，或被证明是唯一可到达正常终点的路线，才允许“至少一名角色存活”的窄例外。当前生产接线没有这种预验证路线证明时会安全暂停。`Off` 也会安全暂停。
 - `ShopMode = Off`：默认通过原生关闭流程离店；`EquipmentBags` 购买已验证且买得起的装备袋。
 - `DetailedLogging = true`：输出有界的 `[F12][AutoNether]` 诊断日志。

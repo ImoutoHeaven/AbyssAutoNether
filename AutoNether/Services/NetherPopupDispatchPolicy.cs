@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AutoNether.Services;
 
@@ -64,6 +65,11 @@ internal sealed record NetherRuntimePopupContext
     public int RawFloorType { get; init; }
     public IReadOnlyList<NetherEventOption> Options { get; init; } = Array.Empty<NetherEventOption>();
     public IReadOnlyList<NetherShopContent> ShopContents { get; init; } = Array.Empty<NetherShopContent>();
+    /// <summary>
+    /// Exact removal committed by the preceding accepted Recovery option. The native Change popup
+    /// itself exposes only the owned Code list and cannot reconstruct Rest/Purification value.
+    /// </summary>
+    public NetherCodeTransformCommitment? CodeTransformCommitment { get; init; }
 }
 
 internal enum NetherRuntimePopupResultKind
@@ -168,7 +174,10 @@ internal static class NetherPopupDispatchPolicy
             ErosionProjectionKnown = true,
             CodeHash = "nether-codes:none",
             ErosionEffects = Array.Empty<NetherCodeEffect>(),
-        }
+        },
+        NetherCodeTransformHardExclusionEvidence.Unknown(
+            "code-transform-hard-exclusions-not-captured"
+        )
     );
 
     public static NetherPopupDispatchDecision Decide(
@@ -176,6 +185,22 @@ internal static class NetherPopupDispatchPolicy
         NetherRuntimePopupContext popup,
         NetherAutoClimbSettings settings,
         NetherActiveCodeErosionProjection activeCodeErosion
+    ) => Decide(
+        snapshot,
+        popup,
+        settings,
+        activeCodeErosion,
+        NetherCodeTransformHardExclusionEvidence.Unknown(
+            "code-transform-hard-exclusions-not-captured"
+        )
+    );
+
+    public static NetherPopupDispatchDecision Decide(
+        NetherSnapshot snapshot,
+        NetherRuntimePopupContext popup,
+        NetherAutoClimbSettings settings,
+        NetherActiveCodeErosionProjection activeCodeErosion,
+        NetherCodeTransformHardExclusionEvidence transformHardExclusions
     )
     {
         if (snapshot == null)
@@ -211,11 +236,20 @@ internal static class NetherPopupDispatchPolicy
         return popup.Kind switch
         {
             NetherRuntimePopupKind.CodeOffer => new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.Code },
-            NetherRuntimePopupKind.CodeTransform => FromCodeTransform(snapshot),
+            NetherRuntimePopupKind.CodeTransform => FromCodeTransform(snapshot, popup),
             NetherRuntimePopupKind.Event when popup.RawFloorType == (int)NetherFloorNodeType.Event =>
                 FromEventDecision(EventPolicy.DecideEvent(snapshot, popup.Options, settings, modifiers), popup.TargetCharacterId),
             NetherRuntimePopupKind.Event => Pause(NetherPauseReason.UnknownFloor, "event-popup-raw-type-mismatch:" + popup.RawFloorType),
-            NetherRuntimePopupKind.Recovery => FromEventDecision(EventPolicy.DecideRecovery(snapshot, popup.Options, settings, modifiers), 0),
+            NetherRuntimePopupKind.Recovery => FromEventDecision(
+                EventPolicy.DecideRecovery(
+                    snapshot,
+                    popup.Options,
+                    settings,
+                    modifiers,
+                    transformHardExclusions
+                ),
+                0
+            ),
             NetherRuntimePopupKind.Treasure => FromEventDecision(EventPolicy.DecideTreasure(snapshot, popup.Options, settings, modifiers), 0),
             NetherRuntimePopupKind.Shop => FromShopDecision(EventPolicy.DecideShop(snapshot, popup.ShopContents, settings)),
             NetherRuntimePopupKind.Continue or NetherRuntimePopupKind.ReturnItems =>
@@ -224,23 +258,32 @@ internal static class NetherPopupDispatchPolicy
         };
     }
 
-    private static NetherPopupDispatchDecision FromCodeTransform(NetherSnapshot snapshot)
+    private static NetherPopupDispatchDecision FromCodeTransform(
+        NetherSnapshot snapshot,
+        NetherRuntimePopupContext popup
+    )
     {
-        NetherCodeTransformDecision decision = new NetherCodeTransformPolicy().Decide(
-            snapshot.Codes,
-            snapshot.CodeCapacity
-        );
-        return decision.CanTransform
-            ? new NetherPopupDispatchDecision
+        NetherCodeTransformCommitment? commitment = popup.CodeTransformCommitment;
+        if (commitment is not NetherCodeTransformCommitment exact
+            || !exact.IsValid
+            || snapshot.Codes.Count(code => code != null
+                && code.IsKnown
+                && code.CodeId == exact.RemoveCodeId) != 1)
+        {
+            return Pause(
+                NetherPauseReason.UnknownMasterData,
+                "code-transform-recovery-commitment-unavailable"
+            );
+        }
+        return new NetherPopupDispatchDecision
             {
                 Kind = NetherPopupDispatchKind.NativeAction,
                 Action = new NetherPlannedAction(NetherActionKind.TransformCode)
                 {
-                    ReplaceCodeId = decision.RemoveCodeId,
+                    ReplaceCodeId = exact.RemoveCodeId,
                 },
-                Detail = "popup-code-transform:" + decision.RemoveCodeId,
-            }
-            : Pause(decision.PauseReason, decision.Detail);
+                Detail = "popup-code-transform:" + exact.RemoveCodeId,
+            };
     }
 
     private static NetherPopupDispatchDecision FromEventDecision(

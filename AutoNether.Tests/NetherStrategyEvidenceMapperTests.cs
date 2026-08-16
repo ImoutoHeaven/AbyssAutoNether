@@ -14,7 +14,17 @@ public sealed class NetherStrategyEvidenceMapperTests
         var characterEffects = new[] { new NetherStrategyAbilityEffect(7001, 2, 3, 40) };
         var party = new[]
         {
-            new NetherStrategyPartyMember(11, 1, 2, 3, 4, 875, true, 90, 5)
+            new NetherStrategyPartyMember(
+                11,
+                1,
+                NetherPartyPosition.Back,
+                3,
+                NetherCrestIdentity.Impact,
+                875,
+                true,
+                90,
+                5
+            )
             {
                 NativeParameters = parameters,
                 CharacterAbilityEffects = characterEffects,
@@ -46,6 +56,10 @@ public sealed class NetherStrategyEvidenceMapperTests
                 NetherCodeMasterEffectType.NetherAbility,
                 [KnownTrigger(NetherStrategyTriggerKind.StartBattle)],
                 new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Friend)
+                {
+                    ParametersKnown = true,
+                    NativeTypeIdentity = "Project.AbilityTargets.AbilityTargetAllAllies",
+                }
             )
             {
                 Duration = 15,
@@ -96,7 +110,7 @@ public sealed class NetherStrategyEvidenceMapperTests
         Assert.True(mapped.IsMapped, mapped.Detail);
         NetherStrategyEvidencePackage package = mapped.Package!;
         Assert.True(package.Party.IsKnown);
-        Assert.Equal(4, package.Party.Value!.Members[0].ManaType);
+        Assert.Equal(NetherCrestIdentity.Impact, package.Party.Value!.Members[0].Crest);
         Assert.Equal(1234, package.Party.Value.Members[0].NativeParameters[0].Value);
         Assert.Equal(7001, package.Party.Value.Members[0].CharacterAbilityEffects[0].EffectId);
         Assert.True(package.OwnedCodes.IsKnown);
@@ -218,6 +232,10 @@ public sealed class NetherStrategyEvidenceMapperTests
             NetherCodeMasterEffectType.NetherAbility,
             [KnownTrigger(NetherStrategyTriggerKind.StartBattle)],
             new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Friend)
+            {
+                ParametersKnown = true,
+                NativeTypeIdentity = "Project.AbilityTargets.AbilityTargetAllAllies",
+            }
         )
         {
             AbilityEffect = new NetherStrategyAbilityEffectEvidence(
@@ -329,7 +347,7 @@ public sealed class NetherStrategyEvidenceMapperTests
                 IgnoreDeadUnit: true,
                 ElementTypeFlags: 3,
                 ElementWeakTypeFlags: 5,
-                PartyPositionFlags: 2,
+                PartyPositionFlags: NetherPartyPositionFlags.Forward,
                 UnionTypeFlags: 7,
                 JobGroupFlags: 11,
                 JobSpeciesFlags: 13,

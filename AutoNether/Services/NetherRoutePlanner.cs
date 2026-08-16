@@ -22,6 +22,8 @@ internal sealed record NetherRouteSafetyContext
     public IReadOnlyDictionary<long, int> MinimumActiveCharacterHpPermilleByFloorId { get; init; } = new Dictionary<long, int>();
     public IReadOnlyDictionary<long, string> HorizonRejectionByFloorId { get; init; } = new Dictionary<long, string>();
     public IReadOnlyDictionary<long, bool> RequiresUserPauseByFloorId { get; init; } = new Dictionary<long, bool>();
+    public IReadOnlyDictionary<long, NetherRouteHorizonSafetyEvaluation> HorizonEvaluationByFloorId
+        { get; init; } = new Dictionary<long, NetherRouteHorizonSafetyEvaluation>();
 
     public bool IsHpSafe(long floorId) => !HpSafeByFloorId.TryGetValue(floorId, out bool safe) || safe;
     public bool IsKnown(long floorId) => !KnownNodeByFloorId.TryGetValue(floorId, out bool known) || known;
@@ -45,6 +47,10 @@ internal sealed record NetherRouteSafetyContext
         : "missing-horizon-evidence";
     public bool RequiresUserPause(long floorId) =>
         RequiresUserPauseByFloorId.TryGetValue(floorId, out bool value) && value;
+    public NetherRouteHorizonSafetyEvaluation? HorizonEvaluation(long floorId) =>
+        HorizonEvaluationByFloorId.TryGetValue(floorId, out NetherRouteHorizonSafetyEvaluation? value)
+            ? value
+            : null;
 
     public string DiagnosticDetail(long floorId)
     {

@@ -9,7 +9,8 @@ Each ticket is a context-sized vertical slice under `issues/`. A ticket becomes 
 ## Current frontier
 
 - `01`–`03` — complete; two-axis review passed (Spec PASS; Standards PASS, independent 39/39)
-- `04` — blocked/paused per user quota request; dependencies are satisfied but implementation must not start
+- `04`–`06` — complete; two-axis review passed (Spec PASS; Standards PASS; staged full suite 1084/1084)
+- `07` — paused/blocked by explicit user quota request; do not start until the user resumes it
 
 ## Dependency order
 

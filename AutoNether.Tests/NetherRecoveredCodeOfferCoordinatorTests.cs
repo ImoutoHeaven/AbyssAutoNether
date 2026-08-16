@@ -371,6 +371,91 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
         CodeReloadReserve = 1,
     };
 
+    private static NetherCodePolicyEvidence RecoveredEquipmentEvidence(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherCodeCandidate> candidates
+    )
+    {
+        var mechanics = candidates.ToDictionary(
+            candidate => candidate.CodeId,
+            _ => new NetherCodeHardEligibilityEvidence { IsKnown = true }
+        );
+        var mechanismValues = candidates.ToDictionary(
+            candidate => candidate.CodeId,
+            _ => NetherMechanismValue.Quantified(
+                NetherMechanismQuantityKind.None,
+                0,
+                "recovered-fixture-known-zero-mechanism"
+            )
+        );
+        var mutations = new Dictionary<
+            NetherCodeMutationKey,
+            NetherCodeEquipmentMutationEvidence
+        >();
+        foreach (NetherCodeCandidate candidate in candidates)
+        {
+            IEnumerable<long> removals = snapshot.Codes.Count < snapshot.CodeCapacity
+                ? [0]
+                : snapshot.Codes.Select(code => code.CodeId);
+            foreach (long removal in removals)
+            {
+                mutations[new NetherCodeMutationKey(candidate.CodeId, removal)] = new(
+                    candidate.CodeId,
+                    removal,
+                    new NetherNativePortfolioComparisonInput(
+                        BeforeWindows: [],
+                        AfterWindows:
+                        [
+                            new NetherNativeBuffWindow(
+                                candidate.CodeId,
+                                RecipientCharacterId: 1001,
+                                new NetherStrategyBuffType(10),
+                                NetherStrategyBuffEffectKind.Buff,
+                                NetherStrategyBuffCoexistenceKind.Allow,
+                                NetherCombatMetricKind.Attack,
+                                ValuePermille: 100,
+                                StartSecond: 0,
+                                DurationSeconds: 10
+                            ),
+                        ],
+                        BossDurationSeconds: 10
+                    ),
+                    mechanismValues[candidate.CodeId]
+                )
+                {
+                    CombatTier = NetherEquipmentCombatTier.RearOrFullOffense,
+                    Survival = NetherSurvivalRepairEvidence.Known(false, false),
+                    MechanismPortfolio = NetherMechanismPortfolioComparisonEvidence.Known([], []),
+                    RecipientPositions = new Dictionary<long, NetherPartyPosition>
+                    {
+                        [1001] = NetherPartyPosition.Back,
+                    },
+                };
+            }
+        }
+
+        return new NetherCodePolicyEvidence
+        {
+            MechanicsByCodeId = mechanics,
+            MechanismValuesByCodeId = mechanismValues,
+            EquipmentMutationValuesByKey = mutations,
+            ActiveParty =
+            [
+                new NetherStrategyPartyMember(
+                    1001,
+                    0,
+                    NetherPartyPosition.Back,
+                    1,
+                    NetherCrestIdentity.Impact,
+                    900,
+                    true,
+                    1,
+                    0
+                ),
+            ],
+        };
+    }
+
     private sealed class Driver : INetherRecoveredCodeOfferDriver
     {
         public bool HasRecoveredCodeOffer { get; set; } = true;
@@ -412,6 +497,14 @@ public sealed class NetherRecoveredCodeOfferCoordinatorTests
         public NetherRuntimePopupResult TryGetRecoveredCodePopup() => Popup == null
             ? NetherRuntimePopupResult.Failure("popup-not-yet-registered")
             : NetherRuntimePopupResult.Success(Popup);
+
+        public NetherRuntimeCodePolicyEvidenceResult TryCaptureRecoveredCodePolicyEvidence(
+            NetherSnapshot snapshot,
+            NetherRuntimeCodeCandidatesResult candidates,
+            NetherAutoClimbSettings settings
+        ) => NetherRuntimeCodePolicyEvidenceResult.Success(
+            RecoveredEquipmentEvidence(snapshot, candidates.Candidates)
+        );
 
         public NetherNativeActionResult InvokeRecoveredCode(
             NetherRuntimePopupContext popup,

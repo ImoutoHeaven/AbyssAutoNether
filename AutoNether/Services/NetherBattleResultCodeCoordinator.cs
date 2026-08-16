@@ -42,6 +42,12 @@ internal interface INetherBattleResultCodeDriver
 
     NetherRuntimePopupResult TryGetBattleResultCodePopup();
 
+    NetherRuntimeCodePolicyEvidenceResult TryCaptureCodePolicyEvidence(
+        NetherSnapshot snapshot,
+        NetherRuntimeCodeCandidatesResult candidates,
+        NetherAutoClimbSettings settings
+    );
+
     NetherNativeActionResult InvokeBattleResultCode(
         NetherRuntimePopupContext popup,
         NetherPlannedAction action
@@ -280,6 +286,15 @@ internal sealed class NetherBattleResultCodeCoordinator
             );
         }
         NetherSnapshot snapshot = snapshotResult.Snapshot!;
+        NetherRuntimeCodePolicyEvidenceResult policyEvidence =
+            driver.TryCaptureCodePolicyEvidence(snapshot, candidates, settings);
+        if (!policyEvidence.IsSuccess)
+        {
+            return Terminate(
+                NetherBattleResultCodeStepKind.BindingUnavailable,
+                "battle-result-code-policy-evidence:" + policyEvidence.Detail
+            );
+        }
         NetherCodeDecision decision = _policy.Decide(
             new NetherCodePortfolio
             {
@@ -293,7 +308,8 @@ internal sealed class NetherBattleResultCodeCoordinator
                 LockedLane = lockedLane ?? _lockedLane,
             },
             candidates.Candidates,
-            settings
+            settings,
+            policyEvidence.Evidence!
         );
         if (decision.Kind == NetherCodeDecisionKind.Pause)
         {

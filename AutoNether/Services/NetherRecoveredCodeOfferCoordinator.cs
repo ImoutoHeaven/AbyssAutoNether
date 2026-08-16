@@ -24,6 +24,12 @@ internal interface INetherRecoveredCodeOfferDriver
     NetherRuntimePopupResult TryGetRecoveredCodePopup() =>
         NetherRuntimePopupResult.Failure("recovered-code-driver-unavailable");
 
+    NetherRuntimeCodePolicyEvidenceResult TryCaptureRecoveredCodePolicyEvidence(
+        NetherSnapshot snapshot,
+        NetherRuntimeCodeCandidatesResult candidates,
+        NetherAutoClimbSettings settings
+    ) => NetherRuntimeCodePolicyEvidenceResult.Failure("recovered-code-policy-evidence-unavailable");
+
     NetherNativeActionResult InvokeRecoveredCode(
         NetherRuntimePopupContext popup,
         NetherPlannedAction action
@@ -167,6 +173,12 @@ internal sealed class NetherRecoveredCodeOfferCoordinator
 
         public NetherRuntimePopupResult TryGetBattleResultCodePopup() =>
             Current.TryGetRecoveredCodePopup();
+
+        public NetherRuntimeCodePolicyEvidenceResult TryCaptureCodePolicyEvidence(
+            NetherSnapshot snapshot,
+            NetherRuntimeCodeCandidatesResult candidates,
+            NetherAutoClimbSettings settings
+        ) => Current.TryCaptureRecoveredCodePolicyEvidence(snapshot, candidates, settings);
 
         public NetherNativeActionResult InvokeBattleResultCode(
             NetherRuntimePopupContext popup,

@@ -28,9 +28,13 @@ _Avoid_: Row-wide combat buff
 An effect triggered by receiving or consuming a crest without granting that crest itself. Crest payoffs remain compatible with mixed-crest rows when their trigger can actually occur.
 _Avoid_: Uniform crest grant
 
-**Research-Point Rate**:
-The percentage used when settling research points; a Code offer may scope it to one family while unlocked research can provide a broader rate. Competing sources overwrite rather than add, so a lower Code-provided rate can replace a higher unlocked research rate.
-_Avoid_: Additive research bonus
+**Technology Research-Point Rate**:
+The `SpherePointRatio` unlocked by Nether research technology and used when settling research points. It is separate from selectable Code mechanics and from the family-point amounts returned by normal settlement.
+_Avoid_: Code rate, settlement family points, additive research bonus
+
+**Settlement Family Points**:
+The Rush, Impact, Safe, and Risk point amounts returned by the server after a normal Nether result. They are settlement outcomes, not selectable Code mechanics or evidence that an offered Code changes a research-point rate.
+_Avoid_: Research-rate Code, technology rate
 
 **Safe Erosion Adjustment**:
 The Safe-family adjustment that reduces future erosion gains and improves future erosion reductions.
@@ -129,6 +133,10 @@ _Avoid_: Equal row weighting
 **Equipment Combat Tier Order**:
 The lexicographic combat-value order used by Equipment after all hard exclusions, erosion safety, and party compatibility checks pass. If the party is below an authoritative survival threshold, a rear-row or full-party survivability effect that repairs that deficit comes first. Once survival passes, a Back-row Force-Chain numerical payoff comes first, followed by ordinary rear-row or full-party offense, then nonessential rear-row or full-party defence, and finally Forward-row or other front-only fallbacks. No invented DPS/EHP weighted sum may trade a lower tier against a higher one.
 _Avoid_: Display-power ordering, offence/defence weighted sum, front-only percentage leapfrogging a usable rear effect
+
+**Survival-Repair Proof Boundary**:
+Survival repair remains the highest Equipment tier, but a Code may enter it only when the current lifecycle contains an authoritative before/after survival projection. In the current client, Event HP becomes authoritative in `NetherUpdateEventResponseEntity.t_nether_characters`, battle HP becomes authoritative in `NetherClearBattleResponseEntity.t_nether_characters`, and future combat damage is resolved by the live `UnitDamageCalculator`, including randomness. The Code Offer lifecycle therefore cannot prove that an offered maximum-HP or defence mutation repairs an already-proven route deficit. It must preserve that deficit, mark only the repair relationship unknown, and reject the dependent candidate rather than fabricate a positive repair. A future game version may make this tier reachable only by exposing an exact pre-entry damage/survival contract.
+_Avoid_: Treating a defensive percentage as proof of survival, erasing a known deficit when repair evidence is missing
 
 **Defensive Portfolio Comparison**:
 For effects with the same recipient set, compare the exact per-character relative effective-HP change through the native HP, defence, and taken-damage chains. For different recipient sets, compare lexicographically by the number of benefiting rear-row characters, then the weakest benefiting rear character's effective-HP gain, then the remaining aggregate gain. A front-only effect cannot outrank a usable rear-row defence merely because its description percentage is larger.
@@ -254,9 +262,9 @@ _Avoid_: Latched projected completion, sacrificing completed-family settlement p
 At Code Capacity, replacement removes a hard-excluded held Code first, then an opposing-family Code, then an ordinary non-target Code, and only then a provable surplus from a projected-complete family. An active-target Code is never removed for a non-target candidate. A same-family swap is allowed only when it preserves the family contribution, violates no hard exclusion, and improves Actual Combat Value.
 _Avoid_: Display-power-only replacement, active-target regression
 
-**Research-Rate Code**:
-A family-specific Code whose current MasterData rate is 5, 10, or 15 percent and whose effect overwrites rather than adds to the research-tree rate. Equipment runs always reject it. Research runs accept it only when its rate is authoritatively known to be strictly greater than the current technology rate, it matches the active target family, and taking it preserves every Research Completion Invariant; unknown comparison state requires rejection.
-_Avoid_: Additive-rate assumption, lower-rate overwrite, Equipment selection
+**Research-Rate Code Evidence**:
+A future/update-tolerant candidate classification that requires an authoritative selectable Code mechanic to expose both family and overwrite rate. The current client exposes no such Code row: `MNetherCodes` and `NetherCodeModel.CreateModel` resolve ability and erosion effects, while `SpherePointRatio` belongs to technology and server `nether_code_points` belong to settlement; absent exact future evidence, only that candidate is rejected.
+_Avoid_: Inferring a Code rate from settlement points, technology rate, description text, or displayed power
 
 **Recovery Code Transform**:
 The recovery-floor action in which the player chooses an owned Code to sacrifice but the server determines the replacement. It is not Code Offer replacement. Research runs always reject it; Equipment runs reject it by default and may consider it only when an explicitly enabled random-transform policy can remove a hard-excluded Code while both purification and rest have no actual value.

@@ -642,6 +642,7 @@ internal sealed class NetherRouteSafetyContextBuilder
         private readonly Dictionary<long, int> _minimumActiveHp = new();
         private readonly Dictionary<long, string> _horizonRejection = new();
         private readonly Dictionary<long, bool> _requiresUserPause = new();
+        private readonly Dictionary<long, NetherRouteHorizonSafetyEvaluation> _horizonEvaluation = new();
         private readonly int _maximumFloorLevel;
 
         public MutableContext(int maximumFloorLevel) => _maximumFloorLevel = maximumFloorLevel;
@@ -660,6 +661,7 @@ internal sealed class NetherRouteSafetyContextBuilder
             _minimumActiveHp[floorId] = UnknownScalar;
             _horizonRejection[floorId] = detail;
             _requiresUserPause[floorId] = false;
+            _horizonEvaluation.Remove(floorId);
         }
 
         public void SetUnsafe(long floorId, string detail) => AddUnknown(floorId, detail);
@@ -706,6 +708,7 @@ internal sealed class NetherRouteSafetyContextBuilder
             _minimumActiveHp[floorId] = evaluation.MinimumActiveCharacterHpPermille!.Value;
             _horizonRejection[floorId] = string.Empty;
             _requiresUserPause[floorId] = false;
+            _horizonEvaluation[floorId] = evaluation;
         }
 
         public void SetHorizonRejected(long floorId, NetherRouteHorizonSafetyEvaluation evaluation)
@@ -719,6 +722,7 @@ internal sealed class NetherRouteSafetyContextBuilder
                 ? "visible-horizon-incomplete"
                 : evaluation.RejectionDetail;
             _requiresUserPause[floorId] = evaluation.RequiresUserPause;
+            _horizonEvaluation[floorId] = evaluation;
         }
 
         public NetherRouteSafetyContext ToImmutable() => new()
@@ -736,6 +740,7 @@ internal sealed class NetherRouteSafetyContextBuilder
             MinimumActiveCharacterHpPermilleByFloorId = _minimumActiveHp,
             HorizonRejectionByFloorId = _horizonRejection,
             RequiresUserPauseByFloorId = _requiresUserPause,
+            HorizonEvaluationByFloorId = _horizonEvaluation,
         };
     }
 }

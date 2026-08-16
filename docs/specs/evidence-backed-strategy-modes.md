@@ -6,7 +6,7 @@ Status: ready for tracker publication
 
 Abyss AutoNether's lifecycle and transaction handling are now stable enough to climb reliably, but its strategy layer still makes decisions from a small set of generic settings and shallow proxies. It does not distinguish an early Research run from a late Equipment run, cannot use the server-authoritative family research wallet as a completion objective, and ranks Code offers primarily from structural family counts and displayed coverage instead of the configured party's real combat interactions.
 
-That gap produces materially wrong choices. A uniform crest grant can overwrite the required crest of characters in a mixed row. A lower research-rate Code can overwrite a stronger technology rate. A card that looks strong on paper can have no reachable trigger, be saturated by a native cap, lose to native buff coexistence rules, or require an unsafe erosion state. Conversely, a back-row Force Chain payoff can be strategically excellent even when exact cadence is unavailable. At capacity, candidate-only power cannot determine whether replacing a held Code improves the retained portfolio.
+That gap produces materially wrong choices. A uniform crest grant can overwrite the required crest of characters in a mixed row. A card that looks strong on paper can have no reachable trigger, be saturated by a native cap, lose to native buff coexistence rules, or require an unsafe erosion state. Conversely, a back-row Force Chain payoff can be strategically excellent even when exact cadence is unavailable. At capacity, candidate-only power cannot determine whether replacing a held Code improves the retained portfolio. A previously assumed current 5/10/15-percent research-rate Code mechanic is not exposed by the current client and must not be inferred from technology or settlement data.
 
 Route selection has the same problem. The current planner filters basic HP and erosion safety, then orders immediate nodes by generic reward and erosion fields. It does not compare the complete visible branch to the next terminal Boss, resolve Event choices into their exact semantic value, reserve Gold for a known rank-5 Treasure key, recognize an eligible late Shop, or apply the approved Treasure HP-payment exceptions. A locally attractive option can therefore consume a committed resource or select a lower-value branch even when authoritative information already proves a better one.
 
@@ -19,6 +19,8 @@ Add two explicit strategy modes: Equipment and Research. Equipment is the defaul
 Deepen the existing Code, Event, Recovery, Treasure, Shop, checkpoint, and route-policy seams rather than adding a second controller. Enrich their immutable inputs with the authoritative party combat profile, Code effect semantics, native buff strategies, family-wallet state, technology research rates, category-skill rows, exact visible Event and inventory rows, and resource commitments. Keep execution in the existing controller transaction model.
 
 Use lexicographic decision pipelines. Safety, hard exclusions, family compatibility, and exact binding always precede objectives. Research then prioritizes its active family and settlement invariant. Equipment then applies the approved combat-tier order and compares the actual marginal value of the complete retained portfolio. Route planning first removes unsafe branches, then compares complete visible-branch encounter vectors, and uses erosion and HP only as equal-vector tie breaks.
+
+**Fresh native-design deviation (2026-08-16):** Docker read-only inspection of current `Project.dll` SHA-256 `53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300` and `GameAssembly.dll` SHA-256 `573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb` disproved the earlier claim that current selectable Codes carry a 5/10/15-percent research-rate overwrite. `MNetherCodes` contains only identity/category/effect parameters/asset/power; `NetherCodeModel.CreateModel` constructs native/common ability or erosion effects; `NetherResultRequestEntity` sends no Code rate; and `CreateNetherResultModelAsync` consumes response `nether_code_points` only as four server settlement outcomes. `NetherPointData.SpherePointRatio` is separate research-tree technology. Current production therefore never manufactures a Code family/rate from those sources. The typed policy remains update-tolerant: a future authoritative selectable mechanic may supply exact family and overwrite rate, but missing evidence rejects only that candidate.
 
 ## User Stories
 
@@ -92,6 +94,8 @@ Use lexicographic decision pipelines. Safety, hard exclusions, family compatibil
 
 35. As an Equipment user, a survival-repairing rear-row or full-party effect outranks offense when the party is below an authoritative survival threshold.
 
+Current-version evidence boundary: fresh `Project.dll` SHA-256 `53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300` and `GameAssembly.dll` SHA-256 `573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb` prove that Event and battle character HP are server-authoritative only in `NetherUpdateEventResponseEntity.t_nether_characters` and `NetherClearBattleResponseEntity.t_nether_characters`, while future combat damage runs through the live `UnitDamageCalculator` including `RandomModifier`. At the current Code Offer lifecycle no exact maximum-HP/defence mutation can prove repair of an existing route deficit. The implementation must preserve that known deficit and fail only the dependent candidate closed; it must not manufacture a reachable survival tier. If a future version exposes an authoritative before/after survival contract, the higher tier applies unchanged.
+
 36. As an Equipment user, once survival is adequate, back-row Force Chain payoff outranks ordinary rear-row or full-party offense.
 
 37. As an Equipment user, ordinary rear-row or full-party offense outranks nonessential rear-row or full-party defense.
@@ -148,11 +152,11 @@ Use lexicographic decision pipelines. Safety, hard exclusions, family compatibil
 
 63. As a user, declining every candidate consumes the Code Offer normally and never attempts a route rollback.
 
-64. As a user, a lower or equal research-rate Code is rejected because it can overwrite rather than add to the technology rate.
+64. As a user, the current client never classifies a Code as research-rate from `SpherePointRatio`, result `nether_code_points`, description text, or displayed power.
 
-65. As an Equipment user, every research-rate Code is rejected because it adds no combat value.
+65. As an Equipment user, any future research-rate Code is rejected unless a future authoritative selectable mechanic first proves that classification; when proven, Equipment still rejects it because it adds no combat value.
 
-66. As a Research user, a research-rate Code is accepted only when it matches the active family and its authoritative rate is strictly greater than the current technology rate.
+66. As a Research user, a future research-rate Code is accepted only when an authoritative selectable mechanic supplies its exact family and overwrite rate, it matches the active family, and that rate is strictly greater than the current technology rate; unknown evidence rejects only that candidate.
 
 67. As a user, current Risk Codes 40010 through 40019 are hard excluded because they require erosion at or above 70.
 
@@ -306,7 +310,7 @@ Use lexicographic decision pipelines. Safety, hard exclusions, family compatibil
 
 16. Implement Research as a settlement objective separate from combat value. Determine the active family from wallet plus projected normal settlement, consume all rerolls while it remains incomplete, preserve every completed-family invariant, and apply the approved deterministic replacement order at capacity.
 
-17. Compare a Research-rate Code against the authoritative current technology rate using overwrite semantics. Reject unknown, equal, lower, wrong-family, and all Equipment-mode cases.
+17. Do not infer a Research-rate Code from current technology or settlement data because the current native client exposes no selectable Code mechanic with family/rate fields. Retain a future/update-tolerant typed seam: only an authoritative future mechanic may supply exact family and overwrite rate, after which overwrite comparison rejects unknown, equal, lower, wrong-family, and all Equipment-mode cases.
 
 18. Treat the current Risk identifier set as characterization coverage while classifying effects from their runtime gates. Always reject 70-plus gated cards and the adverse erosion-adjustment card. Project conditionally eligible and linear Risk cards across confirmed battle-start erosion on the visible horizon.
 
@@ -344,7 +348,7 @@ Use lexicographic decision pipelines. Safety, hard exclusions, family compatibil
 
 2. Keep the production route-safety wiring as the highest pure route seam. Tests provide one immutable snapshot plus runtime safety, party, Event, Shop, Treasure, wallet, and semantic evidence, then assert the selected node, complete audit, immutable planned action, and captured battle or interactive commitment.
 
-3. Use the Code policy seam for exhaustive candidate and replacement matrices. Cover both modes, all family pairs, mixed and homogeneous rows, count-five crossings and repair, trigger reachability, Risk exclusions, research-rate overwrite, reroll rules, capacity replacement, zero marginal value, and card-local evidence failure.
+3. Use the Code policy seam for exhaustive candidate and replacement matrices. Cover both modes, all family pairs, mixed and homogeneous rows, count-five crossings and repair, trigger reachability, Risk exclusions, future authoritative research-rate overwrite and current missing-evidence locality, reroll rules, capacity replacement, zero marginal value, and card-local evidence failure.
 
 4. Use the Event, Recovery, Treasure, and Shop policy seams for option-local matrices. Cover all-character HP projection, partial-death exceptions, 80-point erosion semantics, deterministic Recovery behavior, exact content binding, sequential Shop budgets, late-shop eligibility, unknown-option locality, and deterministic tie breaks.
 
@@ -352,7 +356,7 @@ Use lexicographic decision pipelines. Safety, hard exclusions, family compatibil
 
 6. Extend configuration-contract tests to assert the default Equipment mode, explicit family parsing, absence of automatic mode inference, invalid opposed targets, transform opt-in default, Boss normalization, dynamic deepest Boss, and mode-derived start floor.
 
-7. Add MasterData and native-mapper characterization fixtures for the decompiled mechanics on which policy depends: wallet threshold and settlement fields, Code capacity, opposing-family thresholds, whole-party crest grants, Risk gates and erosion adjustment, research-rate overwrite, buff coexistence, probability ladders, charge caps, Force Chain activation, Event HP scope, key costs, Treasure payment parameters, shop inventory, and Boss identities.
+7. Add MasterData and native-mapper characterization fixtures for the decompiled mechanics on which policy depends: wallet threshold and settlement fields, Code capacity, opposing-family thresholds, whole-party crest grants, Risk gates and erosion adjustment, the current absence of a selectable research-rate mechanic plus future exact-field tolerance, buff coexistence, probability ladders, charge caps, Force Chain activation, Event HP scope, key costs, Treasure payment parameters, shop inventory, and Boss identities.
 
 8. Test update tolerance by supplying unknown future Code effects, Event content, inventory rows, and category skills. Assert that only the dependent choice becomes ineligible, diagnostics retain the exact missing evidence, and other authoritative choices continue.
 

@@ -103,7 +103,7 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
     }
 
     [Fact]
-    public void Live_target_seven_maps_to_transform_trigger_and_captures_current_codes()
+    public void Live_target_seven_captures_current_codes_but_fails_closed_without_transform_eligibility()
     {
         NetherRuntimeInteractivePreEntryCaptureResult result = Capture(
             floor: new FloorFixture { MNetherMapFloorId = 900, ExtendId = 36, FloorType = (int)NetherFloorNodeType.Event },
@@ -113,9 +113,9 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
         );
 
         Assert.True(result.IsCaptured);
-        Assert.True(result.Safety.IsSafe, result.Safety.PauseReason + ":" + result.Safety.Detail);
-        NetherEffect transform = Assert.Single(result.Safety.SafeOptionProjectionByEventId[36].ExpectedEffects);
-        Assert.Equal(NetherEffectKind.AbyssCodeTransform, transform.Kind);
+        Assert.False(result.Safety.IsSafe);
+        Assert.Equal(NetherPauseReason.NoSafeRoute, result.Safety.PauseReason);
+        Assert.Contains("equipment-code-transform-disabled", result.Safety.Detail);
         Assert.Single(result.Input!.CurrentCodes);
     }
 

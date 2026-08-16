@@ -8,41 +8,92 @@ namespace AutoNether.Tests;
 public sealed class NetherCodeTransformPolicyTests
 {
     [Fact]
-    public void Conversion_removes_the_card_whose_absence_preserves_the_best_evidenced_portfolio()
+    public void Equipment_transform_uses_hard_reason_then_code_identity_not_reversed_display_power()
     {
-        NetherCodeTransformDecision decision = Decide(
-            Code(1, NetherCodeFamily.Safe, power: 1),
-            Code(2, NetherCodeFamily.Rush, power: 5),
-            Code(3, NetherCodeFamily.Risk, power: 10)
+        // Fresh Project.dll 53806a5b...1300: target_type=7 sends only the chosen owned Code ID;
+        // the replacement is server-random. MNetherCodes.power is display/reference data and the
+        // native transform request never consumes it. With equal hard-exclusion reasons, CodeId is
+        // therefore the deterministic authority even when displayed Power is reversed.
+        NetherCodeTransformDecision decision = new NetherCodeTransformPolicy().Decide(
+            [
+                Code(10, NetherCodeFamily.Risk, power: 99_999),
+                Code(20, NetherCodeFamily.Risk, power: 1),
+            ],
+            capacity: 5,
+            new NetherCodeTransformEligibilityEvidence
+            {
+                StrategyMode = NetherStrategyMode.Equipment,
+                EquipmentOptInEnabled = true,
+                IsRecovery = true,
+                DeterministicRecoveryChoicesHaveZeroValue = true,
+                HardExcludedCodes =
+                [
+                    new NetherCodeTransformHardExclusion(
+                        10,
+                        NetherCodeTransformHardExclusionReason.AdverseErosionAdjustment
+                    ),
+                    new NetherCodeTransformHardExclusion(
+                        20,
+                        NetherCodeTransformHardExclusionReason.AdverseErosionAdjustment
+                    ),
+                ],
+            }
         );
 
         Assert.True(decision.CanTransform, decision.Detail);
-        Assert.Equal(1, decision.RemoveCodeId);
+        Assert.Equal(10, decision.RemoveCodeId);
+    }
+
+    [Theory]
+    [InlineData((int)NetherStrategyMode.Research, true, true)]
+    [InlineData((int)NetherStrategyMode.Equipment, false, true)]
+    [InlineData((int)NetherStrategyMode.Equipment, true, false)]
+    public void Transform_rejects_research_disabled_opt_in_or_valuable_deterministic_recovery(
+        int rawMode,
+        bool optIn,
+        bool deterministicChoicesAreZero
+    )
+    {
+        NetherCodeTransformDecision decision = new NetherCodeTransformPolicy().Decide(
+            [Code(10, NetherCodeFamily.Risk, power: 1)],
+            capacity: 5,
+            new NetherCodeTransformEligibilityEvidence
+            {
+                StrategyMode = (NetherStrategyMode)rawMode,
+                EquipmentOptInEnabled = optIn,
+                IsRecovery = true,
+                DeterministicRecoveryChoicesHaveZeroValue = deterministicChoicesAreZero,
+                HardExcludedCodes =
+                [
+                    new NetherCodeTransformHardExclusion(
+                        10,
+                        NetherCodeTransformHardExclusionReason.AdverseErosionAdjustment
+                    ),
+                ],
+            }
+        );
+
+        Assert.False(decision.CanTransform);
     }
 
     [Fact]
-    public void Paired_counter_coherence_beats_static_power_when_choosing_a_conversion_source()
+    public void Transform_rejects_when_no_exact_hard_excluded_owned_code_is_proven()
     {
-        NetherCodeTransformDecision decision = Decide(
-            Code(1, NetherCodeFamily.Rush, power: 1),
-            Code(2, NetherCodeFamily.Rush, power: 1),
-            Code(3, NetherCodeFamily.Impact, power: 9999)
+        NetherCodeTransformDecision decision = new NetherCodeTransformPolicy().Decide(
+            [Code(10, NetherCodeFamily.Safe, power: 1)],
+            capacity: 5,
+            new NetherCodeTransformEligibilityEvidence
+            {
+                StrategyMode = NetherStrategyMode.Equipment,
+                EquipmentOptInEnabled = true,
+                IsRecovery = true,
+                DeterministicRecoveryChoicesHaveZeroValue = true,
+                HardExcludedCodes = [],
+            }
         );
 
-        Assert.True(decision.CanTransform, decision.Detail);
-        Assert.Equal(3, decision.RemoveCodeId);
-    }
-
-    [Fact]
-    public void Safe_and_risk_have_no_magic_protection_or_forced_removal()
-    {
-        NetherCodeTransformDecision decision = Decide(
-            Code(30024, NetherCodeFamily.Safe, power: 10),
-            Code(40024, NetherCodeFamily.Risk, power: 1)
-        );
-
-        Assert.True(decision.CanTransform, decision.Detail);
-        Assert.Equal(30024, decision.RemoveCodeId);
+        Assert.False(decision.CanTransform);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]
@@ -52,20 +103,34 @@ public sealed class NetherCodeTransformPolicyTests
             NetherPauseReason.UnknownMasterData,
             new NetherCodeTransformPolicy().Decide(
                 [Code(1, NetherCodeFamily.Rush), Code(1, NetherCodeFamily.Rush)],
-                capacity: 5
+                capacity: 5,
+                Eligible(1)
             ).PauseReason
         );
         Assert.Equal(
             NetherPauseReason.UnknownMasterData,
             new NetherCodeTransformPolicy().Decide(
                 [Code(1, NetherCodeFamily.Rush) with { IsKnown = false }],
-                capacity: 5
+                capacity: 5,
+                Eligible(1)
             ).PauseReason
         );
     }
 
-    private static NetherCodeTransformDecision Decide(params NetherCodeState[] codes) =>
-        new NetherCodeTransformPolicy().Decide(codes, capacity: 5);
+    private static NetherCodeTransformEligibilityEvidence Eligible(long codeId) => new()
+    {
+        StrategyMode = NetherStrategyMode.Equipment,
+        EquipmentOptInEnabled = true,
+        IsRecovery = true,
+        DeterministicRecoveryChoicesHaveZeroValue = true,
+        HardExcludedCodes =
+        [
+            new NetherCodeTransformHardExclusion(
+                codeId,
+                NetherCodeTransformHardExclusionReason.AdverseErosionAdjustment
+            ),
+        ],
+    };
 
     private static NetherCodeState Code(
         long id,

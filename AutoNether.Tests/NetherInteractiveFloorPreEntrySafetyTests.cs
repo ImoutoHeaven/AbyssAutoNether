@@ -177,7 +177,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
-    public void Native_code_transform_target_and_code_offer_content_are_exact_safe_options()
+    public void Native_code_transform_requires_prevalidated_opt_in_while_code_offer_remains_exact()
     {
         NetherInteractiveFloorPreEntrySafetyResult transform = Evaluate(Input(
             NetherFloorNodeType.Recovery,
@@ -191,11 +191,9 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             parts: [Part(701, targetType1: 0, parameter1: 0, contentType: 160, contentId: 0, amount: 1)]
         ));
 
-        Assert.True(transform.IsSafe, transform.PauseReason + ":" + transform.Detail);
-        Assert.Equal(1, transform.SafeOptionNumberByEventId[354]);
-        NetherEffect transformEffect = Assert.Single(transform.SafeOptionProjectionByEventId[354].ExpectedEffects);
-        Assert.Equal(NetherEffectKind.AbyssCodeTransform, transformEffect.Kind);
-        Assert.Equal(0, transformEffect.ReplacementCodeId);
+        Assert.False(transform.IsSafe);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, transform.PauseReason);
+        Assert.Contains("code-transform-hard-exclusions-not-captured", transform.Detail);
 
         Assert.True(offer.IsSafe, offer.PauseReason + ":" + offer.Detail);
         NetherEffect offerEffect = Assert.Single(offer.SafeOptionProjectionByEventId[355].ExpectedEffects);

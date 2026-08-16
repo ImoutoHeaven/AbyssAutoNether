@@ -105,6 +105,11 @@ internal sealed class NetherRuntimeBridge
             NetherRuntimeSnapshotResult.Failure("test-unconfigured-battle-result-code-snapshot");
         public NetherRuntimePopupResult TryGetBattleResultCodePopup() =>
             NetherRuntimePopupResult.Failure("test-unconfigured-battle-result-code-popup");
+        public NetherRuntimeCodePolicyEvidenceResult TryCaptureCodePolicyEvidence(
+            NetherSnapshot snapshot,
+            NetherRuntimeCodeCandidatesResult candidates,
+            NetherAutoClimbSettings settings
+        ) => NetherRuntimeCodePolicyEvidenceResult.Failure("test-unconfigured-code-policy-evidence");
         public NetherNativeActionResult InvokeBattleResultCode(
             NetherRuntimePopupContext popup,
             NetherPlannedAction action

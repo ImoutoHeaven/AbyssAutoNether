@@ -896,6 +896,7 @@ internal static class NetherAutoClimbController
         NetherRuntimePopupContext popup
     )
     {
+        popup = BindCommittedCodeTransform(settlement, popup);
         NetherRuntimeSnapshotResult captured = _bridge.TryCaptureSnapshot();
         if (!captured.IsSuccess)
             return NetherNativeActionResult.BindingUnavailable("owned-popup-snapshot:" + captured.Detail);
@@ -913,11 +914,14 @@ internal static class NetherAutoClimbController
         }
 
         NetherSnapshot snapshot = captured.Snapshot!;
+        NetherCodeTransformHardExclusionEvidence transformHardExclusions =
+            CaptureCodeTransformHardExclusions(snapshot, settings, popup.Kind);
         NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
             snapshot,
             popup,
             settings,
-            _bridge.TryCaptureActiveCodeErosionProjection()
+            _bridge.TryCaptureActiveCodeErosionProjection(),
+            transformHardExclusions
         );
         if (decision.Kind == NetherPopupDispatchKind.Code)
             return DispatchOwnedCodePopup(ownerParent, settlement, popup, snapshot, settings);
@@ -993,6 +997,14 @@ internal static class NetherAutoClimbController
         if (!candidates.IsSuccess)
             return NetherNativeActionResult.BindingUnavailable("owned-code-candidates:" + candidates.Detail);
 
+        NetherRuntimeCodePolicyEvidenceResult evidence =
+            _bridge.TryCaptureCodePolicyEvidence(snapshot, candidates, settings);
+        if (!evidence.IsSuccess)
+        {
+            return NetherNativeActionResult.BindingUnavailable(
+                "owned-code-policy-evidence:" + evidence.Detail
+            );
+        }
         NetherCodeDecision decision = CodePolicy.Decide(
             new NetherCodePortfolio
             {
@@ -1006,7 +1018,8 @@ internal static class NetherAutoClimbController
                 LockedLane = _lockedCombatLane,
             },
             candidates.Candidates,
-            settings
+            settings,
+            evidence.Evidence!
         );
         AuditCodeDecision(snapshot, candidates.Candidates, decision, "owned");
         if (decision.Kind == NetherCodeDecisionKind.Pause)
@@ -2089,7 +2102,8 @@ internal static class NetherAutoClimbController
             snapshot,
             popup,
             settings,
-            _bridge.TryCaptureActiveCodeErosionProjection()
+            _bridge.TryCaptureActiveCodeErosionProjection(),
+            CaptureCodeTransformHardExclusions(snapshot, settings, popup.Kind)
         );
         switch (decision.Kind)
         {
@@ -2312,6 +2326,16 @@ internal static class NetherAutoClimbController
             return;
         }
 
+        NetherRuntimeCodePolicyEvidenceResult evidence =
+            _bridge.TryCaptureCodePolicyEvidence(snapshot, candidates, settings);
+        if (!evidence.IsSuccess)
+        {
+            FailClosed(
+                NetherPauseReason.BindingUnavailable,
+                "code-policy-evidence:" + evidence.Detail
+            );
+            return;
+        }
         NetherCodeDecision decision = CodePolicy.Decide(
             new NetherCodePortfolio
             {
@@ -2325,7 +2349,8 @@ internal static class NetherAutoClimbController
                 LockedLane = _lockedCombatLane,
             },
             candidates.Candidates,
-            settings
+            settings,
+            evidence.Evidence!
         );
         AuditCodeDecision(snapshot, candidates.Candidates, decision, "direct");
         if (decision.Kind == NetherCodeDecisionKind.Pause)
@@ -2840,8 +2865,91 @@ internal static class NetherAutoClimbController
         CodeReloadReserve = Config.NetherAutoClimbCodeReloadReserve.Value,
         TreasureMode = Config.NetherAutoClimbTreasureMode.Value,
         ShopMode = Config.NetherAutoClimbShopMode.Value,
+        EquipmentRecoveryCodeTransformEnabled =
+            Config.NetherAutoClimbEquipmentRecoveryCodeTransformEnabled.Value,
         DetailedLogging = Config.NetherAutoClimbDetailedLogging.Value,
     };
+
+    private static NetherCodeTransformHardExclusionEvidence CaptureCodeTransformHardExclusions(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        NetherRuntimePopupKind popupKind
+    )
+    {
+        if (popupKind != NetherRuntimePopupKind.Recovery)
+        {
+            return NetherCodeTransformHardExclusionEvidence.Unknown(
+                "code-transform-not-at-recovery-option-boundary"
+            );
+        }
+        NetherCodeCandidate[] heldCandidates = snapshot.Codes
+            .Where(code => code != null)
+            .Select(code => new NetherCodeCandidate(
+                code.CodeId,
+                code.Family,
+                code.AbilityLevel
+            )
+            {
+                IsKnown = code.IsKnown,
+                EffectSemanticsKnown = code.EffectSemanticsKnown,
+                Category = code.Category,
+                Rarity = code.Rarity,
+                Power = code.Power,
+                MasterEffectType = code.MasterEffectType,
+                EffectParameter1 = code.EffectParameter1,
+                EffectParameter2 = code.EffectParameter2,
+                EffectParameter3 = code.EffectParameter3,
+                AbilityAssetId = code.AbilityAssetId,
+                PartyCoverageKnown = code.PartyCoverageKnown,
+                PartyCoverage = code.PartyCoverage,
+            })
+            .ToArray();
+        bool heldMasterComplete = heldCandidates.Length == snapshot.Codes.Count
+            && heldCandidates.All(code => code.IsKnown && code.CodeId > 0)
+            && heldCandidates.Select(code => code.CodeId).Distinct().Count()
+                == heldCandidates.Length;
+        NetherRuntimeCodePolicyEvidenceResult policyEvidence =
+            _bridge.TryCaptureCodePolicyEvidence(
+                snapshot,
+                new NetherRuntimeCodeCandidatesResult(
+                    heldCandidates,
+                    heldMasterComplete,
+                    heldMasterComplete ? string.Empty : "held-code-master-incomplete"
+                ),
+                settings
+            );
+        return policyEvidence.IsSuccess
+            ? NetherCodeTransformHardExclusionMapper.Map(snapshot, policyEvidence.Evidence!)
+            : NetherCodeTransformHardExclusionEvidence.Unknown(
+                "code-transform-held-policy-evidence:" + policyEvidence.Detail
+            );
+    }
+
+    private static NetherRuntimePopupContext BindCommittedCodeTransform(
+        NetherPlannedAction settlement,
+        NetherRuntimePopupContext popup
+    )
+    {
+        if (popup.Kind != NetherRuntimePopupKind.CodeTransform)
+            return popup;
+        NetherFloorPopupStage[] committed = (settlement.OwnedPopupStages
+                ?? Array.Empty<NetherFloorPopupStage>())
+            .Where(stage => stage != null
+                && stage.PopupKind == NetherRuntimePopupKind.Recovery
+                && stage.ActionKind == NetherActionKind.SelectEventOption
+                && stage.CodeId > 0
+                && stage.ExpectedEffects.Count(effect =>
+                    effect.Kind == NetherEffectKind.AbyssCodeTransform) == 1)
+            .ToArray();
+        return committed.Length == 1
+            ? popup with
+            {
+                CodeTransformCommitment = new NetherCodeTransformCommitment(
+                    committed[0].CodeId
+                ),
+            }
+            : popup;
+    }
 
     private static void LogAction(string action, NetherSnapshot snapshot, string detail)
     {

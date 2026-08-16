@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Explicit strategy modes and Boss-aligned run boundaries; 03 — Project route-horizon safety and erosion recoverability; 04 — Enforce Code-family integrity and hard eligibility; 05 — Simulate native buff timelines and parameter value; 06 — Value crest, charge, stack, erosion, and Force Chain mechanics.
 
-**Status:** ready-for-agent
+**Status:** paused/blocked by explicit user quota request — do not start until resumed
 
 - [ ] The decision pipeline applies hard eligibility before Equipment Combat Tier Order.
 - [ ] Survival-repairing rear/full-party value leads only while an authoritative survival deficit exists.

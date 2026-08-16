@@ -97,7 +97,16 @@ internal sealed class NetherEventPolicy
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers
-    ) => Decide(snapshot, options, settings, modifiers, isRecovery: false);
+    ) => Decide(
+        snapshot,
+        options,
+        settings,
+        modifiers,
+        isRecovery: false,
+        NetherCodeTransformHardExclusionEvidence.Unknown(
+            "code-transform-outside-recovery"
+        )
+    );
 
     public NetherEventDecision DecideRecovery(
         NetherSnapshot snapshot,
@@ -110,7 +119,23 @@ internal sealed class NetherEventPolicy
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers
-    ) => Decide(snapshot, options, settings, modifiers, isRecovery: true);
+    ) => DecideRecovery(
+        snapshot,
+        options,
+        settings,
+        modifiers,
+        NetherCodeTransformHardExclusionEvidence.Unknown(
+            "code-transform-hard-exclusions-not-captured"
+        )
+    );
+
+    public NetherEventDecision DecideRecovery(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
+        NetherCodeTransformHardExclusionEvidence hardExclusions
+    ) => Decide(snapshot, options, settings, modifiers, isRecovery: true, hardExclusions);
 
     public NetherEventDecision DecideTreasure(
         NetherSnapshot snapshot,
@@ -142,6 +167,12 @@ internal sealed class NetherEventPolicy
                     settings,
                     modifiers,
                     allowPartialActiveDeaths: isStrategicallyEligibleHpPayment,
+                    new NetherCodeTransformEligibilityEvidence
+                    {
+                        StrategyMode = settings.StrategyMode,
+                        EquipmentOptInEnabled = settings.EquipmentRecoveryCodeTransformEnabled,
+                        IsRecovery = false,
+                    },
                     out EventCandidate candidate,
                     out _
                 ))
@@ -219,10 +250,20 @@ internal sealed class NetherEventPolicy
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers,
-        bool isRecovery
+        bool isRecovery,
+        NetherCodeTransformHardExclusionEvidence hardExclusions
     )
     {
         ValidateInputs(snapshot, options, settings);
+        NetherCodeTransformEligibilityEvidence transformEligibility =
+            BuildTransformEligibility(
+                snapshot,
+                options,
+                settings,
+                modifiers,
+                isRecovery,
+                hardExclusions
+            );
         var candidates = new List<EventCandidate>();
         NetherPauseReason firstRejection = NetherPauseReason.NoSafeRoute;
         string firstDetail = "no-safe-event-option";
@@ -238,6 +279,7 @@ internal sealed class NetherEventPolicy
                     settings,
                     modifiers,
                     allowPartialActiveDeaths,
+                    transformEligibility,
                     out EventCandidate candidate,
                     out NetherEventDecision rejection
                 ))
@@ -264,7 +306,11 @@ internal sealed class NetherEventPolicy
 
         bool belowHpSoftLimit = snapshot.Characters.Any(character => character.IsActive && character.HpPermille < settings.MinimumCharacterHpPermille);
         EventCandidate selected = candidates
-            .OrderByDescending(candidate => belowHpSoftLimit && candidate.HpDelta > 0)
+            // A transform candidate can exist only after the exact Recovery option set proved both
+            // deterministic alternatives have zero clipped value.  Rank that committed recovery
+            // action before their raw (but already saturated) effect amounts.
+            .OrderByDescending(candidate => candidate.ReplacementCodeId > 0)
+            .ThenByDescending(candidate => belowHpSoftLimit && candidate.HpDelta > 0)
             .ThenBy(candidate => candidate.ErosionDelta)
             .ThenByDescending(candidate => candidate.HpDelta)
             .ThenByDescending(candidate => candidate.SafeCodeBenefit)
@@ -281,12 +327,14 @@ internal sealed class NetherEventPolicy
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers,
         bool allowPartialActiveDeaths,
+        NetherCodeTransformEligibilityEvidence transformEligibility,
         out EventCandidate candidate,
         out NetherEventDecision rejection
     )
     {
         candidate = default;
         rejection = default!;
+        long replacementCodeId = 0;
         if (option == null || option.OptionNumber < 1 || option.Effects == null || option.Effects.Count is < 1 or > 4)
         {
             rejection = Pause(NetherPauseReason.UnknownEffect, "invalid-event-option");
@@ -305,12 +353,17 @@ internal sealed class NetherEventPolicy
         }
         if (option.Effects.Any(effect => effect.Kind == NetherEffectKind.AbyssCodeTransform))
         {
-            NetherCodeTransformDecision transform = _transformPolicy.Decide(snapshot.Codes, snapshot.CodeCapacity);
+            NetherCodeTransformDecision transform = _transformPolicy.Decide(
+                snapshot.Codes,
+                snapshot.CodeCapacity,
+                transformEligibility
+            );
             if (!transform.CanTransform)
             {
                 rejection = Pause(transform.PauseReason, transform.Detail);
                 return false;
             }
+            replacementCodeId = transform.RemoveCodeId;
         }
         if (option.Effects.Any(effect => effect.Kind == NetherEffectKind.NetherGoldUsed && effect.Amount > snapshot.NetherGold)
             || option.Effects.Any(effect => effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount > snapshot.TreasureKeyCount))
@@ -375,8 +428,9 @@ internal sealed class NetherEventPolicy
             erosion.ProjectedErosion,
             erosionDelta,
             hpDelta,
-            0,
-            option.Effects.Any(effect => effect.Kind == NetherEffectKind.AbyssCodeOffer) ? 1 : 0,
+            replacementCodeId,
+            option.Effects.Any(effect => effect.Kind is NetherEffectKind.AbyssCodeOffer
+                or NetherEffectKind.AbyssCodeTransform) ? 1 : 0,
             benefit,
             startsBattle,
             optionalBattle,
@@ -384,6 +438,113 @@ internal sealed class NetherEventPolicy
         );
         return true;
     }
+
+    private NetherCodeTransformEligibilityEvidence BuildTransformEligibility(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
+        bool isRecovery,
+        NetherCodeTransformHardExclusionEvidence hardExclusions
+    )
+    {
+        if (!isRecovery)
+        {
+            return new NetherCodeTransformEligibilityEvidence
+            {
+                StrategyMode = settings.StrategyMode,
+                EquipmentOptInEnabled = settings.EquipmentRecoveryCodeTransformEnabled,
+                IsRecovery = false,
+            };
+        }
+        if (hardExclusions == null || !hardExclusions.IsKnown)
+        {
+            return new NetherCodeTransformEligibilityEvidence
+            {
+                IsKnown = false,
+                UnknownReason = hardExclusions?.UnknownReason
+                    ?? "code-transform-hard-exclusions-unavailable",
+            };
+        }
+
+        NetherEventOption[] transforms = options.Where(IsExactTransformOption).ToArray();
+        NetherEventOption[] rests = options.Where(IsExactRestOption).ToArray();
+        NetherEventOption[] purifications = options.Where(IsExactPurificationOption).ToArray();
+        if (options.Count != 3 || transforms.Length != 1 || rests.Length != 1
+            || purifications.Length != 1)
+        {
+            return new NetherCodeTransformEligibilityEvidence
+            {
+                IsKnown = false,
+                UnknownReason = "recovery-transform-three-option-shape-unavailable",
+            };
+        }
+
+        bool restHasValue = HasActualRecoveryValue(
+            rests[0],
+            snapshot,
+            settings,
+            modifiers
+        );
+        bool purificationHasValue = HasActualRecoveryValue(
+            purifications[0],
+            snapshot,
+            settings,
+            modifiers
+        );
+        return new NetherCodeTransformEligibilityEvidence
+        {
+            StrategyMode = settings.StrategyMode,
+            EquipmentOptInEnabled = settings.EquipmentRecoveryCodeTransformEnabled,
+            IsRecovery = true,
+            DeterministicRecoveryChoicesHaveZeroValue = !restHasValue
+                && !purificationHasValue,
+            HardExcludedCodes = hardExclusions.HardExcludedCodes,
+        };
+    }
+
+    private bool HasActualRecoveryValue(
+        NetherEventOption option,
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers
+    )
+    {
+        NetherEffect effect = option.Effects[0];
+        bool hpValue = effect.Kind == NetherEffectKind.Heal
+            && snapshot.Characters.Any(character => character.IsActive
+                && character.HpPermille < 1000
+                && effect.Amount > 0);
+        NetherErosionProjection projection = _erosionPolicy.ProjectEffects(
+            snapshot.ErosionPoint,
+            option.Effects,
+            modifiers,
+            settings.SoftErosionLimit,
+            isMandatoryBoss: false
+        );
+        // An ineligible or non-neutral deterministic branch is not proof of zero value.
+        return hpValue || !projection.IsAllowed
+            || projection.ProjectedErosion != snapshot.ErosionPoint;
+    }
+
+    private static bool IsExactTransformOption(NetherEventOption option) =>
+        IsExactSingleEffect(option, NetherEffectKind.AbyssCodeTransform);
+
+    private static bool IsExactRestOption(NetherEventOption option) =>
+        IsExactSingleEffect(option, NetherEffectKind.Heal);
+
+    private static bool IsExactPurificationOption(NetherEventOption option) =>
+        IsExactSingleEffect(option, NetherEffectKind.ErosionHeal);
+
+    private static bool IsExactSingleEffect(NetherEventOption option, NetherEffectKind kind) =>
+        option != null
+        && option.Effects != null
+        && option.Effects.Count == 1
+        && option.Effects[0] != null
+        && option.Effects[0].Known
+        && option.Effects[0].ContentKnown
+        && option.Effects[0].Kind == kind
+        && option.Effects[0].Amount >= 0;
 
     private static bool IsExactTreasureHpPayment(NetherEventOption option) =>
         option?.Effects != null

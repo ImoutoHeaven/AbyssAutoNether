@@ -1542,6 +1542,114 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_uses_candidate_local_mechanism_evidence_not_displayed_power()
+    {
+        NetherCodeCandidate unknownDisplayedHigh = NetherCodeRuntimeSemanticMapper.MapCandidate(
+            codeId: 51011,
+            rawCategory: (int)NetherCodeCategory.Technique,
+            effectType: 1,
+            effectParameter1: 100006,
+            effectParameter2: 1,
+            effectParameter3: 0,
+            rarity: 5,
+            power: 99_999
+        );
+        NetherCodeCandidate backForceChain = NetherCodeRuntimeSemanticMapper.MapCandidate(
+            codeId: 51012,
+            rawCategory: (int)NetherCodeCategory.Technique,
+            effectType: 1,
+            effectParameter1: 100006,
+            effectParameter2: 1,
+            effectParameter3: 0,
+            rarity: 1,
+            power: 1
+        );
+        NetherMechanismValue forceChainValue = NetherMechanismValue.Qualitative(
+            NetherMechanismQualitativePriority.BackForceChainHigh,
+            "native-force-chain-completion-message"
+        );
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = new ScriptedRuntimeBridge().WaitForInteractivePopup,
+            ActivePopup = new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.CodeOffer },
+            CodeCandidates = new NetherRuntimeCodeCandidatesResult(
+                [unknownDisplayedHigh, backForceChain],
+                IsMasterComplete: true,
+                Detail: string.Empty
+            ),
+            CodePolicyEvidenceFactory = (_, _, _) =>
+                NetherRuntimeCodePolicyEvidenceResult.Success(new NetherCodePolicyEvidence
+                {
+                    MechanicsByCodeId = new Dictionary<long, NetherCodeHardEligibilityEvidence>
+                    {
+                        [unknownDisplayedHigh.CodeId] = new()
+                        {
+                            IsKnown = false,
+                            UnknownReason = "candidate-native-effect-unavailable",
+                        },
+                        [backForceChain.CodeId] = new() { IsKnown = true },
+                    },
+                    MechanismValuesByCodeId = new Dictionary<long, NetherMechanismValue>
+                    {
+                        [unknownDisplayedHigh.CodeId] = NetherMechanismValue.Missing(
+                            "candidate-native-effect-unavailable"
+                        ),
+                        [backForceChain.CodeId] = forceChainValue,
+                    },
+                    EquipmentMutationValuesByKey = new Dictionary<
+                        NetherCodeMutationKey,
+                        NetherCodeEquipmentMutationEvidence
+                    >
+                    {
+                        [new NetherCodeMutationKey(backForceChain.CodeId, 0)] = new(
+                            backForceChain.CodeId,
+                            RemoveCodeId: 0,
+                            new NetherNativePortfolioComparisonInput([], [], BossDurationSeconds: 1),
+                            forceChainValue
+                        )
+                        {
+                            CombatTier = NetherEquipmentCombatTier.BackForceChain,
+                            Survival = NetherSurvivalRepairEvidence.Known(false, false),
+                            MechanismPortfolio = NetherMechanismPortfolioComparisonEvidence.Known(
+                                [],
+                                [new NetherMechanismPortfolioEntry(
+                                    backForceChain.CodeId,
+                                    forceChainValue
+                                )]
+                            ),
+                        },
+                    },
+                }),
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            NetherPlannedAction selected = Assert.Single(
+                bridge.NativeActions,
+                action => action.Kind == NetherActionKind.SelectCode
+            );
+            Assert.Equal(backForceChain.CodeId, selected.CodeId);
+            Assert.NotEqual(unknownDisplayedHigh.CodeId, selected.CodeId);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_reconciles_owned_event_floor_as_one_exact_parent_transaction()
     {
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10);
@@ -2422,7 +2530,7 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
-    public void Production_controller_runs_event_transform_then_offer_under_one_parent_and_one_get()
+    public void Production_controller_rejects_unproven_default_transform_before_parent_mutation()
     {
         NetherCodeState beforeRisk = NetherCodeRuntimeSemanticMapper.MapState(
             40024,
@@ -2585,23 +2693,16 @@ public class NetherAutoClimbControllerEndToEndTests
             NetherAutoClimbController.Toggle();
             Pump(10);
 
-            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
-            Assert.Equal(
-                new[]
-                {
-                    NetherActionKind.SelectEventOption,
-                    NetherActionKind.TransformCode,
-                    NetherActionKind.SelectCode,
-                },
-                bridge.OwnedPopupActions.Select(action => action.Kind)
-            );
-            Assert.Equal(1, bridge.CodeTransformInvokeCount);
-            Assert.Equal(1, bridge.CodeTransformConfirmCount);
-            Assert.Equal(1, bridge.CodeTransformCompleteCount);
-            Assert.Equal(1, bridge.CodeTransformTaskPollCount);
-            Assert.Equal(1, bridge.FloorParentTerminalCount);
-            Assert.Equal(1, bridge.GetOnlyBeginCount);
-            Assert.Equal(1, bridge.GetOnlyPollCount);
+            Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.UnknownMasterData, NetherAutoClimbController.PauseReason);
+            Assert.Empty(bridge.OwnedPopupActions);
+            Assert.Equal(0, bridge.CodeTransformInvokeCount);
+            Assert.Equal(0, bridge.CodeTransformConfirmCount);
+            Assert.Equal(0, bridge.CodeTransformCompleteCount);
+            Assert.Equal(0, bridge.CodeTransformTaskPollCount);
+            Assert.Equal(0, bridge.FloorParentTerminalCount);
+            Assert.Equal(0, bridge.GetOnlyBeginCount);
+            Assert.Equal(0, bridge.GetOnlyPollCount);
         }
         finally
         {
@@ -2610,7 +2711,7 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
-    public void Production_controller_pauses_a_faulted_code_transform_without_early_get_or_replay()
+    public void Production_controller_never_enters_faultable_transform_without_eligibility_proof()
     {
         NetherCodeState beforeRisk = NetherCodeRuntimeSemanticMapper.MapState(
             40024,
@@ -2655,7 +2756,51 @@ public class NetherAutoClimbControllerEndToEndTests
             },
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
             InteractivePreEntryFactory = (snapshot, settings) =>
-                ScriptedRuntimeBridge.InteractivePreEntry(snapshot, settings),
+            {
+                var input = new NetherInteractiveFloorPreEntrySafetyInput(
+                    NetherFloorNodeType.Event,
+                    FloorMasterId: 2,
+                    MapFloorRows: new[] { new NetherFloorMasterBoundsRow(2, 0, 0) },
+                    EventRows: new[] { new NetherFloorEventMasterRow(42, 2, 1, 1001, 0, 0, 0) },
+                    EventPartRows: new[]
+                    {
+                        new NetherFloorEventPartMasterRow(
+                            1001,
+                            TargetType1: 7,
+                            SelectParameter1: 0,
+                            TargetType2: 0,
+                            SelectParameter2: 0,
+                            TargetType3: 0,
+                            SelectParameter3: 0,
+                            ContentType: 0,
+                            ContentId: 0,
+                            Amount: 0
+                        ),
+                    },
+                    CurrentErosion: snapshot.ErosionPoint,
+                    ActiveHpPermille: new[] { 500 },
+                    CurrentNetherGold: snapshot.NetherGold,
+                    CurrentTreasureKeys: snapshot.TreasureKeyCount,
+                    Settings: settings
+                )
+                {
+                    CurrentCodes = snapshot.Codes,
+                    CodeCapacity = snapshot.CodeCapacity,
+                };
+                NetherInteractiveFloorPreEntrySafetyResult safety =
+                    new NetherInteractiveFloorPreEntrySafety().Evaluate(input);
+                return NetherRuntimeInteractivePreEntryInputsResult.Success(
+                    new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
+                    {
+                        [2] = new()
+                        {
+                            IsCaptured = true,
+                            Input = input,
+                            Safety = safety,
+                        },
+                    }
+                );
+            },
             CodeTransformTaskPollResult =
                 NetherNativeActionResult.UnknownOutcome("scripted-code-transform-fault"),
             RequireExplicitFloorParentTerminal = true,
@@ -2683,15 +2828,14 @@ public class NetherAutoClimbControllerEndToEndTests
             Pump(9);
 
             Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
-            Assert.Equal(NetherPauseReason.BindingUnavailable, NetherAutoClimbController.PauseReason);
-            Assert.Contains("scripted-code-transform-fault", NetherAutoClimbController.PauseDetail);
+            Assert.Equal(NetherPauseReason.UnknownMasterData, NetherAutoClimbController.PauseReason);
             Assert.Equal(0, bridge.GetOnlyBeginCount);
             Assert.Equal(0, bridge.GetOnlyPollCount);
-            Assert.Single(bridge.OwnedPopupActions, action => action.Kind == NetherActionKind.TransformCode);
-            Assert.Equal(1, bridge.CodeTransformInvokeCount);
-            Assert.Equal(1, bridge.CodeTransformConfirmCount);
-            Assert.Equal(1, bridge.CodeTransformCompleteCount);
-            Assert.Equal(1, bridge.CodeTransformTaskPollCount);
+            Assert.Empty(bridge.OwnedPopupActions);
+            Assert.Equal(0, bridge.CodeTransformInvokeCount);
+            Assert.Equal(0, bridge.CodeTransformConfirmCount);
+            Assert.Equal(0, bridge.CodeTransformCompleteCount);
+            Assert.Equal(0, bridge.CodeTransformTaskPollCount);
         }
         finally
         {
@@ -4331,6 +4475,12 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherActiveCodeErosionProjection ActiveCodeErosion { get; set; } =
             KnownEmptyCodeProjection();
         public Func<NetherSnapshot, NetherAutoClimbSettings, NetherRuntimeInteractivePreEntryInputsResult>? InteractivePreEntryFactory { get; set; }
+        public Func<
+            NetherSnapshot,
+            NetherRuntimeCodeCandidatesResult,
+            NetherAutoClimbSettings,
+            NetherRuntimeCodePolicyEvidenceResult
+        >? CodePolicyEvidenceFactory { get; set; }
         public NetherRuntimeCodeCandidatesResult CodeCandidates { get; set; } = new(
             Array.Empty<NetherCodeCandidate>(),
             IsMasterComplete: true,
@@ -4520,6 +4670,122 @@ public class NetherAutoClimbControllerEndToEndTests
                         : CurrentRuntimeGeneration,
                 });
 
+        public NetherRuntimeCodePolicyEvidenceResult TryCaptureCodePolicyEvidence(
+            NetherSnapshot snapshot,
+            NetherRuntimeCodeCandidatesResult candidates,
+            NetherAutoClimbSettings settings
+        ) => CodePolicyEvidenceFactory?.Invoke(snapshot, candidates, settings)
+            ?? NetherRuntimeCodePolicyEvidenceResult.Success(
+                ScriptedCodePolicyEvidence(snapshot, candidates, settings)
+            );
+
+        private static NetherCodePolicyEvidence ScriptedCodePolicyEvidence(
+            NetherSnapshot snapshot,
+            NetherRuntimeCodeCandidatesResult candidates,
+            NetherAutoClimbSettings settings
+        )
+        {
+            NetherNativeBuffWindow[] before = snapshot.Codes
+                .Where(code => code.PossessionAmount > 0)
+                .Select(code => ScriptedCodeWindow(code.CodeId, 50))
+                .ToArray();
+            var mutations = new Dictionary<
+                NetherCodeMutationKey,
+                NetherCodeEquipmentMutationEvidence
+            >();
+            foreach (NetherCodeCandidate candidate in candidates.Candidates)
+            {
+                IEnumerable<long> removals = snapshot.Codes.Count < snapshot.CodeCapacity
+                    ? [0]
+                    : snapshot.Codes.Select(code => code.CodeId);
+                foreach (long removal in removals)
+                {
+                    NetherNativeBuffWindow[] after = before
+                        .Where(window => window.CodeId != removal)
+                        .Append(ScriptedCodeWindow(candidate.CodeId, 100))
+                        .ToArray();
+                    mutations[new NetherCodeMutationKey(candidate.CodeId, removal)] = new(
+                        candidate.CodeId,
+                        removal,
+                        new NetherNativePortfolioComparisonInput(before, after, 10),
+                        KnownZeroMechanism()
+                    )
+                    {
+                        CombatTier = NetherEquipmentCombatTier.RearOrFullOffense,
+                        Survival = NetherSurvivalRepairEvidence.Known(false, false),
+                        MechanismPortfolio = NetherMechanismPortfolioComparisonEvidence.Known(
+                            [],
+                            []
+                        ),
+                        RecipientPositions = new Dictionary<long, NetherPartyPosition>
+                        {
+                            [1] = NetherPartyPosition.Back,
+                        },
+                    };
+                }
+            }
+            NetherCodeFamily activeFamily = settings.StrategyMode == NetherStrategyMode.Research
+                ? settings.ResearchPrimaryFamily
+                : NetherCodeFamily.Unknown;
+            return new NetherCodePolicyEvidence
+            {
+                MechanicsByCodeId = candidates.Candidates.ToDictionary(
+                    candidate => candidate.CodeId,
+                    _ => new NetherCodeHardEligibilityEvidence { IsKnown = true }
+                ),
+                MechanismValuesByCodeId = candidates.Candidates.ToDictionary(
+                    candidate => candidate.CodeId,
+                    _ => KnownZeroMechanism()
+                ),
+                EquipmentMutationValuesByKey = mutations,
+                ActiveParty = snapshot.Characters
+                    .Where(character => character.IsActive)
+                    .Select((character, index) => new NetherStrategyPartyMember(
+                        character.CharacterId,
+                        index,
+                        NetherPartyPosition.Back,
+                        1,
+                        NetherCrestIdentity.Impact,
+                        character.HpPermille,
+                        true,
+                        1,
+                        0
+                    ))
+                    .ToArray(),
+                Research = new[]
+                {
+                    new NetherStrategyResearchFamilyState(NetherCodeFamily.Rush, 0, 0, 0),
+                    new NetherStrategyResearchFamilyState(NetherCodeFamily.Impact, 0, 0, 0),
+                    new NetherStrategyResearchFamilyState(NetherCodeFamily.Safe, 0, 0, 0),
+                    new NetherStrategyResearchFamilyState(NetherCodeFamily.Risk, 0, 0, 0),
+                },
+                ActiveResearchFamily = activeFamily,
+                ErosionHorizonKnown = true,
+                ProjectedMinimumErosion = snapshot.ErosionPoint,
+                ProjectedMaximumErosion = snapshot.ErosionPoint,
+                RecoverableToFiftySeventyBand = true,
+            };
+        }
+
+        private static NetherMechanismValue KnownZeroMechanism() =>
+            NetherMechanismValue.Quantified(
+                NetherMechanismQuantityKind.None,
+                0,
+                "scripted-known-zero-mechanism"
+            );
+
+        private static NetherNativeBuffWindow ScriptedCodeWindow(long codeId, int value) => new(
+            codeId,
+            RecipientCharacterId: 1,
+            new NetherStrategyBuffType(10),
+            NetherStrategyBuffEffectKind.Buff,
+            NetherStrategyBuffCoexistenceKind.Allow,
+            NetherCombatMetricKind.Attack,
+            value,
+            StartSecond: 0,
+            DurationSeconds: 10
+        );
+
         public NetherNativeActionResult InvokeBattleResultCode(
             NetherRuntimePopupContext popup,
             NetherPlannedAction action
@@ -4538,6 +4804,12 @@ public class NetherAutoClimbControllerEndToEndTests
             NetherRuntimeSnapshotResult.Success(CurrentSnapshot);
 
         public NetherRuntimeCodeCandidatesResult TryGetRecoveredCodeCandidates() => CodeCandidates;
+
+        public NetherRuntimeCodePolicyEvidenceResult TryCaptureRecoveredCodePolicyEvidence(
+            NetherSnapshot snapshot,
+            NetherRuntimeCodeCandidatesResult candidates,
+            NetherAutoClimbSettings settings
+        ) => TryCaptureCodePolicyEvidence(snapshot, candidates, settings);
 
         public NetherRuntimePopupResult TryGetRecoveredCodePopup() => RecoveredCodePopup == null
             ? NetherRuntimePopupResult.Failure("scripted-recovered-code-popup-missing")

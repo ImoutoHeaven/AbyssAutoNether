@@ -503,6 +503,12 @@ internal sealed record NetherAutoClimbSettings
     public int CodeReloadReserve { get; init; } = 1;
     public NetherTreasureMode TreasureMode { get; init; } = NetherTreasureMode.KeyOnly;
     public NetherShopMode ShopMode { get; init; } = NetherShopMode.Off;
+    /// <summary>
+    /// Explicit Equipment-only opt-in for the server-random Recovery Code transform. Even when
+    /// enabled, policy still requires exact zero-value Rest/Purification and a hard-excluded held
+    /// Code. The default remains false.
+    /// </summary>
+    public bool EquipmentRecoveryCodeTransformEnabled { get; init; }
     public bool DetailedLogging { get; init; } = true;
 }
 

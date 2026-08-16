@@ -1884,6 +1884,118 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         );
     }
 
+    public NetherRuntimeCodePolicyEvidenceResult TryCaptureCodePolicyEvidence(
+        NetherSnapshot snapshot,
+        NetherRuntimeCodeCandidatesResult candidates,
+        NetherAutoClimbSettings settings
+    )
+    {
+        if (snapshot == null || settings == null || !candidates.IsSuccess
+            || !candidates.IsMasterComplete)
+        {
+            return NetherRuntimeCodePolicyEvidenceResult.Failure(
+                "code-policy-authoritative-input-unavailable"
+            );
+        }
+
+        NetherRuntimeStrategyEvidenceResult strategy = TryCaptureStrategyEvidence(snapshot, settings);
+        if (!strategy.IsSuccess)
+        {
+            return NetherRuntimeCodePolicyEvidenceResult.Failure(
+                "code-policy-strategy-evidence:" + strategy.Detail
+            );
+        }
+
+        try
+        {
+            MasterDataStore? masterDataStore = Engine.Get<MasterDataStore>();
+            if (masterDataStore == null)
+            {
+                return NetherRuntimeCodePolicyEvidenceResult.Failure(
+                    "code-policy-master-store-unavailable"
+                );
+            }
+            NetherCodeState[] offeredStates = candidates.Candidates
+                .Where(candidate => candidate != null)
+                .GroupBy(candidate => candidate.CodeId)
+                .Select(group => group.First())
+                .Select(candidate => new NetherCodeState(
+                    candidate.CodeId,
+                    candidate.Family,
+                    candidate.AbilityLevel
+                )
+                {
+                    Category = candidate.Category,
+                    Rarity = candidate.Rarity,
+                    Power = candidate.Power,
+                    PossessionAmount = 1,
+                    MasterEffectType = candidate.MasterEffectType,
+                    EffectParameter1 = candidate.EffectParameter1,
+                    EffectParameter2 = candidate.EffectParameter2,
+                    EffectParameter3 = candidate.EffectParameter3,
+                    AbilityAssetId = candidate.AbilityAssetId,
+                    PartyCoverageKnown = candidate.PartyCoverageKnown,
+                    PartyCoverage = candidate.PartyCoverage,
+                })
+                .ToArray();
+            if (!NetherNativeMechanicProductionCapture.TryCapture(
+                    offeredStates,
+                    masterDataStore,
+                    out IReadOnlyList<NetherStrategyNativeMechanic>? mechanics,
+                    out string mechanicError
+                )
+                || mechanics == null)
+            {
+                return NetherRuntimeCodePolicyEvidenceResult.Failure(
+                    "code-policy-offered-mechanics:" + mechanicError
+                );
+            }
+            NetherProductionRouteSafetyPlan routePlan = new NetherRouteSafetyProductionCoordinator()
+                .Plan(
+                    snapshot,
+                    settings.MaxDepth,
+                    settings,
+                    TryCaptureRouteSafety(snapshot.Floors),
+                    TryCaptureInteractivePreEntryInputs(snapshot, settings)
+                );
+            MNetherFloorBattles[]? nativeBattles = masterDataStore.GetCache<MNetherFloorBattles>();
+            MNetherBattleStages[]? nativeStages = masterDataStore.GetCache<MNetherBattleStages>();
+            NetherCodePolicyRouteEvidence routeEvidence = nativeBattles == null || nativeStages == null
+                ? NetherCodePolicyRouteEvidenceMapper.Map(snapshot, routePlan)
+                : NetherCodePolicyRouteEvidenceMapper.Map(
+                    snapshot,
+                    routePlan,
+                    nativeBattles.Where(row => row != null).Select(row =>
+                        new NetherStrategyBattleMasterRow(
+                            row.id,
+                            row.m_nether_map_floor_id,
+                            row.type,
+                            row.m_nether_battle_stage_id,
+                            row.code_drop_ratio
+                        )
+                    ).ToArray(),
+                    nativeStages.Where(row => row != null).Select(row =>
+                        new NetherCodePolicyBattleStageRow(row.id, row.time_limit)
+                    ).ToArray()
+                );
+            return NetherCodePolicyEvidenceAssembler.Assemble(
+                strategy.Package!,
+                snapshot,
+                candidates.Candidates,
+                mechanics,
+                settings,
+                routeEvidence
+            );
+        }
+        catch (Exception ex)
+        {
+            return NetherRuntimeCodePolicyEvidenceResult.Failure(
+                "code-policy-evidence-capture-exception:"
+                    + ex.GetType().Name + ":" + ex.Message
+            );
+        }
+    }
+
     /// <summary>
     /// Reproduces only the packaged UI's GetBuffTargetCount projection.  Native code proves that
     /// this count is multiplied by MNetherCodes.power for display; it does not prove that every
@@ -2165,6 +2277,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     public NetherRuntimeSnapshotResult TryCaptureRecoveredCodeSnapshot() =>
         TryCaptureSnapshot();
+
+    public NetherRuntimeCodePolicyEvidenceResult TryCaptureRecoveredCodePolicyEvidence(
+        NetherSnapshot snapshot,
+        NetherRuntimeCodeCandidatesResult candidates,
+        NetherAutoClimbSettings settings
+    ) => TryCaptureCodePolicyEvidence(snapshot, candidates, settings);
 
     public NetherRuntimeCodeCandidatesResult TryGetRecoveredCodeCandidates() =>
         TryGetCodeCandidates();
@@ -8014,12 +8132,41 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         members = null;
         if (!TryReadMember(model, "PartyModel", out object? party) || party == null
-            || !TryReadMember(party, "CharacterModels", out object? rawCharacters)
-            || rawCharacters == null)
+            || party is not Project.Nether.NetherPartyModel nativeParty
+            || nativeParty.CharacterModels == null)
         {
             error = "missing-strategy-party-model";
             return false;
         }
+        object rawCharacters = nativeParty.CharacterModels;
+        Il2CppSystem.Collections.Generic.Dictionary<int, Project.Common.CharacterParameters>?
+            effectiveByPartyIndex;
+        try
+        {
+            // Fresh Project.dll 53806a5b...1300: this calculator folds the exact character,
+            // equipment, general-ability and support relationships used by the native party model.
+            effectiveByPartyIndex =
+                Project.Nether.NetherPartyCharacterParametersCalculator.CalculateUnitParametersMap(
+                    nativeParty.CharacterModels
+                );
+        }
+        catch (Exception ex)
+        {
+            error = "strategy-effective-parameter-calculator:"
+                + ex.GetType().Name + ":" + ex.Message;
+            return false;
+        }
+        if (effectiveByPartyIndex == null)
+        {
+            error = "strategy-effective-parameter-map-unavailable";
+            return false;
+        }
+        bool parameterCalculationsMapped = NetherNativePartyParameterEvidenceCapture.TryCapture(
+            nativeParty,
+            out IReadOnlyDictionary<int, IReadOnlyList<
+                NetherStrategyParameterCalculationEvidence>> parameterCalculationsByPartyIndex,
+            out string parameterCalculationsError
+        );
 
         string[] parameterMembers =
         {
@@ -8065,6 +8212,68 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 || !NetherHpRatioPermilleQuantizer.TryQuantize(hpRatio, out int hpPermille))
             {
                 error = "invalid-strategy-party-member:" + characterId;
+                return false;
+            }
+            NetherPartyPosition typedPartyPosition = partyPosition switch
+            {
+                (int)Project.PartyPositionType.Forward => NetherPartyPosition.Forward,
+                (int)Project.PartyPositionType.Back => NetherPartyPosition.Back,
+                (int)Project.PartyPositionType.Assist => NetherPartyPosition.Assist,
+                _ => NetherPartyPosition.Unknown,
+            };
+            NetherCrestIdentity typedCrest = manaType switch
+            {
+                (int)Project.Master.ManaType.General => NetherCrestIdentity.General,
+                (int)Project.Master.ManaType.Passion => NetherCrestIdentity.Passion,
+                (int)Project.Master.ManaType.Impact => NetherCrestIdentity.Impact,
+                _ => NetherCrestIdentity.Unknown,
+            };
+            if (typedPartyPosition == NetherPartyPosition.Unknown
+                || typedCrest == NetherCrestIdentity.Unknown)
+            {
+                error = "unsupported-strategy-party-enum:"
+                    + characterId + ":" + partyPosition + ":" + manaType;
+                return false;
+            }
+            if (!effectiveByPartyIndex.TryGetValue(
+                    partyIndex,
+                    out Project.Common.CharacterParameters? effectiveParameters
+                )
+                || effectiveParameters?.Table == null)
+            {
+                error = "strategy-effective-parameters-unavailable:" + characterId;
+                return false;
+            }
+            IReadOnlyList<NetherStrategyParameterCalculationEvidence>? memberParameterCalculations =
+                null;
+            if (parameterCalculationsMapped
+                && !parameterCalculationsByPartyIndex.TryGetValue(
+                    partyIndex,
+                    out memberParameterCalculations
+                ))
+            {
+                error = "strategy-parameter-calculation-member-unavailable:" + characterId;
+                return false;
+            }
+            var typedEffectiveParameters = new List<NetherStrategyEffectiveParameter>();
+            foreach (Project.Master.ParameterType parameterType in
+                     Project.Common.CharacterParameters.ParameterTypes)
+            {
+                NetherCharacterParameterKind kind = MapCharacterParameterKind(parameterType);
+                if (kind == NetherCharacterParameterKind.None)
+                    continue;
+                if (!effectiveParameters.Table.TryGetValue(parameterType, out int value)
+                    || value < 0)
+                {
+                    error = "strategy-effective-parameter-unavailable:"
+                        + characterId + ":" + (int)parameterType;
+                    return false;
+                }
+                typedEffectiveParameters.Add(new NetherStrategyEffectiveParameter(kind, value));
+            }
+            if (typedEffectiveParameters.Count == 0)
+            {
+                error = "strategy-effective-parameter-set-empty:" + characterId;
                 return false;
             }
 
@@ -8142,15 +8351,28 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             mapped.Add(new NetherStrategyPartyMember(
                 characterId,
                 partyIndex,
-                partyPosition,
+                typedPartyPosition,
                 elementType,
-                manaType,
+                typedCrest,
                 hpPermille,
                 isAlive,
                 level,
                 limitBreakCount
             )
             {
+                EffectiveParametersKnown = true,
+                EffectiveParameters = typedEffectiveParameters,
+                EffectiveParametersUnknownReason = string.Empty,
+                ParameterCalculationsKnown = parameterCalculationsMapped,
+                ParameterCalculations = parameterCalculationsMapped
+                    ? memberParameterCalculations!
+                    : Array.Empty<NetherStrategyParameterCalculationEvidence>(),
+                ParameterCalculationsUnknownReason = parameterCalculationsMapped
+                    ? string.Empty
+                    : parameterCalculationsError,
+                ContinuousAttackCountMaximumKnown = false,
+                ContinuousAttackCountMaximumUnknownReason =
+                    "code-offer-party-model-has-no-live-i-character-status",
                 NativeParameters = parameters,
                 CharacterAbilityEffects = characterEffects!,
                 EquipmentAbilityEffects = equipmentEffects!,
@@ -8166,6 +8388,38 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         error = string.Empty;
         return true;
     }
+
+    private static NetherCharacterParameterKind MapCharacterParameterKind(
+        Project.Master.ParameterType parameterType
+    ) => parameterType switch
+    {
+        Project.Master.ParameterType.Hp => NetherCharacterParameterKind.Hp,
+        Project.Master.ParameterType.Attack => NetherCharacterParameterKind.Attack,
+        Project.Master.ParameterType.Defence => NetherCharacterParameterKind.Defence,
+        Project.Master.ParameterType.CriticalProb =>
+            NetherCharacterParameterKind.CriticalProbability,
+        Project.Master.ParameterType.CriticalDmgRate =>
+            NetherCharacterParameterKind.CriticalDamageRate,
+        Project.Master.ParameterType.AttackContinuousProb =>
+            NetherCharacterParameterKind.ContinuousAttackProbability,
+        Project.Master.ParameterType.AvoidProb => NetherCharacterParameterKind.AvoidProbability,
+        Project.Master.ParameterType.ResistBurnt => NetherCharacterParameterKind.ResistBurnt,
+        Project.Master.ParameterType.ResistFreeze => NetherCharacterParameterKind.ResistFreeze,
+        Project.Master.ParameterType.ResistStone => NetherCharacterParameterKind.ResistStone,
+        Project.Master.ParameterType.ResistParalyze => NetherCharacterParameterKind.ResistParalyze,
+        Project.Master.ParameterType.ResistCharmed => NetherCharacterParameterKind.ResistCharmed,
+        Project.Master.ParameterType.ResistLoss => NetherCharacterParameterKind.ResistLoss,
+        Project.Master.ParameterType.ResistFire => NetherCharacterParameterKind.ResistFire,
+        Project.Master.ParameterType.ResistWater => NetherCharacterParameterKind.ResistWater,
+        Project.Master.ParameterType.ResistEarth => NetherCharacterParameterKind.ResistEarth,
+        Project.Master.ParameterType.ResistLight => NetherCharacterParameterKind.ResistLight,
+        Project.Master.ParameterType.ResistDark => NetherCharacterParameterKind.ResistDark,
+        Project.Master.ParameterType.ResistArtifact => NetherCharacterParameterKind.ResistArtifact,
+        Project.Master.ParameterType.ElementAdvantageCorrection =>
+            NetherCharacterParameterKind.ElementAdvantageCorrection,
+        Project.Master.ParameterType.SkillCharge => NetherCharacterParameterKind.SkillCharge,
+        _ => NetherCharacterParameterKind.None,
+    };
 
     private static bool TryMapStrategyAbilityEffects(
         object character,

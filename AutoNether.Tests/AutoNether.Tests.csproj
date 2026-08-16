@@ -65,6 +65,18 @@
     <Compile Include="..\AutoNether\Services\NetherDiagnosticTransitionGate.cs" Link="NetherDiagnosticTransitionGate.cs" Condition="Exists('..\AutoNether\Services\NetherDiagnosticTransitionGate.cs')" />
     <Compile Include="..\AutoNether\Services\NetherAutoClimbController.cs" Link="NetherAutoClimbController.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbController.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodePolicy.cs" Link="NetherCodePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherCodePolicy.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherCodePolicyEvidenceAssembler.cs" Link="NetherCodePolicyEvidenceAssembler.cs" Condition="Exists('..\AutoNether\Services\NetherCodePolicyEvidenceAssembler.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherCodePolicyRouteEvidence.cs" Link="NetherCodePolicyRouteEvidence.cs" Condition="Exists('..\AutoNether\Services\NetherCodePolicyRouteEvidence.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherNativePortfolioValuation.cs" Link="NetherNativePortfolioValuation.cs" Condition="Exists('..\AutoNether\Services\NetherNativePortfolioValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherNativeUnitParameterProjection.cs" Link="NetherNativeUnitParameterProjection.cs" Condition="Exists('..\AutoNether\Services\NetherNativeUnitParameterProjection.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherMechanismSpecificValuation.cs" Link="NetherMechanismSpecificValuation.cs" Condition="Exists('..\AutoNether\Services\NetherMechanismSpecificValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherCrestMechanismValuation.cs" Link="NetherCrestMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherCrestMechanismValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherChargeMechanismValuation.cs" Link="NetherChargeMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherChargeMechanismValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherStackMechanismValuation.cs" Link="NetherStackMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherStackMechanismValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherErosionMechanismValuation.cs" Link="NetherErosionMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherErosionMechanismValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherCategoryMechanismValuation.cs" Link="NetherCategoryMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherCategoryMechanismValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherForceChainMechanismValuation.cs" Link="NetherForceChainMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherForceChainMechanismValuation.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherEquipmentCodeValuePolicy.cs" Link="NetherEquipmentCodeValuePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherEquipmentCodeValuePolicy.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodePartyCoverageProjection.cs" Link="NetherCodePartyCoverageProjection.cs" Condition="Exists('..\AutoNether\Services\NetherCodePartyCoverageProjection.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeIdentity.cs" Link="NetherCodeIdentity.cs" Condition="Exists('..\AutoNether\Services\NetherCodeIdentity.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeTransformPolicy.cs" Link="NetherCodeTransformPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherCodeTransformPolicy.cs')" />

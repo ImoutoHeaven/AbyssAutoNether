@@ -15,6 +15,7 @@ public static class Config
     internal static ConfigEntry<int> NetherAutoClimbCodeReloadReserve { get; private set; } = null!;
     internal static ConfigEntry<NetherTreasureMode> NetherAutoClimbTreasureMode { get; private set; } = null!;
     internal static ConfigEntry<NetherShopMode> NetherAutoClimbShopMode { get; private set; } = null!;
+    internal static ConfigEntry<bool> NetherAutoClimbEquipmentRecoveryCodeTransformEnabled { get; private set; } = null!;
     internal static ConfigEntry<bool> NetherAutoClimbDetailedLogging { get; private set; } = null!;
     internal static ConfigEntry<string> CheckpointPreserveItemIds { get; private set; } = null!;
 
@@ -79,6 +80,12 @@ public static class Config
             "ShopMode",
             NetherShopMode.Off,
             "Shop strategy. Off leaves through the verified native callback; EquipmentBags buys verified affordable bags."
+        );
+        NetherAutoClimbEquipmentRecoveryCodeTransformEnabled = Plugin.ConfigFile.Bind(
+            "AutoNether",
+            "EquipmentRecoveryCodeTransformEnabled",
+            false,
+            "Equipment-only opt-in for Recovery Code transform. It remains disabled unless exact Rest/Purification zero-value and a hard-excluded held Code are proven."
         );
         NetherAutoClimbDetailedLogging = Plugin.ConfigFile.Bind(
             "AutoNether",
