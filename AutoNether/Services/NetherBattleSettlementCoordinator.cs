@@ -101,6 +101,12 @@ internal sealed class NetherBattleSettlementCoordinator
             return false;
         }
 
+        // Terminal observations are process-local edge signals, not battle identities.  Begin
+        // establishes the observation window for this exact Battle snapshot, so a Clear/Close
+        // left by an earlier battle (including one seen while automation was disabled) cannot
+        // settle the new contract.
+        _battle.TryConsumeBattleClear();
+        _battle.TryConsumeBattleClose();
         _action = action;
         _before = before;
         _settlementObserved = false;

@@ -212,7 +212,7 @@ public class NetherContinueSceneCoordinatorTests
     }
 
     [Fact]
-    public void Continue_rebind_waits_through_missing_then_stale_snapshot_until_applied_state_arrives()
+    public void Continue_rebind_waits_for_scene_model_then_uses_applied_datastore_over_stale_presentation()
     {
         var driver = new FakeDriver(
             parent: new[]
@@ -248,15 +248,102 @@ public class NetherContinueSceneCoordinatorTests
         Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
         Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
 
-        NetherContinueSceneStep stale = coordinator.Pump();
+        NetherContinueSceneStep fenced = coordinator.Pump();
 
-        Assert.Equal(NetherContinueSceneStepKind.Reconcile, stale.Kind);
-        Assert.Contains("awaiting-applied-snapshot", stale.Detail);
-        Assert.Equal(NetherContinueSceneStepKind.Complete, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.WaitForPresentation, fenced.Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
         Assert.Equal(1, driver.GetOnlyBeginCalls);
         Assert.Equal(1, driver.GetOnlyPollCalls);
         Assert.Equal(1, driver.AppliedSnapshotReads);
+        Assert.Equal(1, driver.ContinueAppliedSnapshotReads);
         Assert.Equal(3, driver.ReadySnapshotReadsAfterGet);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
+    public void Continue_settlement_uses_authoritative_datastore_when_rebound_floor_model_is_stale()
+    {
+        NetherSnapshot stalePresentation = BeforeSnapshot() with
+        {
+            TicketCount = AppliedSnapshot().TicketCount,
+        };
+        var driver = new FakeDriver(
+            parent: new[] { NetherNativeActionResult.Completed("continue-parent-terminal") },
+            appliedSnapshot: stalePresentation,
+            readySnapshots: new[]
+            {
+                NetherFloorSceneSnapshotResult.Ready(11, stalePresentation),
+                NetherFloorSceneSnapshotResult.Ready(11, AppliedSnapshot()),
+            },
+            continueAppliedSnapshots: new[]
+            {
+                NetherReadOnlySnapshotResult.Success(AppliedSnapshot()),
+            }
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+
+        NetherContinueSceneStep fenced = DriveToTerminal(coordinator, driver);
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForPresentation, fenced.Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
+        Assert.Equal(NetherSessionStatus.Play, terminal.Snapshot!.Status);
+        Assert.Equal(2, terminal.Snapshot.TicketCount);
+        Assert.Equal(1, driver.ContinueAppliedSnapshotReads);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
+    public void Continue_wait_repolls_authoritative_datastore_instead_of_stale_floor_model()
+    {
+        NetherSnapshot stalePresentation = BeforeSnapshot() with
+        {
+            TicketCount = AppliedSnapshot().TicketCount,
+        };
+        var driver = new FakeDriver(
+            parent: new[] { NetherNativeActionResult.Completed("continue-parent-terminal") },
+            appliedSnapshot: stalePresentation,
+            readySnapshots: new[]
+            {
+                NetherFloorSceneSnapshotResult.Ready(11, stalePresentation),
+                NetherFloorSceneSnapshotResult.Ready(11, stalePresentation),
+                NetherFloorSceneSnapshotResult.Ready(11, AppliedSnapshot()),
+            },
+            continueAppliedSnapshots: new[]
+            {
+                NetherReadOnlySnapshotResult.Success(stalePresentation),
+                NetherReadOnlySnapshotResult.Success(AppliedSnapshot()),
+            }
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver, maximumMissingTicks: 3);
+
+        NetherContinueSceneStep waiting = DriveToTerminal(coordinator, driver);
+
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, waiting.Kind);
+        Assert.Contains("awaiting-applied-snapshot", waiting.Detail);
+
+        NetherContinueSceneStep fenced = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForPresentation, fenced.Kind);
+
+        NetherContinueSceneStep terminal = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, terminal.Kind);
+        Assert.Equal(2, driver.ContinueAppliedSnapshotReads);
+        Assert.Equal(3, driver.ReadySnapshotReadsAfterGet);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
         Assert.Equal(0, driver.StartOrMutationCalls);
     }
 
@@ -651,6 +738,7 @@ public class NetherContinueSceneCoordinatorTests
         private readonly Queue<NetherNativeActionResult> _parent;
         private readonly Queue<NetherNativeActionResult> _polls;
         private readonly Queue<NetherReadOnlySnapshotResult> _appliedSnapshots;
+        private readonly Queue<NetherReadOnlySnapshotResult> _continueAppliedSnapshots;
         private readonly Queue<NetherFloorSceneSnapshotResult> _readySnapshots;
         private readonly NetherSnapshot _defaultReadySnapshot;
 
@@ -658,7 +746,8 @@ public class NetherContinueSceneCoordinatorTests
             IEnumerable<NetherNativeActionResult> parent,
             NetherSnapshot appliedSnapshot,
             IEnumerable<NetherReadOnlySnapshotResult>? appliedSnapshots = null,
-            IEnumerable<NetherFloorSceneSnapshotResult>? readySnapshots = null
+            IEnumerable<NetherFloorSceneSnapshotResult>? readySnapshots = null,
+            IEnumerable<NetherReadOnlySnapshotResult>? continueAppliedSnapshots = null
         )
         {
             _parent = new Queue<NetherNativeActionResult>(parent);
@@ -668,6 +757,9 @@ public class NetherContinueSceneCoordinatorTests
             });
             _appliedSnapshots = new Queue<NetherReadOnlySnapshotResult>(
                 appliedSnapshots ?? new[] { NetherReadOnlySnapshotResult.Success(appliedSnapshot) }
+            );
+            _continueAppliedSnapshots = new Queue<NetherReadOnlySnapshotResult>(
+                continueAppliedSnapshots ?? new[] { NetherReadOnlySnapshotResult.Success(appliedSnapshot) }
             );
             _readySnapshots = new Queue<NetherFloorSceneSnapshotResult>(
                 readySnapshots ?? Array.Empty<NetherFloorSceneSnapshotResult>()
@@ -683,6 +775,7 @@ public class NetherContinueSceneCoordinatorTests
         public int GetOnlyBeginCalls { get; private set; }
         public int GetOnlyPollCalls { get; private set; }
         public int AppliedSnapshotReads { get; private set; }
+        public int ContinueAppliedSnapshotReads { get; private set; }
         public int ReadySnapshotReadsAfterGet { get; private set; }
         public int StartOrMutationCalls { get; private set; }
 
@@ -706,6 +799,12 @@ public class NetherContinueSceneCoordinatorTests
         {
             AppliedSnapshotReads++;
             return _appliedSnapshots.Dequeue();
+        }
+
+        public NetherReadOnlySnapshotResult TryCaptureContinueAppliedSnapshot()
+        {
+            ContinueAppliedSnapshotReads++;
+            return _continueAppliedSnapshots.Dequeue();
         }
 
         public NetherFloorSceneSnapshotResult TryCaptureReadyFloorSceneSnapshot(

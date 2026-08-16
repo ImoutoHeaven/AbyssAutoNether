@@ -222,6 +222,9 @@ public class NetherContinueSceneRuntimeCoordinatorTests
         public NetherReadOnlySnapshotResult TryCaptureAppliedSnapshot() =>
             NetherReadOnlySnapshotResult.Success(_after);
 
+        public NetherReadOnlySnapshotResult TryCaptureContinueAppliedSnapshot() =>
+            NetherReadOnlySnapshotResult.Success(_after);
+
         public NetherFloorSceneSnapshotResult TryCaptureReadyFloorSceneSnapshot(
             long minimumGenerationExclusive = 0
         )

@@ -132,6 +132,7 @@ internal sealed class NetherRuntimeBridge
         public NetherNativeActionResult BeginGetOnlyRefresh() => Unavailable("get");
         public NetherNativeActionResult PollGetOnlyRefresh() => Unavailable("get-poll");
         public NetherReadOnlySnapshotResult TryCaptureAppliedSnapshot() => NetherReadOnlySnapshotResult.Failure("test-unconfigured-applied-snapshot");
+        public NetherReadOnlySnapshotResult TryCaptureContinueAppliedSnapshot() => NetherReadOnlySnapshotResult.Failure("test-unconfigured-continue-applied-snapshot");
         public NetherNativeActionResult PollBattleLifecycle() => Unavailable("battle");
         public NetherNativeActionResult PollBattleStart() => Unavailable("battle-start");
         public void CancelBattleStartObservation() { }

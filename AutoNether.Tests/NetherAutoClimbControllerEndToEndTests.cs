@@ -294,6 +294,57 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_holds_continue_ownership_until_stale_sleep_presentation_converges()
+    {
+        var bridge = new ScriptedRuntimeBridge();
+        bridge.CurrentSnapshot = bridge.SleepCheckpoint;
+        bridge.ContinueAppliedSnapshotOverride = bridge.NewSegment;
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+
+            NetherAutoClimbController.Update(); // invoke exactly one Continue from Sleep
+            Assert.Equal(1, bridge.ContinueNativeInvokeCount);
+
+            NetherAutoClimbController.Update(); // native parent pending
+            bridge.ContinueParentCompleted = true;
+            NetherAutoClimbController.Update(); // native parent terminal
+            bridge.FloorOwnerTerminated = true;
+            NetherAutoClimbController.Update(); // old owner teardown
+            bridge.CurrentRuntimeGeneration = 2;
+            NetherAutoClimbController.Update(); // newer scene/controller, presentation still Sleep
+            NetherAutoClimbController.Update(); // one GET-only begin
+            NetherAutoClimbController.Update(); // datastore proves Play on the new segment
+
+            // Fresh game evidence shows Apply can precede the rebound controller's private
+            // _netherModel update. Releasing ownership here would plan a second paid Continue.
+            NetherAutoClimbController.Update();
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(1, bridge.ContinueNativeInvokeCount);
+            Assert.Equal(1, bridge.ContinueReadOnlyBeginCount);
+            Assert.Equal(1, bridge.GetOnlyBeginCount);
+
+            bridge.CurrentSnapshot = bridge.NewSegment;
+            NetherAutoClimbController.Update(); // presentation converges; ownership may release
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Equal(1, bridge.ContinueNativeInvokeCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_reconciles_consumed_recovered_parent_fault_before_resuming_route()
     {
         bool previousDetailedLogging = Config.NetherAutoClimbDetailedLogging.Value;
@@ -4275,6 +4326,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherSnapshot? BattleResultReboundSnapshot { get; set; }
         public NetherRuntimePopupContext? BattleResultReboundPopup { get; set; }
         public NetherSnapshot? BattleSettlementSnapshotOverride { get; set; }
+        public NetherSnapshot? ContinueAppliedSnapshotOverride { get; set; }
         public NetherRuntimePopupContext? BattleResultCodePopup { get; set; }
         public List<NetherPlannedAction> BattleResultCodeActions { get; } = new();
         public Queue<NetherBattleResultCodeNativeStep> BattleResultCodeNativeSteps { get; } = new();
@@ -4802,6 +4854,11 @@ public class NetherAutoClimbControllerEndToEndTests
 
         public NetherReadOnlySnapshotResult TryCaptureAppliedSnapshot() =>
             NetherReadOnlySnapshotResult.Success(CurrentSnapshot);
+
+        public NetherReadOnlySnapshotResult TryCaptureContinueAppliedSnapshot() =>
+            NetherReadOnlySnapshotResult.Success(
+                ContinueAppliedSnapshotOverride ?? CurrentSnapshot
+            );
 
         public NetherNativeActionResult PollBattleLifecycle()
         {

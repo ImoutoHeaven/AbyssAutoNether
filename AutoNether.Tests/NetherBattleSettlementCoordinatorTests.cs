@@ -6,6 +6,32 @@ namespace AutoNether.Tests;
 public class NetherBattleSettlementCoordinatorTests
 {
     [Fact]
+    public void Previous_battle_terminal_is_discarded_before_observing_the_current_battle()
+    {
+        var driver = new FakeDriver(
+            lifecycle: new[]
+            {
+                NetherNativeActionResult.Completed("current-battle-start-parent-terminal"),
+                NetherNativeActionResult.Completed("current-battle-start-parent-terminal"),
+            },
+            clearObserved: true,
+            closeObserved: false,
+            appliedSnapshot: Snapshot(NetherSessionStatus.Play, mapId: 2, floorId: 10)
+        );
+        var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
+
+        Assert.True(coordinator.Begin(Action(), BattleSnapshot()));
+
+        NetherBattleSettlementStep stale = coordinator.Pump();
+
+        Assert.Equal(NetherBattleSettlementStepKind.AwaitingBattle, stale.Kind);
+        Assert.Equal(0, driver.GetOnlyBeginCalls);
+
+        driver.ObserveClear();
+        Assert.Equal(NetherBattleSettlementStepKind.AwaitingSettlement, coordinator.Pump().Kind);
+    }
+
+    [Fact]
     public void Clear_terminal_then_get_only_reconcile_with_exact_status_map_and_floor_settles()
     {
         NetherSnapshot before = BattleSnapshot();
@@ -19,6 +45,7 @@ public class NetherBattleSettlementCoordinatorTests
         var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
 
         Assert.True(coordinator.Begin(Action(), before));
+        driver.ObserveClear();
         Assert.Equal(NetherBattleSettlementStepKind.AwaitingSettlement, coordinator.Pump().Kind);
         Assert.Equal(NetherBattleSettlementStepKind.AwaitingSettlement, coordinator.Pump().Kind);
 
@@ -44,6 +71,7 @@ public class NetherBattleSettlementCoordinatorTests
         var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
 
         Assert.True(coordinator.Begin(Action(), before));
+        driver.ObserveClose();
         coordinator.Pump();
         coordinator.Pump();
 
@@ -67,6 +95,7 @@ public class NetherBattleSettlementCoordinatorTests
         var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
 
         Assert.True(coordinator.Begin(Action(), before));
+        driver.ObserveClear();
         coordinator.Pump();
         coordinator.Pump();
 
@@ -149,6 +178,7 @@ public class NetherBattleSettlementCoordinatorTests
         var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
 
         Assert.True(coordinator.Begin(Action(), before));
+        driver.ObserveClear();
         coordinator.Pump();
         coordinator.Pump();
 
@@ -174,6 +204,7 @@ public class NetherBattleSettlementCoordinatorTests
         var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
 
         Assert.True(coordinator.Begin(Action(projectedMinimum: 25), before));
+        driver.ObserveClear();
         coordinator.Pump();
         coordinator.Pump();
 
@@ -203,6 +234,7 @@ public class NetherBattleSettlementCoordinatorTests
         var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
 
         Assert.True(coordinator.Begin(Action(), before));
+        driver.ObserveClear();
         coordinator.Pump();
         coordinator.Pump();
 
@@ -290,6 +322,18 @@ public class NetherBattleSettlementCoordinatorTests
         };
 
         public NetherNativeActionResult PollBattleLifecycle() => _lifecycle.Dequeue();
+
+        public void ObserveClear()
+        {
+            _clearObserved = true;
+            _closeObserved = false;
+        }
+
+        public void ObserveClose()
+        {
+            _closeObserved = true;
+            _clearObserved = false;
+        }
 
         public bool TryConsumeBattleClear()
         {

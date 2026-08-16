@@ -22,6 +22,7 @@ internal sealed record NetherAuthoritativeTransitionState
     public int FloorIndex { get; init; }
     public int MaxFloorLevel { get; init; }
     public int ContinuanceFloorLevel { get; init; }
+    public int MasterMaxFloorLevel { get; init; }
     public int ErosionPoint { get; init; }
     public int TicketCount { get; init; }
     public int SignalCount { get; init; }
@@ -33,6 +34,30 @@ internal sealed record NetherAuthoritativeTransitionState
     public NetherContinuationTarget? ContinuationTarget { get; init; }
     public IReadOnlyList<NetherCodeState> Codes { get; init; } = Array.Empty<NetherCodeState>();
     public IReadOnlyList<NetherRewardItem> AcquiredItems { get; init; } = Array.Empty<NetherRewardItem>();
+}
+
+internal enum NetherTransitionSnapshotPurpose
+{
+    BattleSettlement,
+    ContinueSettlement,
+}
+
+/// <summary>
+/// Keeps the runtime bridge's snapshot-purpose dispatch in the testable transition seam.  Battle
+/// settlement must retain its strict cached graph ownership checks; Continue settlement has a
+/// different contract because the authoritative response may install the next map before the
+/// rebound FloorSelection presentation model catches up.
+/// </summary>
+internal static class NetherTransitionSnapshotCompositionPolicy
+{
+    public static NetherRuntimeSnapshotResult Compose(
+        NetherTransitionSnapshotCache cache,
+        NetherAuthoritativeTransitionState state,
+        bool requireFreshBattleCharacters,
+        NetherTransitionSnapshotPurpose purpose
+    ) => purpose == NetherTransitionSnapshotPurpose.ContinueSettlement
+        ? cache.TryComposeContinueApplied(state)
+        : cache.TryCompose(state, requireFreshBattleCharacters);
 }
 
 /// <summary>
@@ -203,6 +228,91 @@ internal sealed class NetherTransitionSnapshotCache
             CharacterHpHash = CreateCharacterHash(validatedCharacters!),
             CodeHash = CreateCodeHash(codes),
             MapHash = cached.MapHash,
+        };
+        return NetherRuntimeSnapshotResult.Success(snapshot);
+    }
+
+    /// <summary>
+    /// Builds the narrow datastore-authoritative snapshot used only to prove a completed
+    /// Continue.  A valid Continue can replace the map before the rebound controller's private
+    /// presentation model is rebuilt, so the old map ID, graph and current node must not be used
+    /// as ownership evidence.  The Nether session identity remains stable and is still checked.
+    /// </summary>
+    public NetherRuntimeSnapshotResult TryComposeContinueApplied(
+        NetherAuthoritativeTransitionState state
+    )
+    {
+        if (state == null)
+            throw new ArgumentNullException(nameof(state));
+
+        NetherSnapshot? cached;
+        lock (_gate)
+            cached = _lastFullSnapshot;
+
+        if (cached == null)
+            return NetherRuntimeSnapshotResult.Failure("missing-cached-floor-selection-snapshot");
+        if (state.NetherId <= 0 || state.NetherId != cached.NetherId)
+        {
+            return NetherRuntimeSnapshotResult.Failure(
+                "cached-continue-owner-mismatch:cached=" + cached.NetherId
+                + ":fresh=" + state.NetherId
+            );
+        }
+        if (state.Status == NetherSessionStatus.Unknown
+            || state.MapId <= 0
+            || state.CurrentFloorId <= 0
+            || state.FloorLevel <= 0
+            || state.FloorIndex < 0
+            || state.TicketCount < 0)
+        {
+            return NetherRuntimeSnapshotResult.Failure("invalid-authoritative-continue-state");
+        }
+        if (state.Codes == null || state.AcquiredItems == null)
+            return NetherRuntimeSnapshotResult.Failure("missing-authoritative-transition-collections");
+        if (!TryValidateCharacters(cached.Characters, out NetherCharacterState[]? characters))
+            return NetherRuntimeSnapshotResult.Failure("invalid-transition-characters");
+
+        NetherCodeState[] codes = state.Codes.ToArray();
+        if (codes.Any(code => code == null || code.CodeId <= 0)
+            || codes.GroupBy(code => code.CodeId).Any(group => group.Count() != 1))
+        {
+            return NetherRuntimeSnapshotResult.Failure("invalid-authoritative-transition-codes");
+        }
+
+        var snapshot = new NetherSnapshot
+        {
+            Status = state.Status,
+            NetherId = state.NetherId,
+            MapId = state.MapId,
+            CurrentFloorId = state.CurrentFloorId,
+            // The new presentation graph is deliberately not synthesized from the prior map.
+            // The normal full snapshot path will supply its node identity after _netherModel
+            // catches up; Continue settlement validates only datastore-owned postconditions.
+            CurrentNodeId = 0,
+            FloorLevel = state.FloorLevel,
+            FloorIndex = state.FloorIndex,
+            MaxFloorLevel = state.MaxFloorLevel,
+            ContinuanceFloorLevel = state.ContinuanceFloorLevel,
+            MasterMaxFloorLevel = state.MasterMaxFloorLevel,
+            ErosionPoint = state.ErosionPoint,
+            TicketCount = state.TicketCount,
+            SignalCount = state.SignalCount,
+            TreasureKeyCount = state.TreasureKeyCount,
+            NetherGold = state.NetherGold,
+            CodeReloadCount = state.CodeReloadCount,
+            CodeCapacity = state.CodeCapacity,
+            LockReward = state.LockReward,
+            ContinuationTarget = state.ContinuationTarget,
+            // Characters are not part of the Continue postcondition and are absent from the
+            // datastore response. Retaining the last validated party keeps the snapshot shape
+            // valid without claiming that an old map graph belongs to the new map.
+            Characters = characters!,
+            Codes = codes,
+            Floors = Array.Empty<NetherFloorNode>(),
+            AcquiredItems = state.AcquiredItems.ToArray(),
+            CharacterHpHash = CreateCharacterHash(characters!),
+            CodeHash = CreateCodeHash(codes),
+            MapHash = string.Empty,
         };
         return NetherRuntimeSnapshotResult.Success(snapshot);
     }

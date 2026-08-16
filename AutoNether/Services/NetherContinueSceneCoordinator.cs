@@ -8,8 +8,9 @@ namespace AutoNether.Services;
 /// Narrow production seam for the destructive boundary after a one-ticket Sleep continuation.
 /// The native Continue parent must either finish or be superseded by its exact scene transition.
 /// Its FloorSelection owner must disappear, and a strictly newer NetherTop runtime must register
-/// before one GET-only refresh is allowed.  Registration can precede the new controller's model
-/// injection, so that exact post-GET snapshot gap is also awaited for a bounded period.
+/// before one GET-only refresh is allowed. Registration can precede the new controller's model
+/// injection, so the datastore mapping gap is awaited for a bounded period. Once the mutation is
+/// authoritative, ownership is retained without retry or timeout until presentation converges.
 /// Nothing in this component starts, resumes, or repeats a Nether action.
 /// </summary>
 internal interface INetherContinueSceneDriver : INetherReadOnlyReconcileDriver,
@@ -32,6 +33,13 @@ internal interface INetherContinueSceneDriver : INetherReadOnlyReconcileDriver,
 
     /// <summary>True only for the expected NetherTop/new-segment scene binding.</summary>
     bool IsExpectedNetherTopScene { get; }
+
+    /// <summary>
+    /// Reads the datastore-backed state applied by the completed GET-only refresh.  The rebound
+    /// FloorSelection controller can retain its pre-Continue presentation model while this
+    /// authoritative state has already advanced.
+    /// </summary>
+    NetherReadOnlySnapshotResult TryCaptureContinueAppliedSnapshot();
 }
 
 /// <summary>
@@ -55,6 +63,7 @@ internal enum NetherContinueSceneStepKind
     WaitForTeardown,
     WaitForRebind,
     Reconcile,
+    WaitForPresentation,
     Complete,
     Pause,
 }
@@ -73,6 +82,9 @@ internal readonly record struct NetherContinueSceneStep(
 
     public static NetherContinueSceneStep Reconcile(string detail) =>
         new(NetherContinueSceneStepKind.Reconcile, null, detail);
+
+    public static NetherContinueSceneStep WaitForPresentation(string detail) =>
+        new(NetherContinueSceneStepKind.WaitForPresentation, null, detail);
 
     public static NetherContinueSceneStep Complete(NetherSnapshot snapshot, string detail) =>
         new(NetherContinueSceneStepKind.Complete, snapshot, detail);
@@ -96,6 +108,7 @@ internal sealed class NetherContinueSceneCoordinator
         AwaitingRebind,
         Reconciling,
         AwaitingAppliedSnapshot,
+        AwaitingPresentationConvergence,
         Terminal,
     }
 
@@ -111,6 +124,7 @@ internal sealed class NetherContinueSceneCoordinator
     private Stage _stage;
     private NetherContinueSceneContract _contract;
     private NetherSnapshot? _before;
+    private NetherSnapshot? _appliedSettlement;
     private long _ownerGeneration;
     private bool _parentTerminalObserved;
     private NetherContinueSceneStep? _terminal;
@@ -151,6 +165,7 @@ internal sealed class NetherContinueSceneCoordinator
 
         _contract = contract;
         _before = before;
+        _appliedSettlement = null;
         _ownerGeneration = ownerGeneration;
         _parentTerminalObserved = false;
         _terminal = null;
@@ -176,6 +191,7 @@ internal sealed class NetherContinueSceneCoordinator
             Stage.AwaitingRebind => PumpRebind(),
             Stage.Reconciling => PumpReconcile(),
             Stage.AwaitingAppliedSnapshot => PumpAppliedSnapshot(),
+            Stage.AwaitingPresentationConvergence => PumpPresentationConvergence(),
             _ => TerminalPause("continue-scene-invalid-stage:" + _stage),
         };
     }
@@ -184,6 +200,7 @@ internal sealed class NetherContinueSceneCoordinator
     {
         _stage = Stage.Idle;
         _before = null;
+        _appliedSettlement = null;
         _ownerGeneration = 0;
         _parentTerminalObserved = false;
         _terminal = null;
@@ -334,9 +351,34 @@ internal sealed class NetherContinueSceneCoordinator
     {
         NetherFloorSceneSnapshotResult ready =
             _driver.TryCaptureReadyFloorSceneSnapshot(_ownerGeneration);
-        return ready.IsReady
-            ? ValidateSettlement(ready.Snapshot!)
-            : AwaitAppliedSnapshot(ready.Detail);
+        if (!ready.IsReady)
+            return AwaitAppliedSnapshot(ready.Detail);
+
+        // Ready proves that the exact newer scene/controller still owns this handoff; its
+        // presentation snapshot is not settlement authority.  Continue writes the GET response
+        // into NetherDataStore before a newly registered controller is guaranteed to rebuild its
+        // private NetherModel, so validate and re-poll the datastore-backed transition snapshot.
+        NetherReadOnlySnapshotResult applied = _driver.TryCaptureContinueAppliedSnapshot();
+        return applied.IsSuccess
+            ? ValidateSettlement(applied.Snapshot!, ready.Snapshot!)
+            : AwaitAppliedSnapshot("continue-transition-snapshot:" + applied.Detail);
+    }
+
+    private NetherContinueSceneStep PumpPresentationConvergence()
+    {
+        if (_appliedSettlement == null)
+            return TerminalPause("continue-presentation-fence-missing-settlement");
+
+        NetherFloorSceneSnapshotResult ready =
+            _driver.TryCaptureReadyFloorSceneSnapshot(_ownerGeneration);
+        if (!ready.IsReady)
+        {
+            return NetherContinueSceneStep.WaitForPresentation(
+                "continue-settlement-applied-awaiting-presentation:" + ready.Detail
+            );
+        }
+
+        return CompleteWhenPresentationConverges(ready.Snapshot!);
     }
 
     private NetherContinueSceneStep AwaitAppliedSnapshot(
@@ -358,13 +400,18 @@ internal sealed class NetherContinueSceneCoordinator
             );
     }
 
-    private NetherContinueSceneStep ValidateSettlement(NetherSnapshot after)
+    private NetherContinueSceneStep ValidateSettlement(
+        NetherSnapshot after,
+        NetherSnapshot presentation
+    )
     {
         NetherSnapshot before = _before!;
         if (IsExactSettlement(before, after))
         {
             _snapshotWait.ObserveRegistration();
-            return TerminalComplete(after, "continue-settlement-exact");
+            _appliedSettlement = after;
+            _stage = Stage.AwaitingPresentationConvergence;
+            return CompleteWhenPresentationConverges(presentation);
         }
         if (IsPlausiblePartialPropagation(before, after))
         {
@@ -401,6 +448,47 @@ internal sealed class NetherContinueSceneCoordinator
 
         return TerminalPause("continue-settlement-incomplete");
     }
+
+    private NetherContinueSceneStep CompleteWhenPresentationConverges(
+        NetherSnapshot presentation
+    )
+    {
+        NetherSnapshot applied = _appliedSettlement!;
+        if (HasConvergedPresentation(applied, presentation))
+        {
+            return TerminalComplete(
+                presentation,
+                "continue-settlement-exact:presentation-converged"
+            );
+        }
+
+        // The paid mutation is already proven by the datastore. Keep the original action owner
+        // without another GET, timeout, or native invocation until the rebound controller stops
+        // presenting the pre-Continue Sleep model. Releasing it early would plan Continue twice.
+        return NetherContinueSceneStep.WaitForPresentation(
+            "continue-settlement-applied-awaiting-presentation:status="
+                + presentation.Status
+                + ":map=" + presentation.MapId
+                + ":floor=" + presentation.CurrentFloorId
+                + ":level=" + presentation.FloorLevel
+                + ":api-index=" + presentation.FloorIndex
+                + ":ticket=" + presentation.TicketCount
+        );
+    }
+
+    private static bool HasConvergedPresentation(
+        NetherSnapshot applied,
+        NetherSnapshot presentation
+    ) => presentation.NetherId == applied.NetherId
+        && presentation.Status == applied.Status
+        && presentation.MapId == applied.MapId
+        && presentation.CurrentFloorId == applied.CurrentFloorId
+        && presentation.FloorLevel == applied.FloorLevel
+        && presentation.FloorIndex == applied.FloorIndex
+        && presentation.ErosionPoint == applied.ErosionPoint
+        && presentation.TreasureKeyCount == applied.TreasureKeyCount
+        && presentation.NetherGold == applied.NetherGold
+        && presentation.TicketCount == applied.TicketCount;
 
     private bool IsExactSettlement(NetherSnapshot before, NetherSnapshot after)
     {
@@ -447,6 +535,7 @@ internal sealed class NetherContinueSceneCoordinator
     {
         _stage = Stage.Terminal;
         _before = null;
+        _appliedSettlement = null;
         _snapshotWait.Clear();
         _reconcile.Reset();
         _terminal = NetherContinueSceneStep.Complete(snapshot, detail);
@@ -457,6 +546,7 @@ internal sealed class NetherContinueSceneCoordinator
     {
         _stage = Stage.Terminal;
         _before = null;
+        _appliedSettlement = null;
         _snapshotWait.Clear();
         _reconcile.Reset();
         _terminal = NetherContinueSceneStep.Pause(detail);

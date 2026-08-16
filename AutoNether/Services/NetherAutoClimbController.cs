@@ -1760,6 +1760,7 @@ internal static class NetherAutoClimbController
             case NetherContinueSceneStepKind.WaitForTeardown:
             case NetherContinueSceneStepKind.WaitForRebind:
             case NetherContinueSceneStepKind.Reconcile:
+            case NetherContinueSceneStepKind.WaitForPresentation:
                 return;
             case NetherContinueSceneStepKind.Complete:
                 if (step.Snapshot != null)

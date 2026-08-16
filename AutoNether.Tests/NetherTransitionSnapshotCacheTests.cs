@@ -15,7 +15,8 @@ public sealed class NetherTransitionSnapshotCacheTests
         cache.ObserveFullSnapshot(before);
         cache.BeginBattle();
 
-        NetherRuntimeSnapshotResult result = cache.TryCompose(
+        NetherRuntimeSnapshotResult result = NetherTransitionSnapshotCompositionPolicy.Compose(
+            cache,
             new NetherAuthoritativeTransitionState
             {
                 Status = NetherSessionStatus.Battle,
@@ -37,7 +38,8 @@ public sealed class NetherTransitionSnapshotCacheTests
                 Codes = Array.Empty<NetherCodeState>(),
                 AcquiredItems = Array.Empty<NetherRewardItem>(),
             },
-            requireFreshBattleCharacters: false
+            requireFreshBattleCharacters: false,
+            purpose: NetherTransitionSnapshotPurpose.BattleSettlement
         );
 
         Assert.True(result.IsSuccess, result.Detail);
@@ -343,6 +345,64 @@ public sealed class NetherTransitionSnapshotCacheTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("cached-transition-owner-mismatch", result.Detail);
+    }
+
+    [Fact]
+    public void Continue_composition_accepts_fresh_cross_map_datastore_without_reusing_stale_graph()
+    {
+        var cache = new NetherTransitionSnapshotCache();
+        NetherSnapshot stalePresentation = Snapshot(
+            NetherSessionStatus.Sleep,
+            floorId: 23,
+            floorLevel: 23,
+            apiFloorIndex: 0
+        ) with
+        {
+            MapId = 2,
+            CurrentNodeId = 987654321,
+            Floors = new[]
+            {
+                new NetherFloorNode(23, 23, 0, NetherFloorNodeType.Boss)
+                {
+                    NodeId = 987654321,
+                    ApiFloorIndex = 0,
+                    IsUnlocked = true,
+                },
+            },
+            MapHash = "stale-map-2",
+        };
+        cache.ObserveFullSnapshot(stalePresentation);
+
+        NetherRuntimeSnapshotResult result = NetherTransitionSnapshotCompositionPolicy.Compose(
+            cache,
+            new NetherAuthoritativeTransitionState
+            {
+                Status = NetherSessionStatus.Play,
+                NetherId = 1,
+                MapId = 3,
+                CurrentFloorId = 33,
+                FloorLevel = 23,
+                FloorIndex = 0,
+                MaxFloorLevel = 130,
+                ContinuanceFloorLevel = 20,
+                MasterMaxFloorLevel = 130,
+                TicketCount = 0,
+                CodeCapacity = 28,
+                Codes = Array.Empty<NetherCodeState>(),
+                AcquiredItems = Array.Empty<NetherRewardItem>(),
+            },
+            requireFreshBattleCharacters: false,
+            purpose: NetherTransitionSnapshotPurpose.ContinueSettlement
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.Equal(3, result.Snapshot!.MapId);
+        Assert.Equal(33, result.Snapshot.CurrentFloorId);
+        Assert.Equal(23, result.Snapshot.FloorLevel);
+        Assert.Equal(130, result.Snapshot.MasterMaxFloorLevel);
+        Assert.Equal(0, result.Snapshot.CurrentNodeId);
+        Assert.Empty(result.Snapshot.Floors);
+        Assert.Equal(string.Empty, result.Snapshot.MapHash);
     }
 
     private static NetherAuthoritativeTransitionState TransitionState(

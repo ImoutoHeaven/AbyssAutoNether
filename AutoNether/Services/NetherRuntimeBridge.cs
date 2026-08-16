@@ -1875,6 +1875,16 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             : NetherReadOnlySnapshotResult.Failure(captured.Detail);
     }
 
+    public NetherReadOnlySnapshotResult TryCaptureContinueAppliedSnapshot()
+    {
+        NetherRuntimeSnapshotResult captured = TryCaptureTransitionSnapshot(
+            NetherTransitionSnapshotPurpose.ContinueSettlement
+        );
+        return captured.IsSuccess
+            ? NetherReadOnlySnapshotResult.Success(captured.Snapshot!)
+            : NetherReadOnlySnapshotResult.Failure(captured.Detail);
+    }
+
     public NetherRuntimeSnapshotResult TryCaptureBattleResultCodeSnapshot()
     {
         NetherReadOnlySnapshotResult captured = TryCaptureAppliedSnapshot();
@@ -2298,6 +2308,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     }
 
     private NetherRuntimeSnapshotResult TryCaptureTransitionSnapshot()
+        => TryCaptureTransitionSnapshot(NetherTransitionSnapshotPurpose.BattleSettlement);
+
+    private NetherRuntimeSnapshotResult TryCaptureTransitionSnapshot(
+        NetherTransitionSnapshotPurpose purpose
+    )
     {
         try
         {
@@ -2350,6 +2365,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 FloorIndex = data.FloorIndex,
                 MaxFloorLevel = data.MaxFloorLevel,
                 ContinuanceFloorLevel = data.ContinuanceFloorLevel,
+                MasterMaxFloorLevel = rows!.Map.MaxFloorFloorNumber,
                 ErosionPoint = data.ErosionPoint,
                 TicketCount = dataStore.GetTicketCount(),
                 SignalCount = dataStore.GetSignalCount(),
@@ -2364,20 +2380,25 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 Codes = codes!,
                 AcquiredItems = items!,
             };
-            NetherRuntimeSnapshotResult result = _transitionSnapshotCache.TryCompose(
+            NetherRuntimeSnapshotResult result = NetherTransitionSnapshotCompositionPolicy.Compose(
+                _transitionSnapshotCache,
                 state,
-                requireFreshCharacters
+                requireFreshCharacters,
+                purpose
             );
             NetherAutoClimbController.LogDiagnostic(
                 "transition-snapshot",
                 new("outcome", result.IsSuccess ? "mapped" : "failed"),
+                new("purpose", purpose.ToString()),
                 new("status", status.ToString()),
                 new("netherId", data.MNetherId.ToString()),
                 new("mapId", data.MNetherMapId.ToString()),
                 new("floorId", data.MNetherMapFloorId.ToString()),
                 new("floorLevel", data.FloorLevel.ToString()),
                 new("apiFloorIndex", data.FloorIndex.ToString()),
-                new("floorResolution", data.MNetherMapFloorId == 0
+                new("floorResolution", purpose == NetherTransitionSnapshotPurpose.ContinueSettlement
+                    ? "authoritative-continue-coordinate"
+                    : data.MNetherMapFloorId == 0
                     && result.IsSuccess
                         ? status == NetherSessionStatus.Play && requireFreshCharacters
                             ? "postbattle-unique-coordinate-fallback"

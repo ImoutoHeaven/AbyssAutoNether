@@ -468,7 +468,7 @@ internal sealed class NetherAutoClimbStateMachine
     /// Continue has a parent task whose terminal state intentionally tears the old
     /// FloorSelection down before a new NetherTop runtime is registered.  Preserve the pending
     /// action through that expected absence; it remains a drain phase until exact GET-only
-    /// settlement succeeds or pauses.
+    /// settlement is proven and the rebound presentation converges, or an earlier stage pauses.
     /// </summary>
     public bool BeginContinueSceneHandoff()
     {
