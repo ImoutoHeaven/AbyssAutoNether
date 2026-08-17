@@ -38,9 +38,9 @@ internal interface INetherTreasureConfirmationPort
         NetherTreasureConfirmOwner owner
     );
 
-    NetherNativeActionResult InvokeSkip(NetherTreasureConfirmOwner owner);
-
-    NetherNativeActionResult PollSkip(NetherTreasureConfirmOwner owner);
+    NetherTreasureOpenAnimationObservation ObserveNativeButtonSubscription(
+        NetherTreasureConfirmOwner owner
+    );
 
     NetherNativeActionResult InvokeConfirm(NetherTreasureConfirmOwner owner);
 
@@ -58,6 +58,7 @@ internal sealed class NetherTreasureConfirmationCoordinator
     private readonly NetherTreasureConfirmLease _lease = new();
     private readonly int _maximumOpenAnimationPolls;
     private int _openAnimationPolls;
+    private int _nativeButtonSubscriptionPolls;
 
     public NetherTreasureConfirmationCoordinator(
         INetherTreasureConfirmationPort port,
@@ -75,6 +76,7 @@ internal sealed class NetherTreasureConfirmationCoordinator
     public bool Begin(NetherTreasureConfirmOwner owner)
     {
         _openAnimationPolls = 0;
+        _nativeButtonSubscriptionPolls = 0;
         return _lease.Begin(owner);
     }
 
@@ -85,13 +87,17 @@ internal sealed class NetherTreasureConfirmationCoordinator
     {
         bool invalidated = _lease.InvalidatePopup(popup);
         if (invalidated)
+        {
             _openAnimationPolls = 0;
+            _nativeButtonSubscriptionPolls = 0;
+        }
         return invalidated;
     }
 
     public void Reset()
     {
         _openAnimationPolls = 0;
+        _nativeButtonSubscriptionPolls = 0;
         _lease.Reset();
     }
 
@@ -133,31 +139,61 @@ internal sealed class NetherTreasureConfirmationCoordinator
                 }
 
                 _openAnimationPolls = 0;
-                if (!_lease.TryClaimSkip(owner, openAnimationObserved: true))
+                _nativeButtonSubscriptionPolls = 0;
+                if (!_lease.ObserveOpenAnimationReady(owner, openAnimationObserved: true))
                 {
                     return NetherNativeActionResult.BindingUnavailable(
-                        "treasure-confirm-skip-claim-rejected"
+                        "treasure-confirm-open-observation-rejected"
                     );
                 }
-                return _port.InvokeSkip(owner);
+                // Fresh Cpp2IL shows that the controller's own SkipAndConfirmButton tap path,
+                // not SkipOpenTreasureAnimationAsync, owns native Skip animation behavior.
+                _port.LogStage(owner, "open-observed", "Started");
+                return NetherNativeActionResult.Started(
+                    "native-treasure-open-observed-awaiting-button-subscription"
+                );
             }
 
-            case NetherTreasureConfirmStage.AwaitingSkipTask:
+            case NetherTreasureConfirmStage.AwaitingNativeButtonSubscription:
             {
-                NetherNativeActionResult result = _port.PollSkip(owner);
-                if (result.Kind == NetherNativeActionResultKind.Started)
-                    return result;
-                if (result.Kind != NetherNativeActionResultKind.Completed)
-                    return result;
-                if (!_lease.ObserveSkipTaskCompleted(owner))
+                NetherTreasureOpenAnimationObservation observation =
+                    _port.ObserveNativeButtonSubscription(owner);
+                if (observation.Kind
+                    == NetherTreasureOpenAnimationObservationKind.BindingUnavailable)
+                {
+                    return NetherNativeActionResult.BindingUnavailable(observation.Detail);
+                }
+                if (observation.Kind == NetherTreasureOpenAnimationObservationKind.Waiting)
+                {
+                    _nativeButtonSubscriptionPolls++;
+                    return _nativeButtonSubscriptionPolls <= _maximumOpenAnimationPolls
+                        ? NetherNativeActionResult.Started(
+                            string.IsNullOrWhiteSpace(observation.Detail)
+                                ? "awaiting-native-treasure-button-subscription"
+                                : observation.Detail
+                        )
+                        : NetherNativeActionResult.BindingUnavailable(
+                            "native-treasure-button-subscription-timeout"
+                        );
+                }
+                if (observation.Kind != NetherTreasureOpenAnimationObservationKind.Ready)
                 {
                     return NetherNativeActionResult.BindingUnavailable(
-                        "treasure-confirm-skip-completion-rejected"
+                        "invalid-treasure-button-subscription-observation:"
+                            + observation.Kind
                     );
                 }
-                _port.LogStage(owner, "skip-completed", "Started");
+
+                _nativeButtonSubscriptionPolls = 0;
+                if (!_lease.ObserveNativeButtonSubscription(owner))
+                {
+                    return NetherNativeActionResult.BindingUnavailable(
+                        "treasure-confirm-button-subscription-observation-rejected"
+                    );
+                }
+                _port.LogStage(owner, "native-button-subscription-observed", "Started");
                 return NetherNativeActionResult.Started(
-                    "native-treasure-skip-completed-awaiting-controller-resume"
+                    "native-treasure-button-subscription-observed-awaiting-controller-resume"
                 );
             }
 

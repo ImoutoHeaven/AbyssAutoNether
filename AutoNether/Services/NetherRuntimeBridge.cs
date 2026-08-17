@@ -248,7 +248,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private PopupRegistration? _floorEventHintPopup;
     private CheckpointControllerRegistration? _returnScrollController;
     private object? _nativeActionTask;
-    private object? _treasureSkipTask;
     private object? _codeKeepCancelTask;
     private object? _codeSelectionTask;
     private object? _codeTransformTask;
@@ -2656,74 +2655,44 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             );
     }
 
-    NetherNativeActionResult INetherTreasureConfirmationPort.InvokeSkip(
-        NetherTreasureConfirmOwner owner
-    )
+    NetherTreasureOpenAnimationObservation
+        INetherTreasureConfirmationPort.ObserveNativeButtonSubscription(
+            NetherTreasureConfirmOwner owner
+        )
     {
-        object popup = owner.Popup!;
-        if (!TryResolveExactMethod(
-                popup.GetType(),
-                NetherTreasureAnimationNativeBinding.SkipAnimationDescriptor,
-                InstanceFlags,
-                out string error,
-                out MethodInfo? method
+        int baseline = owner.NativeButtonRuntimeListenerBaseline;
+        if (baseline < 0 || baseline == int.MaxValue)
+        {
+            return NetherTreasureOpenAnimationObservation.BindingUnavailable(
+                "treasure-native-button-listener-baseline-unavailable"
+            );
+        }
+        if (!TryReadTreasureNativeButtonRuntimeListenerCount(
+                owner.Popup!,
+                out int observed,
+                out string error
             ))
         {
-            return NetherNativeActionResult.BindingUnavailable(error);
+            return NetherTreasureOpenAnimationObservation.BindingUnavailable(error);
         }
 
-        try
+        int expected = baseline + 1;
+        if (observed < expected)
         {
-            object? cancellationToken = CreateDefaultValue(
-                method!.GetParameters()[0].ParameterType
-            );
-            _treasureSkipTask = method.Invoke(popup, new[] { cancellationToken });
-            if (_treasureSkipTask == null)
-            {
-                return NetherNativeActionResult.UnknownOutcome(
-                    "native-treasure-skip-missing-task-after-invoke"
-                );
-            }
-            LogTreasureConfirmation(
-                owner,
-                owner.OwnerAction == NetherActionKind.None,
-                "skip-invoked",
-                "Started"
-            );
-            return NetherNativeActionResult.Started(
-                "native-treasure-skip-animation-task-started"
+            return NetherTreasureOpenAnimationObservation.Waiting(
+                "awaiting-native-treasure-button-subscription:baseline_"
+                    + baseline + ":observed_" + observed
             );
         }
-        catch (TargetInvocationException ex)
+        if (observed != expected)
         {
-            return NetherNativeActionResult.UnknownOutcome(
-                FormatInvocationException("treasure-skip-animation", ex)
-            );
-        }
-        catch (Exception ex)
-        {
-            return NetherNativeActionResult.UnknownOutcome(
-                "native-treasure-skip-animation-exception:"
-                    + ex.GetType().Name + ":" + ex.Message
-            );
-        }
-    }
-
-    NetherNativeActionResult INetherTreasureConfirmationPort.PollSkip(
-        NetherTreasureConfirmOwner owner
-    )
-    {
-        if (_treasureSkipTask == null)
-        {
-            return NetherNativeActionResult.BindingUnavailable(
-                "treasure-confirm-missing-skip-task"
+            return NetherTreasureOpenAnimationObservation.BindingUnavailable(
+                "treasure-native-button-listener-count-unexpected:baseline_"
+                    + baseline + ":observed_" + observed
             );
         }
 
-        NetherNativeActionResult result = PollResultTask(_treasureSkipTask);
-        if (result.Kind != NetherNativeActionResultKind.Started)
-            _treasureSkipTask = null;
-        return result;
+        return NetherTreasureOpenAnimationObservation.Ready();
     }
 
     NetherNativeActionResult INetherTreasureConfirmationPort.InvokeConfirm(
@@ -2731,21 +2700,20 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     )
     {
         object popup = owner.Popup!;
-        if (!TryReadMember(popup, "SkipAndConfirmButton", out object? button)
+        if (!TryReadMember(
+                popup,
+                NetherTreasureAnimationNativeBinding.SkipAndConfirmButtonMemberName,
+                out object? button
+            )
             || button == null)
         {
             return NetherNativeActionResult.BindingUnavailable(
                 "treasure-confirm-missing-skip-and-confirm-button"
             );
         }
-        NetherNativeMethodDescriptor descriptor = new(
-            "OnSubmit",
-            new[] { "UnityEngine.EventSystems.BaseEventData" },
-            "System.Void"
-        );
         if (!TryResolveExactMethod(
                 button.GetType(),
-                descriptor,
+                NetherTreasureAnimationNativeBinding.NativeButtonSubmitDescriptor,
                 InstanceFlags,
                 out string error,
                 out MethodInfo? method
@@ -2806,6 +2774,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             || registration.OwnerAction != owner.OwnerAction
             || registration.OwnerGeneration != owner.OwnerGeneration
             || registration.Sequence != owner.Sequence
+            || registration.NativeButtonRuntimeListenerBaseline
+                != owner.NativeButtonRuntimeListenerBaseline
             || owner.RuntimeGeneration != _runtimeGeneration)
         {
             return false;
@@ -2916,6 +2886,87 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         catch (Exception ex)
         {
             error = "native-treasure-open-animation-state-exception:"
+                + ex.GetType().Name + ":" + ex.Message;
+            return false;
+        }
+    }
+
+    private static bool TryReadTreasureNativeButtonRuntimeListenerCount(
+        object popup,
+        out int count,
+        out string error
+    )
+    {
+        count = 0;
+        error = string.Empty;
+        try
+        {
+            if (!TryReadMember(
+                    popup,
+                    NetherTreasureAnimationNativeBinding.SkipAndConfirmButtonMemberName,
+                    out object? button
+                )
+                || button == null)
+            {
+                error = "treasure-native-button-unavailable";
+                return false;
+            }
+            if (!string.Equals(
+                    TypeName(button.GetType()),
+                    NetherTreasureAnimationNativeBinding.NativeButtonTypeName,
+                    StringComparison.Ordinal
+                ))
+            {
+                error = "treasure-native-button-type-mismatch:" + TypeName(button.GetType());
+                return false;
+            }
+            if (!TryReadMember(
+                    button,
+                    NetherTreasureAnimationNativeBinding.NativeButtonOnClickMemberName,
+                    out object? onClick
+                )
+                || onClick == null)
+            {
+                error = "treasure-native-button-on-click-unavailable";
+                return false;
+            }
+            if (!TryReadMember(
+                    onClick,
+                    NetherTreasureAnimationNativeBinding.UnityEventCallsMemberName,
+                    out object? calls
+                )
+                || calls == null)
+            {
+                error = "treasure-native-button-calls-unavailable";
+                return false;
+            }
+            if (!TryReadMember(
+                    calls,
+                    NetherTreasureAnimationNativeBinding.UnityEventRuntimeCallsMemberName,
+                    out object? runtimeCalls
+                )
+                || runtimeCalls == null
+                || !TryReadInt32(
+                    runtimeCalls,
+                    NetherTreasureAnimationNativeBinding.CollectionCountMemberName,
+                    out count
+                )
+                || count < 0)
+            {
+                error = "treasure-native-button-runtime-listeners-unavailable";
+                return false;
+            }
+
+            return true;
+        }
+        catch (TargetInvocationException ex)
+        {
+            error = FormatInvocationException("treasure-native-button-listeners", ex);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            error = "native-treasure-button-listeners-exception:"
                 + ex.GetType().Name + ":" + ex.Message;
             return false;
         }
@@ -3876,6 +3927,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         bool codeListInitializationBound = false;
         bool codeReplacementConfirmBound = false;
         bool checkpointGeneratedParentAttached = false;
+        int nativeButtonRuntimeListenerBaseline = -1;
         lock (_gate)
         {
             ownerAction = NetherActionKind.None;
@@ -4038,6 +4090,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ownerAction = checkpointAction.Kind;
                 ownerGeneration = _checkpointOwnerGeneration;
             }
+            if (typeName == TreasurePopupControllerTypeName)
+            {
+                _ = TryReadTreasureNativeButtonRuntimeListenerCount(
+                    popup,
+                    out nativeButtonRuntimeListenerBaseline,
+                    out _
+                );
+            }
             PopupRegistration registration = new(
                 controller,
                 popup,
@@ -4046,7 +4106,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ownerAction,
                 ownerGeneration,
                 runtimeGeneration,
-                IsLive: true
+                IsLive: true,
+                NativeButtonRuntimeListenerBaseline: nativeButtonRuntimeListenerBaseline
             );
             switch (typeName)
             {
@@ -4235,6 +4296,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("codeListInitializationBound", codeListInitializationBound.ToString()),
             new("codeReplacementConfirmBound", codeReplacementConfirmBound.ToString()),
             new("checkpointGeneratedParentAttached", checkpointGeneratedParentAttached.ToString()),
+            new(
+                "treasureButtonRuntimeListenerBaseline",
+                nativeButtonRuntimeListenerBaseline.ToString()
+            ),
             new("hasClose", (close != null).ToString())
         );
     }
@@ -4248,8 +4313,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _recoveredFloorEventTaskLease.InvalidatePopup(popup);
             _contentAcquiredConfirmLease.InvalidatePopup(popup);
             _floorEventHintConfirmLease.InvalidatePopup(popup);
-            if (_treasureConfirmation.InvalidatePopup(popup))
-                _treasureSkipTask = null;
+            _treasureConfirmation.InvalidatePopup(popup);
             _codeReceivedConfirmLease.InvalidatePopup(popup);
             if (_codeListInitializationEvidence.InvalidatePopup(popup))
                 _codeListInitializationTaskWait.Clear();
@@ -5415,11 +5479,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         );
     }
 
-    private void ClearTreasureConfirmationFlow()
-    {
-        _treasureSkipTask = null;
-        _treasureConfirmation.Reset();
-    }
+    private void ClearTreasureConfirmationFlow() => _treasureConfirmation.Reset();
 
     private void ClearCodeSelectionFlow()
     {
@@ -5559,7 +5619,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     registration.OwnerAction,
                     registration.OwnerGeneration,
                     registration.RuntimeGeneration,
-                    registration.Sequence
+                    registration.Sequence,
+                    registration.NativeButtonRuntimeListenerBaseline
                 );
                 if (!_treasureConfirmation.Begin(treasureOwner))
                 {
@@ -5569,7 +5630,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         "treasure-confirm-owner-already-active-or-invalid"
                     );
                 }
-                _treasureSkipTask = null;
                 treasureSequence = true;
             }
         }
@@ -9099,7 +9159,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherActionKind OwnerAction,
         long OwnerGeneration,
         long RuntimeGeneration,
-        bool IsLive
+        bool IsLive,
+        int NativeButtonRuntimeListenerBaseline
     );
 
     private readonly record struct CheckpointControllerRegistration(

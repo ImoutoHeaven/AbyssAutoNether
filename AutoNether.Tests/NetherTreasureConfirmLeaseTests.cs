@@ -8,13 +8,13 @@ namespace AutoNether.Tests;
 public sealed class NetherTreasureConfirmLeaseTests
 {
     [Fact]
-    public void Floor_26_treasure_does_not_allow_skip_before_native_open_animation_is_ready()
+    public void Floor_46_treasure_does_not_allow_native_button_tap_before_open_is_ready()
     {
         // Fresh current-game evidence (GameAssembly SHA-256 573fa800...):
-        // - LogOutput.log lines 2399-2402: OnConfirm dispatch is followed by an immediate
-        //   SkipOpenTreasureAnimationAsync NullReferenceException and a stalled parent.
-        // - Fresh Cpp2IL recovery: HandleEventConfirmedAsync awaits RequestNetherUpdateEventAsync
-        //   before PlayOpenTreasureAnimationSequenceAsync starts the popup's Open animation.
+        // - LogOutput.log lines 1764-1770: the deployed direct Skip call faulted and stalled the
+        //   floor parent after a waited Open observation.
+        // - Fresh Cpp2IL recovery: the controller owns native skip through SkipAndConfirmButton
+        //   and waits for that button after PlayOpenTreasureAnimationSequenceAsync.
         var popup = new object();
         var lease = new NetherTreasureConfirmLease();
         var owner = new NetherTreasureConfirmOwner(
@@ -27,14 +27,14 @@ public sealed class NetherTreasureConfirmLeaseTests
 
         Assert.True(lease.Begin(owner));
 
-        Assert.False(lease.TryClaimSkip(owner, openAnimationObserved: false));
+        Assert.False(lease.ObserveOpenAnimationReady(owner, openAnimationObserved: false));
         Assert.Equal(NetherTreasureConfirmStage.AwaitingOpenAnimation, lease.Stage);
-        Assert.True(lease.TryClaimSkip(owner, openAnimationObserved: true));
-        Assert.Equal(NetherTreasureConfirmStage.AwaitingSkipTask, lease.Stage);
+        Assert.True(lease.ObserveOpenAnimationReady(owner, openAnimationObserved: true));
+        Assert.Equal(NetherTreasureConfirmStage.AwaitingNativeButtonSubscription, lease.Stage);
     }
 
     [Fact]
-    public void Exact_treasure_owner_requires_skip_completion_and_a_resume_pump_before_confirm_tap()
+    public void Exact_treasure_owner_requires_native_button_subscription_and_a_resume_pump_before_confirm_tap()
     {
         var popup = new object();
         var lease = new NetherTreasureConfirmLease();
@@ -48,12 +48,12 @@ public sealed class NetherTreasureConfirmLeaseTests
 
         Assert.True(lease.Begin(owner));
         Assert.Equal(NetherTreasureConfirmStage.AwaitingOpenAnimation, lease.Stage);
-        Assert.False(lease.TryClaimSkip(owner, openAnimationObserved: false));
-        Assert.True(lease.TryClaimSkip(owner, openAnimationObserved: true));
-        Assert.Equal(NetherTreasureConfirmStage.AwaitingSkipTask, lease.Stage);
+        Assert.False(lease.ObserveOpenAnimationReady(owner, openAnimationObserved: false));
+        Assert.True(lease.ObserveOpenAnimationReady(owner, openAnimationObserved: true));
+        Assert.Equal(NetherTreasureConfirmStage.AwaitingNativeButtonSubscription, lease.Stage);
         Assert.False(lease.TryClaimConfirm(owner));
 
-        Assert.True(lease.ObserveSkipTaskCompleted(owner));
+        Assert.True(lease.ObserveNativeButtonSubscription(owner));
         Assert.Equal(NetherTreasureConfirmStage.AwaitingResumePump, lease.Stage);
         Assert.False(lease.TryClaimConfirm(owner));
 
@@ -78,26 +78,26 @@ public sealed class NetherTreasureConfirmLeaseTests
         );
         Assert.True(lease.Begin(owner));
 
-        Assert.False(lease.TryClaimSkip(
+        Assert.False(lease.ObserveOpenAnimationReady(
             owner with { Popup = new object() },
             openAnimationObserved: true
         ));
-        Assert.False(lease.TryClaimSkip(
+        Assert.False(lease.ObserveOpenAnimationReady(
             owner with { RuntimeGeneration = 10 },
             openAnimationObserved: true
         ));
-        Assert.False(lease.TryClaimSkip(
+        Assert.False(lease.ObserveOpenAnimationReady(
             owner with { Sequence = 42 },
             openAnimationObserved: true
         ));
-        Assert.False(lease.TryClaimSkip(owner with
+        Assert.False(lease.ObserveOpenAnimationReady(owner with
         {
             OwnerAction = NetherActionKind.SelectFloor,
             OwnerGeneration = 1,
         }, openAnimationObserved: true));
 
         Assert.Equal(NetherTreasureConfirmStage.AwaitingOpenAnimation, lease.Stage);
-        Assert.True(lease.TryClaimSkip(owner, openAnimationObserved: true));
+        Assert.True(lease.ObserveOpenAnimationReady(owner, openAnimationObserved: true));
     }
 
     [Fact]

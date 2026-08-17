@@ -8,7 +8,7 @@ internal enum NetherTreasureConfirmStage
 {
     Idle,
     AwaitingOpenAnimation,
-    AwaitingSkipTask,
+    AwaitingNativeButtonSubscription,
     AwaitingResumePump,
     AwaitingConfirmTap,
     Completed,
@@ -19,7 +19,8 @@ internal readonly record struct NetherTreasureConfirmOwner(
     NetherActionKind OwnerAction,
     long OwnerGeneration,
     long RuntimeGeneration,
-    long Sequence
+    long Sequence,
+    int NativeButtonRuntimeListenerBaseline = -1
 )
 {
     public bool IsValid => Popup != null
@@ -58,26 +59,34 @@ internal sealed class NetherTreasureConfirmLease
     }
 
     /// <summary>
-    /// Claims the one-shot skip only after the current popup animator has been observed in the
-    /// packaged Open state. OnConfirm merely starts the server request; it is not readiness.
+    /// Records that the popup reached Open. This authorizes waiting for the native
+    /// SkipAndConfirmButton subscription; it does not authorize a direct reflection call to
+    /// SkipOpenTreasureAnimationAsync.
     /// </summary>
-    public bool TryClaimSkip(
+    public bool ObserveOpenAnimationReady(
         NetherTreasureConfirmOwner owner,
         bool openAnimationObserved
     ) => openAnimationObserved
         && Transition(
             owner,
             NetherTreasureConfirmStage.AwaitingOpenAnimation,
-            NetherTreasureConfirmStage.AwaitingSkipTask
+            NetherTreasureConfirmStage.AwaitingNativeButtonSubscription
         );
 
-    public bool ObserveSkipTaskCompleted(NetherTreasureConfirmOwner owner) =>
+    /// <summary>
+    /// Records the exact post-Open UnityEvent listener increase created by the native controller's
+    /// SkipAndConfirmButton OnTap subscription.
+    /// </summary>
+    public bool ObserveNativeButtonSubscription(NetherTreasureConfirmOwner owner) =>
         Transition(
             owner,
-            NetherTreasureConfirmStage.AwaitingSkipTask,
+            NetherTreasureConfirmStage.AwaitingNativeButtonSubscription,
             NetherTreasureConfirmStage.AwaitingResumePump
         );
 
+    /// <summary>
+    /// Preserves a second complete pump before emitting the single native button tap.
+    /// </summary>
     public bool AdvanceResumePump(NetherTreasureConfirmOwner owner) =>
         Transition(
             owner,

@@ -154,15 +154,18 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
-    public void Packaged_treasure_confirmation_exposes_exact_open_animation_readiness_gate()
+    public void Packaged_treasure_confirmation_exposes_exact_open_and_native_button_tap_contract()
     {
-        // Fresh Cpp2IL recovery from GameAssembly SHA-256 573fa800... proves the order:
-        // RequestNetherUpdateEventAsync -> PlayOpenTreasureAnimationSequenceAsync -> Open state.
-        // The automation may invoke Skip only after observing that exact state.
+        // Fresh Cpp2IL recovery from GameAssembly SHA-256 573fa800... proves the controller
+        // awaits its Open sequence and then the SkipAndConfirmButton tap. The native button's
+        // OnSubmit path drives Button.OnSubmit/OnTap; automation must not call direct Skip.
         using var packaged = PackagedProjectAssembly.Load();
         Type popup = packaged.RequireType(NetherTreasureAnimationNativeBinding.PopupTypeName);
         Type animatorExtensions = packaged.RequireType(
             NetherTreasureAnimationNativeBinding.AnimatorExtensionsTypeName
+        );
+        Type nativeButton = packaged.RequireType(
+            NetherTreasureAnimationNativeBinding.NativeButtonTypeName
         );
         const BindingFlags instanceFlags =
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -188,6 +191,15 @@ public sealed class NetherLifecycleInteropBindingsTests
                 == NetherTreasureAnimationNativeBinding.AnimatorMemberName
         );
         Assert.Equal("UnityEngine.Animator", animator.PropertyType.FullName);
+        PropertyInfo skipAndConfirmButton = Assert.Single(
+            popup.GetProperties(instanceFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.SkipAndConfirmButtonMemberName
+        );
+        Assert.Equal(
+            NetherTreasureAnimationNativeBinding.NativeButtonTypeName,
+            skipAndConfirmButton.PropertyType.FullName
+        );
 
         Assert.True(
             NetherLifecycleInteropBindings.TryResolveExactMethod(
@@ -203,15 +215,39 @@ public sealed class NetherLifecycleInteropBindingsTests
 
         Assert.True(
             NetherLifecycleInteropBindings.TryResolveExactMethod(
-                popup,
-                NetherTreasureAnimationNativeBinding.SkipAnimationDescriptor,
+                nativeButton,
+                NetherTreasureAnimationNativeBinding.NativeButtonSubmitDescriptor,
                 instanceFlags,
-                out string skipError,
-                out MethodInfo? skip
+                out string submitError,
+                out MethodInfo? submit
             ),
-            skipError
+            submitError
         );
-        Assert.NotNull(skip);
+        Assert.NotNull(submit);
+
+        // Fresh UniRx/UI recovery proves OnClickAsObservable adds its listener through this exact
+        // UnityEvent runtime-call list, which is the positive post-Open readiness observation.
+        PropertyInfo onClick = Assert.Single(
+            nativeButton.GetProperties(instanceFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.NativeButtonOnClickMemberName
+        );
+        PropertyInfo calls = Assert.Single(
+            onClick.PropertyType.GetProperties(instanceFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.UnityEventCallsMemberName
+        );
+        PropertyInfo runtimeCalls = Assert.Single(
+            calls.PropertyType.GetProperties(instanceFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.UnityEventRuntimeCallsMemberName
+        );
+        PropertyInfo count = Assert.Single(
+            runtimeCalls.PropertyType.GetProperties(instanceFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.CollectionCountMemberName
+        );
+        Assert.Equal(typeof(int), count.PropertyType);
     }
 
     [Fact]
