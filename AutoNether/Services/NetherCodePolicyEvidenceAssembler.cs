@@ -169,6 +169,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             ActiveParty = party,
             Research = research,
             ActiveResearchFamily = activeResearch,
+            HardExcludedCodeIds = BuildHardExcludedCodeIds(snapshot, ownedMechanics),
             FamilyRetentionByPair = BuildFamilyRetentionEvidence(
                 snapshot,
                 party,
@@ -181,6 +182,44 @@ internal static class NetherCodePolicyEvidenceAssembler
             RecoverableToFiftySeventyBand =
                 routeEvidence?.RecoverableToFiftySeventyBand == true,
         });
+    }
+
+    private static IReadOnlyList<long> BuildHardExcludedCodeIds(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherStrategyNativeMechanic>? ownedMechanics
+    )
+    {
+        if (ownedMechanics == null)
+            return Array.Empty<long>();
+
+        var result = new List<long>();
+        foreach (NetherCodeState code in snapshot.Codes
+                     .Where(code => code != null && code.CodeId > 0 && code.PossessionAmount > 0)
+                     .GroupBy(code => code.CodeId)
+                     .Select(group => group.First()))
+        {
+            NetherStrategyNativeMechanic[] matches = ownedMechanics
+                .Where(mechanic => mechanic != null && mechanic.MechanicId == code.CodeId)
+                .ToArray();
+            if (matches.Length != 1)
+                continue;
+            NetherCodeCandidate candidate = new(code.CodeId, code.Family, code.AbilityLevel)
+            {
+                Category = code.Category,
+                Rarity = code.Rarity,
+                Power = code.Power,
+                IsKnown = code.IsKnown,
+                EffectSemanticsKnown = code.EffectSemanticsKnown,
+            };
+            NetherCodeHardEligibilityEvidence hard = MapHardEligibility(candidate, matches[0]);
+            if (hard.IsKnown && hard.RiskRule is
+                    NetherCodeRiskRule.MinimumErosionSeventy
+                    or NetherCodeRiskRule.AdverseErosionAdjustment)
+            {
+                result.Add(code.CodeId);
+            }
+        }
+        return result.OrderBy(codeId => codeId).ToArray();
     }
 
     private static NetherStrategyNativeMechanic? FindOwnedMechanic(
@@ -530,6 +569,26 @@ internal static class NetherCodePolicyEvidenceAssembler
         bool crestTargetKnown = crestFamily == NetherCodeFamily.Unknown
             || mappedCrestTarget;
 
+        NetherStrategyResearchRateOverwriteEvidence researchRate =
+            mechanic.ResearchRateOverwrite;
+        if (researchRate.IsPresent
+            && (!researchRate.IsKnown
+                || researchRate.Family != candidate.Family
+                || researchRate.Rate <= 0))
+        {
+            string reason = string.IsNullOrWhiteSpace(researchRate.UnknownReason)
+                ? "selectable-research-rate-overwrite-unavailable:" + mechanic.MechanicId
+                : researchRate.UnknownReason;
+            return new NetherCodeHardEligibilityEvidence
+            {
+                IsKnown = false,
+                UnknownReason = reason,
+                UniformCrestFamily = crestFamily,
+                UniformCrestTargetRow = targetRow,
+                RiskRule = risk,
+            };
+        }
+
         return new NetherCodeHardEligibilityEvidence
         {
             IsKnown = crestTargetKnown,
@@ -539,6 +598,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             UniformCrestFamily = crestFamily,
             UniformCrestTargetRow = targetRow,
             RiskRule = risk,
+            ResearchRateOverwrite = researchRate.IsPresent ? researchRate.Rate : 0,
         };
     }
 

@@ -102,7 +102,8 @@ public sealed class NetherStrategyVisibleEvidenceMapperTests
                 Assert.Equal(NetherStrategyVisibleEventEffectSource.Target1, effect.Source);
                 Assert.Equal(8, effect.RawType);
                 Assert.Equal(902, effect.RawParameter);
-                Assert.True(effect.IsKnown, effect.UnknownReason);
+                Assert.False(effect.IsKnown);
+                Assert.Equal(NetherEffectKind.Battle, effect.EffectKind);
             },
             effect =>
             {
@@ -173,6 +174,96 @@ public sealed class NetherStrategyVisibleEvidenceMapperTests
     }
 
     [Fact]
+    public void Production_visible_mapper_keeps_nonzero_target_seven_and_code_offer_content_id_unknown()
+    {
+        NetherFloorNode eventFloor = Floor(103, 10003, NetherFloorNodeType.Event);
+        var request = new NetherStrategyVisibleEvidenceCaptureRequest(
+            [eventFloor],
+            [],
+            [],
+            [new NetherFloorEventMasterRow(502, 103, 20, 602, 0, 0, 0)],
+            [new NetherFloorEventPartMasterRow(602, 7, 999, 0, 0, 0, 0, 160, 999, 1)],
+            []
+        )
+        {
+            ExtendIdByNodeId = new Dictionary<long, long> { [10003] = 502 },
+        };
+
+        NetherStrategyVisibleEvidenceCaptureResult result =
+            NetherStrategyVisibleEvidenceMapper.Map(request);
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherStrategyVisibleContentRow eventRow = Assert.Single(
+            result.Evidence!.ContentRows,
+            row => row.NodeId == 10003 && row.Kind == NetherStrategyVisibleContentKind.Event
+        );
+        NetherStrategyVisibleEventOptionEvidence option = Assert.Single(eventRow.EventOptions);
+        Assert.All(option.Effects.Where(effect => effect.IsPresent), effect => Assert.False(effect.IsKnown));
+        Assert.Contains(option.Effects, effect => effect.RawType == 7 && effect.UnknownReason.Length > 0);
+        Assert.Contains(option.Effects, effect => effect.RawType == 160 && effect.UnknownReason.Length > 0);
+    }
+
+    [Theory]
+    [InlineData(165)]
+    [InlineData(166)]
+    public void Production_visible_mapper_keeps_negative_resource_content_id_unknown(int contentType)
+    {
+        NetherFloorNode eventFloor = Floor(103, 10003, NetherFloorNodeType.Event);
+        NetherStrategyVisibleEvidenceCaptureResult result = NetherStrategyVisibleEvidenceMapper.Map(
+            new NetherStrategyVisibleEvidenceCaptureRequest(
+                [eventFloor],
+                [],
+                [],
+                [new NetherFloorEventMasterRow(502, 103, 20, 602, 0, 0, 0)],
+                [new NetherFloorEventPartMasterRow(602, 0, 0, 0, 0, 0, 0, contentType, -1, 1)],
+                []
+            )
+            {
+                ExtendIdByNodeId = new Dictionary<long, long> { [10003] = 502 },
+            }
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherStrategyVisibleContentRow eventRow = Assert.Single(
+            result.Evidence!.ContentRows,
+            row => row.NodeId == 10003 && row.Kind == NetherStrategyVisibleContentKind.Event
+        );
+        NetherStrategyVisibleEventEffectEvidence effect = Assert.Single(
+            Assert.Single(eventRow.EventOptions).Effects,
+            candidate => candidate.RawType == contentType
+        );
+        Assert.False(effect.IsKnown);
+        Assert.Equal(-1, effect.ContentId);
+    }
+
+    [Fact]
+    public void Production_visible_mapper_keeps_out_of_domain_item_rarity_unknown()
+    {
+        NetherFloorNode eventFloor = Floor(103, 10003, NetherFloorNodeType.Event);
+        NetherStrategyVisibleEvidenceCaptureResult result = NetherStrategyVisibleEvidenceMapper.Map(
+            new NetherStrategyVisibleEvidenceCaptureRequest(
+                [eventFloor],
+                [],
+                [],
+                [new NetherFloorEventMasterRow(502, 103, 20, 602, 0, 0, 0)],
+                [new NetherFloorEventPartMasterRow(602, 0, 0, 0, 0, 0, 0, 30, 701, 1)],
+                [new NetherStrategyItemMasterRow(701, 91, 999, 1, 99)]
+            )
+            {
+                ExtendIdByNodeId = new Dictionary<long, long> { [10003] = 502 },
+            }
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherStrategyVisibleContentRow item = Assert.Single(
+            result.Evidence!.ContentRows,
+            row => row.NodeId == 10003 && row.Kind == NetherStrategyVisibleContentKind.Item
+        );
+        Assert.False(item.IsKnown);
+        Assert.Contains("event-item-master-row-unavailable", item.UnknownReason);
+    }
+
+    [Fact]
     public void Production_assembler_derives_exact_extend_identity_from_the_interactive_capture()
     {
         NetherFloorNode floor = Floor(103, 10003, NetherFloorNodeType.Event);
@@ -237,6 +328,126 @@ public sealed class NetherStrategyVisibleEvidenceMapperTests
         Assert.Equal(602, eventBattle.EventPartId);
         Assert.Equal(902, eventBattle.MasterRowId);
         Assert.Equal(1902, eventBattle.BattleStageId);
+    }
+
+    [Fact]
+    public void Duplicate_item_master_row_isolated_to_the_dependent_event_option()
+    {
+        NetherFloorNode floor = Floor(103, 10003, NetherFloorNodeType.Event);
+        NetherStrategyVisibleEvidenceCaptureResult result =
+            NetherStrategyVisibleEvidenceMapper.Map(
+                new NetherStrategyVisibleEvidenceCaptureRequest(
+                    [floor],
+                    [],
+                    [],
+                    [new NetherFloorEventMasterRow(502, 103, 20, 602, 603, 0, 0)],
+                    [
+                        new NetherFloorEventPartMasterRow(602, 0, 0, 0, 0, 0, 0, 30, 701, 1),
+                        new NetherFloorEventPartMasterRow(603, 0, 0, 0, 0, 0, 0, 165, 0, 40),
+                    ],
+                    [
+                        new NetherStrategyItemMasterRow(701, 77, 5, 888, 9),
+                        new NetherStrategyItemMasterRow(701, 78, 6, 999, 9),
+                    ]
+                )
+                {
+                    ExtendIdByNodeId = new Dictionary<long, long> { [floor.NodeId] = 502 },
+                }
+            );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.False(
+            Assert.Single(result.Evidence!.ContentRows, row => row.Kind == NetherStrategyVisibleContentKind.Item)
+                .IsKnown
+        );
+        Assert.True(
+            Assert.Single(result.Evidence.ContentRows, row => row.Kind == NetherStrategyVisibleContentKind.Resource)
+                .IsKnown
+        );
+    }
+
+    [Fact]
+    public void Duplicate_battle_master_row_isolated_to_the_dependent_event_option()
+    {
+        NetherFloorNode floor = Floor(103, 10003, NetherFloorNodeType.Event);
+        NetherStrategyVisibleEvidenceCaptureResult result =
+            NetherStrategyVisibleEvidenceMapper.Map(
+                new NetherStrategyVisibleEvidenceCaptureRequest(
+                    [floor],
+                    [
+                        new NetherStrategyBattleMasterRow(901, 999, 2, 1901, 321),
+                        new NetherStrategyBattleMasterRow(901, 999, 3, 1902, 654),
+                    ],
+                    [],
+                    [new NetherFloorEventMasterRow(502, 103, 20, 602, 603, 0, 0)],
+                    [
+                        new NetherFloorEventPartMasterRow(602, 8, 901, 0, 0, 0, 0, 0, 0, 0),
+                        new NetherFloorEventPartMasterRow(603, 0, 0, 0, 0, 0, 0, 165, 0, 40),
+                    ],
+                    []
+                )
+                {
+                    ExtendIdByNodeId = new Dictionary<long, long> { [floor.NodeId] = 502 },
+                }
+            );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.False(
+            Assert.Single(result.Evidence!.ContentRows, row => row.Kind == NetherStrategyVisibleContentKind.Battle)
+                .IsKnown
+        );
+        Assert.True(
+            Assert.Single(result.Evidence.ContentRows, row => row.Kind == NetherStrategyVisibleContentKind.Resource)
+                .IsKnown
+        );
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void Raw_native_battle_type_does_not_prove_event_semantic_tier(int rawBattleType)
+    {
+        NetherFloorNode floor = Floor(103, 10003, NetherFloorNodeType.Event);
+        NetherStrategyVisibleEvidenceCaptureResult result =
+            NetherStrategyVisibleEvidenceMapper.Map(
+                new NetherStrategyVisibleEvidenceCaptureRequest(
+                    [floor],
+                    [new NetherStrategyBattleMasterRow(901, 999, rawBattleType, 1901, 321)],
+                    [],
+                    [new NetherFloorEventMasterRow(502, 103, 20, 602, 0, 0, 0)],
+                    [new NetherFloorEventPartMasterRow(602, 8, 901, 0, 0, 0, 0, 0, 0, 0)],
+                    []
+                )
+                {
+                    ExtendIdByNodeId = new Dictionary<long, long> { [floor.NodeId] = 502 },
+                }
+            );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherStrategyVisibleContentRow battle = Assert.Single(
+            result.Evidence!.ContentRows,
+            row => row.Kind == NetherStrategyVisibleContentKind.Battle
+        );
+        Assert.Equal(901, battle.MasterRowId);
+        Assert.Equal(1901, battle.BattleStageId);
+        Assert.Equal(rawBattleType, battle.BattleType);
+        Assert.False(battle.IsKnown);
+        Assert.Contains("semantic", battle.UnknownReason);
+
+        NetherStrategyVisibleContentRow option = Assert.Single(
+            result.Evidence.ContentRows,
+            row => row.Kind == NetherStrategyVisibleContentKind.Event
+        );
+        NetherStrategyVisibleEventEffectEvidence effect = Assert.Single(option.EventOptions).Effects[0];
+        Assert.Equal(NetherEffectKind.Battle, effect.EffectKind);
+        Assert.False(effect.IsKnown);
+        Assert.Contains("semantic", effect.UnknownReason);
     }
 
     private static NetherFloorNode Floor(long masterId, long nodeId, NetherFloorNodeType type) =>

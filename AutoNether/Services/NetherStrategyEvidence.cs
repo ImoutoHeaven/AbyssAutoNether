@@ -304,6 +304,41 @@ internal sealed record NetherStrategyResearchEvidence(
     IReadOnlyList<NetherStrategyResearchFamilyState> Families
 );
 
+/// <summary>
+/// Future-authoritative selectable research-rate evidence.  The current native Code rows do not
+/// expose this mechanic, so production leaves the value NotPresent; a future typed provider must
+/// prove both the exact family and the overwrite rate before policy can consume it.
+/// </summary>
+internal readonly record struct NetherStrategyResearchRateOverwriteEvidence(
+    bool IsPresent,
+    bool IsKnown,
+    NetherCodeFamily Family,
+    int Rate,
+    string UnknownReason
+)
+{
+    public static NetherStrategyResearchRateOverwriteEvidence NotPresent =>
+        new(false, false, NetherCodeFamily.Unknown, 0, string.Empty);
+
+    public static NetherStrategyResearchRateOverwriteEvidence Known(
+        NetherCodeFamily family,
+        int rate
+    ) => new(true, true, family, rate, string.Empty);
+
+    public static NetherStrategyResearchRateOverwriteEvidence Unknown(
+        NetherCodeFamily family,
+        string reason
+    ) => new(
+        true,
+        false,
+        family,
+        0,
+        string.IsNullOrWhiteSpace(reason)
+            ? "selectable-research-rate-overwrite-unknown"
+            : reason
+    );
+}
+
 internal enum NetherStrategyTriggerKind
 {
     Unknown = 0,
@@ -930,6 +965,8 @@ internal sealed record NetherStrategyNativeMechanic(
     NetherStrategyTargetEvidence Target
 )
 {
+    public NetherStrategyResearchRateOverwriteEvidence ResearchRateOverwrite { get; init; } =
+        NetherStrategyResearchRateOverwriteEvidence.NotPresent;
     public NetherStrategyAbilityEffectEvidence AbilityEffect { get; init; } =
         new(NetherStrategyAbilityEffectKind.Unknown);
     public IReadOnlyList<NetherStrategyBuffEvidence> BuffStrategies { get; init; } =
@@ -1072,6 +1109,8 @@ internal sealed record NetherStrategyVisibleContentRow(
     public int ItemRarity { get; init; }
     public int ItemValue { get; init; }
     public int ItemPossessionLimit { get; init; }
+    /// <summary>Exact shop-row currency flag copied from MNetherFloorShopContents.consume_content_type.</summary>
+    public bool UsesNetherGold { get; init; }
     public bool IsKnown { get; init; } = true;
     public string UnknownReason { get; init; } = string.Empty;
     public IReadOnlyList<NetherStrategyNamedValue> RawValues { get; init; } =

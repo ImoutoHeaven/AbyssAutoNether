@@ -28,8 +28,13 @@ internal sealed record NetherRuntimeInteractivePreEntryCaptureRequest(
 {
     public IReadOnlyList<NetherCodeState> CurrentCodes { get; init; } = Array.Empty<NetherCodeState>();
     public int CodeCapacity { get; init; }
+    public long FloorNodeId { get; init; }
+    public IEnumerable? ItemRows { get; init; }
+    public IEnumerable? BattleRows { get; init; }
     public IReadOnlyList<NetherInteractivePartialDeathEligibility> PartialDeathEligibility { get; init; } =
         Array.Empty<NetherInteractivePartialDeathEligibility>();
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> CommittedProcurementByOption { get; init; } =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
 }
 
 /// <summary>
@@ -54,17 +59,20 @@ internal sealed record NetherRuntimeInteractivePreEntryCaptureResult
 internal sealed record NetherRuntimeInteractivePreEntryInputsResult
 {
     public bool IsSuccess { get; init; }
+    public NetherSnapshotFingerprint? SnapshotFingerprint { get; init; }
     /// <summary>Keyed by stable runtime node identity, while each value retains its master ID.</summary>
     public IReadOnlyDictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> ByFloorNodeId { get; init; } =
         new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
     public string Detail { get; init; } = string.Empty;
 
     public static NetherRuntimeInteractivePreEntryInputsResult Success(
-        IReadOnlyDictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> entries
+        IReadOnlyDictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> entries,
+        NetherSnapshotFingerprint? snapshotFingerprint = null
     ) => new()
     {
         IsSuccess = true,
         ByFloorNodeId = entries,
+        SnapshotFingerprint = snapshotFingerprint,
     };
 
     public static NetherRuntimeInteractivePreEntryInputsResult Failure(string detail) => new()
@@ -105,6 +113,10 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
             return Failure(eventError);
         if (!TryMapEventPartRows(request.EventPartRows, out IReadOnlyList<NetherFloorEventPartMasterRow>? eventPartRows, out string partError))
             return Failure(partError);
+        if (!TryMapItemRows(request.ItemRows, out IReadOnlyList<NetherStrategyItemMasterRow>? itemRows, out string itemError))
+            return Failure(itemError);
+        if (!TryMapBattleRows(request.BattleRows, out IReadOnlyList<NetherStrategyBattleMasterRow>? battleRows, out string battleError))
+            return Failure(battleError);
 
         var input = new NetherInteractiveFloorPreEntrySafetyInput(
             FloorKind: floorKind,
@@ -120,11 +132,16 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
         )
         {
             FloorExtendId = extendId,
+            FloorNodeId = request.FloorNodeId,
             CanCloseShop = request.CanCloseShop,
             CurrentCodes = request.CurrentCodes ?? Array.Empty<NetherCodeState>(),
             CodeCapacity = request.CodeCapacity,
+            ItemRows = itemRows,
+            BattleRows = battleRows,
             PartialDeathEligibility = request.PartialDeathEligibility
                 ?? Array.Empty<NetherInteractivePartialDeathEligibility>(),
+            CommittedProcurementByOption = request.CommittedProcurementByOption
+                ?? new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(),
         };
         return new NetherRuntimeInteractivePreEntryCaptureResult
         {
@@ -225,7 +242,8 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
                 mapped.Add(new NetherFloorEventPartMasterRow(0, 0, 0, 0, 0, 0, 0, 0, 0, 0) { HasRequiredFields = false });
                 continue;
             }
-            if (!TryReadInt64(raw, "id", out long id)
+            bool hasId = TryReadInt64(raw, "id", out long id);
+            if (!hasId
                 || !TryReadInt32(raw, "target_type_1", out int targetType1)
                 || !TryReadInt64(raw, "select_parameter_1", out long parameter1)
                 || !TryReadInt32(raw, "target_type_2", out int targetType2)
@@ -236,8 +254,22 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
                 || !TryReadInt64(raw, "content_id", out long contentId)
                 || !TryReadInt64(raw, "amount", out long amount))
             {
-                error = "missing-m-nether-floor-event-part-raw-field";
-                return false;
+                mapped.Add(new NetherFloorEventPartMasterRow(
+                    hasId ? id : 0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                )
+                {
+                    HasRequiredFields = false,
+                });
+                continue;
             }
             mapped.Add(new NetherFloorEventPartMasterRow(
                 id,
@@ -267,6 +299,90 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
             _ => NetherFloorNodeType.Unknown,
         };
         return kind != NetherFloorNodeType.Unknown;
+    }
+
+    private static bool TryMapItemRows(
+        IEnumerable? source,
+        out IReadOnlyList<NetherStrategyItemMasterRow>? rows,
+        out string error
+    )
+    {
+        error = string.Empty;
+        if (source == null)
+        {
+            rows = null;
+            return true;
+        }
+
+        var mapped = new List<NetherStrategyItemMasterRow>();
+        foreach (object? raw in source)
+        {
+            long id = 0;
+            long type = 0;
+            int rarity = 0;
+            int value = 0;
+            int possessionLimit = 0;
+            bool hasId = raw != null && TryReadInt64(raw, "id", out id);
+            bool valid = hasId
+                && TryReadInt64(raw!, "type", out type)
+                && TryReadInt32(raw!, "rarity", out rarity)
+                && TryReadInt32(raw!, "value", out value)
+                && TryReadInt32(raw!, "possession_limit", out possessionLimit);
+            if (!valid)
+            {
+                // Preserve a readable native ID when the row shape is malformed. The option-local
+                // indexer then marks that ID ambiguous even when a valid sibling uses the same ID.
+                mapped.Add(new NetherStrategyItemMasterRow(hasId ? id : 0, 0, -1, 0, 0)
+                {
+                    HasRequiredFields = false,
+                });
+                continue;
+            }
+            mapped.Add(new NetherStrategyItemMasterRow(id, type, rarity, value, possessionLimit));
+        }
+        rows = mapped;
+        return true;
+    }
+
+    private static bool TryMapBattleRows(
+        IEnumerable? source,
+        out IReadOnlyList<NetherStrategyBattleMasterRow>? rows,
+        out string error
+    )
+    {
+        error = string.Empty;
+        if (source == null)
+        {
+            rows = null;
+            return true;
+        }
+
+        var mapped = new List<NetherStrategyBattleMasterRow>();
+        foreach (object? raw in source)
+        {
+            long id = 0;
+            long mapFloorId = 0;
+            int type = 0;
+            long stageId = 0;
+            int dropRatio = 0;
+            bool hasId = raw != null && TryReadInt64(raw, "id", out id);
+            bool valid = hasId
+                && TryReadInt64(raw!, "m_nether_map_floor_id", out mapFloorId)
+                && TryReadInt32(raw!, "type", out type)
+                && TryReadInt64(raw!, "m_nether_battle_stage_id", out stageId)
+                && TryReadInt32(raw!, "code_drop_ratio", out dropRatio);
+            if (!valid)
+            {
+                mapped.Add(new NetherStrategyBattleMasterRow(hasId ? id : 0, 0, 0, 0, -1)
+                {
+                    HasRequiredFields = false,
+                });
+                continue;
+            }
+            mapped.Add(new NetherStrategyBattleMasterRow(id, mapFloorId, type, stageId, dropRatio));
+        }
+        rows = mapped;
+        return true;
     }
 
     private static bool TryReadInt32(object instance, string name, out int value)

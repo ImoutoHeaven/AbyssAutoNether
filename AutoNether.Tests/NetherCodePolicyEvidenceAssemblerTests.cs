@@ -6,6 +6,66 @@ namespace AutoNether.Tests;
 public sealed class NetherCodePolicyEvidenceAssemblerTests
 {
     [Fact]
+    public void Production_assembler_carries_future_typed_research_rate_overwrite_into_hard_eligibility()
+    {
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88001, NetherCodeFamily.Rush, power: 1);
+        NetherStrategyNativeMechanic mechanic = OrdinaryMechanic(candidate.CodeId) with
+        {
+            ResearchRateOverwrite = NetherStrategyResearchRateOverwriteEvidence.Known(
+                NetherCodeFamily.Rush,
+                15
+            ),
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            Package(snapshot, primaryWallet: 0, primaryProjection: 0),
+            snapshot,
+            [candidate],
+            [mechanic],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            },
+            SafeRouteEvidence()
+        );
+
+        Assert.Equal(
+            15,
+            captured.Evidence!.MechanicsByCodeId[candidate.CodeId].ResearchRateOverwrite
+        );
+    }
+
+    [Fact]
+    public void Production_assembler_keeps_unproven_research_rate_candidate_local_and_fail_closed()
+    {
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88002, NetherCodeFamily.Impact, power: 1);
+        NetherStrategyNativeMechanic mechanic = OrdinaryMechanic(candidate.CodeId) with
+        {
+            ResearchRateOverwrite = NetherStrategyResearchRateOverwriteEvidence.Unknown(
+                NetherCodeFamily.Impact,
+                "future-selectable-research-rate-not-proven"
+            ),
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            Package(snapshot, primaryWallet: 0, primaryProjection: 0),
+            snapshot,
+            [candidate],
+            [mechanic],
+            new NetherAutoClimbSettings { StrategyMode = NetherStrategyMode.Research },
+            SafeRouteEvidence()
+        );
+
+        NetherCodeHardEligibilityEvidence evidence =
+            captured.Evidence!.MechanicsByCodeId[candidate.CodeId];
+        Assert.False(evidence.IsKnown);
+        Assert.Equal("future-selectable-research-rate-not-proven", evidence.UnknownReason);
+    }
+
+    [Fact]
     public void Production_route_evidence_uses_only_confirmed_combat_start_erosion()
     {
         // Fresh Project.dll 53806a5b...1300: MNetherMapFloors exposes the typed floor kind;
@@ -333,7 +393,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
             safe.Evidence!.MechanicsByCodeId[candidate.CodeId].RiskRule
         );
         Assert.Equal(
-            NetherCodeDecisionKind.Keep,
+            NetherCodeDecisionKind.Reload,
             new NetherCodePolicy().Decide(
                 Portfolio(snapshot),
                 [candidate],
@@ -342,7 +402,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
             ).Kind
         );
         Assert.Equal(
-            NetherCodeDecisionKind.Keep,
+            NetherCodeDecisionKind.Reload,
             new NetherCodePolicy().Decide(
                 Portfolio(snapshot),
                 [candidate],
@@ -351,7 +411,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
             ).Kind
         );
         Assert.Equal(
-            NetherCodeDecisionKind.Keep,
+            NetherCodeDecisionKind.Reload,
             new NetherCodePolicy().Decide(
                 Portfolio(snapshot),
                 [candidate],

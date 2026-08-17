@@ -959,6 +959,7 @@ internal static class NetherAutoClimbController
                     Kind = NetherEventDecisionKind.Select,
                     ProjectedErosion = decision.ProjectedErosion,
                     HpDelta = decision.HpDelta,
+                    AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
                 }, snapshot);
             }
             LogAction(
@@ -1856,6 +1857,9 @@ internal static class NetherAutoClimbController
         {
             FloorSceneReadinessWait.ObserveRegistration();
             snapshot = ready.Snapshot!;
+            // Every authoritative floor-scene confirmation is a branch boundary.  A changed
+            // snapshot retires route-owned procurement before any new route/effect semantics run.
+            _bridge.ObserveAuthoritativeRouteSnapshot(snapshot.Fingerprint);
             if (FloorSceneReadinessDiagnosticGate.ShouldEmit(boundary, ready.Detail))
             {
                 LogDiagnostic(
@@ -2125,6 +2129,7 @@ internal static class NetherAutoClimbController
                                     Kind = NetherEventDecisionKind.Select,
                                     ProjectedErosion = decision.ProjectedErosion,
                                     HpDelta = decision.HpDelta,
+                                    AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
                                 }, snapshot);
                             }
                         }
@@ -2385,9 +2390,36 @@ internal static class NetherAutoClimbController
         int effectiveMaxDepth
     )
     {
-        NetherRuntimeRouteSafetyData runtimeSafety = _bridge.TryCaptureRouteSafety(snapshot.Floors);
+        _bridge.BeginRouteReplan(snapshot.Fingerprint);
+        NetherRuntimeRouteSafetyData runtimeSafety = _bridge.TryCaptureRouteSafety(snapshot);
+        _bridge.BindEventProcurementCommitments(runtimeSafety.EventProcurementCommitments);
         NetherRuntimeInteractivePreEntryInputsResult interactivePreEntry =
             _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
+        // The first capture supplies exact Event options to the route-owned producer. If that
+        // producer proves a same-branch Shop/Treasure procurement threshold, publish it and take
+        // one fresh capture so the budget is enforced before popup semantics are considered.
+        NetherAutoClimbRouteSafetyDecision preliminaryRoute = RouteSafetyWiring.Plan(
+            snapshot,
+            settings,
+            effectiveMaxDepth,
+            runtimeSafety,
+            interactivePreEntry
+        );
+        bool hasNewRouteOwnedCommitment = preliminaryRoute.EventProcurementCommitments.Any(pair =>
+            !runtimeSafety.EventProcurementCommitments.TryGetValue(pair.Key, out NetherEventProcurementBudget existing)
+            || existing != pair.Value
+        );
+        if (hasNewRouteOwnedCommitment && preliminaryRoute.RouteIdentity is NetherRouteBranchIdentity preliminaryIdentity)
+        {
+            _bridge.CommitRouteOwnedEventProcurementCommitments(
+                preliminaryIdentity,
+                preliminaryRoute.EventProcurementCommitments
+            );
+            _bridge.BindEventProcurementCommitments(
+                preliminaryRoute.EventProcurementCommitments
+            );
+            interactivePreEntry = _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
+        }
         AuditRouteRuntimeInputs(snapshot, runtimeSafety);
         Audit(
             NetherDetailedAuditKind.Interactive,
@@ -2404,6 +2436,16 @@ internal static class NetherAutoClimbController
             runtimeSafety,
             interactivePreEntry
         );
+        // The route plan is the production owner of the exact pre-entry proof. Publish its
+        // branch-local procurement state after the current capture so a repeated native capture
+        // cannot replace a proven budget with an empty observation.
+        if (routeDecision.RouteIdentity is NetherRouteBranchIdentity routeIdentity)
+        {
+            _bridge.CommitRouteOwnedEventProcurementCommitments(
+                routeIdentity,
+                routeDecision.EventProcurementCommitments
+            );
+        }
         NetherRoutePlan route = routeDecision.Route;
         AuditRoute(snapshot, route, routeDecision.Context);
         if (!route.HasSelection)

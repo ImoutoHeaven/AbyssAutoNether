@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <GameDir Condition="'$(ABYSS_GAME_DIR)' != ''">$(ABYSS_GAME_DIR)</GameDir>
+    <GameDir Condition="'$(ABYSS_GAME_DIR)' == ''">x:\DMM\dotabyss_cl</GameDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,129 +19,21 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\AutoNether\Services\NetherDropJsonProbe.cs" Link="NetherDropJsonProbe.cs" />
-    <Compile Include="..\AutoNether\Services\NetherBattleDropProbe.cs" Link="NetherBattleDropProbe.cs" />
-    <Compile Include="..\AutoNether\Services\NetherFloorStrategy.cs" Link="NetherFloorStrategy.cs" />
-    <Compile Include="..\AutoNether\Services\ConfigAutoReloadState.cs" Link="ConfigAutoReloadState.cs" />
-    <Compile Include="..\AutoNether\Services\NetherAutoClimbModels.cs" Link="NetherAutoClimbModels.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbModels.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherAutoClimbStateMachine.cs" Link="NetherAutoClimbStateMachine.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbStateMachine.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRoutePlanner.cs" Link="NetherRoutePlanner.cs" Condition="Exists('..\AutoNether\Services\NetherRoutePlanner.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherErosionPolicy.cs" Link="NetherErosionPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherErosionPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherFloorSafetyEvaluator.cs" Link="NetherFloorSafetyEvaluator.cs" Condition="Exists('..\AutoNether\Services\NetherFloorSafetyEvaluator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRouteSafetyContextBuilder.cs" Link="NetherRouteSafetyContextBuilder.cs" Condition="Exists('..\AutoNether\Services\NetherRouteSafetyContextBuilder.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRouteHorizonSafetyPolicy.cs" Link="NetherRouteHorizonSafetyPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherRouteHorizonSafetyPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRouteHpRuleMapper.cs" Link="NetherRouteHpRuleMapper.cs" Condition="Exists('..\AutoNether\Services\NetherRouteHpRuleMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleRouteProjectionBuilder.cs" Link="NetherBattleRouteProjectionBuilder.cs" Condition="Exists('..\AutoNether\Services\NetherBattleRouteProjectionBuilder.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherFloorMasterBoundsMapper.cs" Link="NetherFloorMasterBoundsMapper.cs" Condition="Exists('..\AutoNether\Services\NetherFloorMasterBoundsMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherActivePartyHpSafetyMapper.cs" Link="NetherActivePartyHpSafetyMapper.cs" Condition="Exists('..\AutoNether\Services\NetherActivePartyHpSafetyMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeActivePartyHpExtractor.cs" Link="NetherRuntimeActivePartyHpExtractor.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeActivePartyHpExtractor.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherActiveCodeErosionProjectionMapper.cs" Link="NetherActiveCodeErosionProjectionMapper.cs" Condition="Exists('..\AutoNether\Services\NetherActiveCodeErosionProjectionMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeEnumerableReader.cs" Link="NetherRuntimeEnumerableReader.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeEnumerableReader.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeActiveCodeErosionExtractor.cs" Link="NetherRuntimeActiveCodeErosionExtractor.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeActiveCodeErosionExtractor.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRouteSafetyProductionCoordinator.cs" Link="NetherRouteSafetyProductionCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherRouteSafetyProductionCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherAutoClimbRouteSafetyWiring.cs" Link="NetherAutoClimbRouteSafetyWiring.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbRouteSafetyWiring.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherActionProjectionCalibration.cs" Link="NetherActionProjectionCalibration.cs" Condition="Exists('..\AutoNether\Services\NetherActionProjectionCalibration.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleProjectionCalibration.cs" Link="NetherBattleProjectionCalibration.cs" Condition="Exists('..\AutoNether\Services\NetherBattleProjectionCalibration.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherInteractiveFloorPreEntrySafety.cs" Link="NetherInteractiveFloorPreEntrySafety.cs" Condition="Exists('..\AutoNether\Services\NetherInteractiveFloorPreEntrySafety.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeInteractivePreEntryInputCapture.cs" Link="NetherRuntimeInteractivePreEntryInputCapture.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeInteractivePreEntryInputCapture.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeFloorModelValidator.cs" Link="NetherRuntimeFloorModelValidator.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeFloorModelValidator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeFloorGraphMapper.cs" Link="NetherRuntimeFloorGraphMapper.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeFloorGraphMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherNativeWaitGate.cs" Link="NetherNativeWaitGate.cs" Condition="Exists('..\AutoNether\Services\NetherNativeWaitGate.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCheckpointNativeFlow.cs" Link="NetherCheckpointNativeFlow.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointNativeFlow.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCheckpointContinueNativeBinding.cs" Link="NetherCheckpointContinueNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointContinueNativeBinding.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCheckpointReturnPreflight.cs" Link="NetherCheckpointReturnPreflight.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointReturnPreflight.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCheckpointReturnScrollResolver.cs" Link="NetherCheckpointReturnScrollResolver.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointReturnScrollResolver.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCheckpointPopupWaitCoordinator.cs" Link="NetherCheckpointPopupWaitCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointPopupWaitCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeOfferSelection.cs" Link="NetherCodeOfferSelection.cs" Condition="Exists('..\AutoNether\Services\NetherCodeOfferSelection.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodePopupReadiness.cs" Link="NetherCodePopupReadiness.cs" Condition="Exists('..\AutoNether\Services\NetherCodePopupReadiness.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeSelectionNativeFlow.cs" Link="NetherCodeSelectionNativeFlow.cs" Condition="Exists('..\AutoNether\Services\NetherCodeSelectionNativeFlow.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeListInitializationTaskEvidence.cs" Link="NetherCodeListInitializationTaskEvidence.cs" Condition="Exists('..\AutoNether\Services\NetherCodeListInitializationTaskEvidence.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherNativeTaskStatusPoller.cs" Link="NetherNativeTaskStatusPoller.cs" Condition="Exists('..\AutoNether\Services\NetherNativeTaskStatusPoller.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeListSelectionMapping.cs" Link="NetherCodeListSelectionMapping.cs" Condition="Exists('..\AutoNether\Services\NetherCodeListSelectionMapping.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeListSelectionTransaction.cs" Link="NetherCodeListSelectionTransaction.cs" Condition="Exists('..\AutoNether\Services\NetherCodeListSelectionTransaction.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeDiagnosticAudit.cs" Link="NetherCodeDiagnosticAudit.cs" Condition="Exists('..\AutoNether\Services\NetherCodeDiagnosticAudit.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeCategorySemantics.cs" Link="NetherCodeCategorySemantics.cs" Condition="Exists('..\AutoNether\Services\NetherCodeCategorySemantics.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeRuntimeSemanticMapper.cs" Link="NetherCodeRuntimeSemanticMapper.cs" Condition="Exists('..\AutoNether\Services\NetherCodeRuntimeSemanticMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherDetailedAuditLogger.cs" Link="NetherDetailedAuditLogger.cs" Condition="Exists('..\AutoNether\Services\NetherDetailedAuditLogger.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherAutoClimbDiagnostics.cs" Link="NetherAutoClimbDiagnostics.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbDiagnostics.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherDiagnosticTransitionGate.cs" Link="NetherDiagnosticTransitionGate.cs" Condition="Exists('..\AutoNether\Services\NetherDiagnosticTransitionGate.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherAutoClimbController.cs" Link="NetherAutoClimbController.cs" Condition="Exists('..\AutoNether\Services\NetherAutoClimbController.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodePolicy.cs" Link="NetherCodePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherCodePolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodePolicyEvidenceAssembler.cs" Link="NetherCodePolicyEvidenceAssembler.cs" Condition="Exists('..\AutoNether\Services\NetherCodePolicyEvidenceAssembler.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodePolicyRouteEvidence.cs" Link="NetherCodePolicyRouteEvidence.cs" Condition="Exists('..\AutoNether\Services\NetherCodePolicyRouteEvidence.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherNativePortfolioValuation.cs" Link="NetherNativePortfolioValuation.cs" Condition="Exists('..\AutoNether\Services\NetherNativePortfolioValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherNativeUnitParameterProjection.cs" Link="NetherNativeUnitParameterProjection.cs" Condition="Exists('..\AutoNether\Services\NetherNativeUnitParameterProjection.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherMechanismSpecificValuation.cs" Link="NetherMechanismSpecificValuation.cs" Condition="Exists('..\AutoNether\Services\NetherMechanismSpecificValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCrestMechanismValuation.cs" Link="NetherCrestMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherCrestMechanismValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherChargeMechanismValuation.cs" Link="NetherChargeMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherChargeMechanismValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherStackMechanismValuation.cs" Link="NetherStackMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherStackMechanismValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherErosionMechanismValuation.cs" Link="NetherErosionMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherErosionMechanismValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCategoryMechanismValuation.cs" Link="NetherCategoryMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherCategoryMechanismValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherForceChainMechanismValuation.cs" Link="NetherForceChainMechanismValuation.cs" Condition="Exists('..\AutoNether\Services\NetherForceChainMechanismValuation.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherEquipmentCodeValuePolicy.cs" Link="NetherEquipmentCodeValuePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherEquipmentCodeValuePolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodePartyCoverageProjection.cs" Link="NetherCodePartyCoverageProjection.cs" Condition="Exists('..\AutoNether\Services\NetherCodePartyCoverageProjection.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeIdentity.cs" Link="NetherCodeIdentity.cs" Condition="Exists('..\AutoNether\Services\NetherCodeIdentity.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeTransformPolicy.cs" Link="NetherCodeTransformPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherCodeTransformPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherEventPolicy.cs" Link="NetherEventPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherEventPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherShopContentMapper.cs" Link="NetherShopContentMapper.cs" Condition="Exists('..\AutoNether\Services\NetherShopContentMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCheckpointPolicy.cs" Link="NetherCheckpointPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRunBoundaryPolicy.cs" Link="NetherRunBoundaryPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherRunBoundaryPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRunBoundaryMasterMapper.cs" Link="NetherRunBoundaryMasterMapper.cs" Condition="Exists('..\AutoNether\Services\NetherRunBoundaryMasterMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherStartRunNativeBinding.cs" Link="NetherStartRunNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherStartRunNativeBinding.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherStrategyEvidence.cs" Link="NetherStrategyEvidence.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyEvidence.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherStrategyVisibleEvidenceMapper.cs" Link="NetherStrategyVisibleEvidenceMapper.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyVisibleEvidenceMapper.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherStrategyVisibleEvidenceAssembler.cs" Link="NetherStrategyVisibleEvidenceAssembler.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyVisibleEvidenceAssembler.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherStrategyEvidenceProductionGate.cs" Link="NetherStrategyEvidenceProductionGate.cs" Condition="Exists('..\AutoNether\Services\NetherStrategyEvidenceProductionGate.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherReturnItemPolicy.cs" Link="NetherReturnItemPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherReturnItemPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleSettingsLeaseState.cs" Link="NetherBattleSettingsLeaseState.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLeaseState.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleSettingsLease.cs" Link="NetherBattleSettingsLease.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLease.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleSettingsLeaseRuntimeCoordinator.cs" Link="NetherBattleSettingsLeaseRuntimeCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLeaseRuntimeCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleSettingsLeaseControllerLifecycle.cs" Link="NetherBattleSettingsLeaseControllerLifecycle.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsLeaseControllerLifecycle.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleSettingsNativeAccessor.cs" Link="NetherBattleSettingsNativeAccessor.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettingsNativeAccessor.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherActionReconcilePolicy.cs" Link="NetherActionReconcilePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherActionReconcilePolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherFloorActionTransactionComposer.cs" Link="NetherFloorActionTransactionComposer.cs" Condition="Exists('..\AutoNether\Services\NetherFloorActionTransactionComposer.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherShopPurchaseCloseCoordinator.cs" Link="NetherShopPurchaseCloseCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherShopPurchaseCloseCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherShopPurchaseConfirmCoordinator.cs" Link="NetherShopPurchaseConfirmCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherShopPurchaseConfirmCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeReloadEpochCoordinator.cs" Link="NetherCodeReloadEpochCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherCodeReloadEpochCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeKeepCancelCoordinator.cs" Link="NetherCodeKeepCancelCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherCodeKeepCancelCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeTransformNativeFlow.cs" Link="NetherCodeTransformNativeFlow.cs" Condition="Exists('..\AutoNether\Services\NetherCodeTransformNativeFlow.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherOwnedPopupNativeStageRuntime.cs" Link="NetherOwnedPopupNativeStageRuntime.cs" Condition="Exists('..\AutoNether\Services\NetherOwnedPopupNativeStageRuntime.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherOwnedPopupStageBridgeEntry.cs" Link="NetherOwnedPopupStageBridgeEntry.cs" Condition="Exists('..\AutoNether\Services\NetherOwnedPopupStageBridgeEntry.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherPopupDispatchPolicy.cs" Link="NetherPopupDispatchPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherPopupDispatchPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherPopupOwnershipRegistry.cs" Link="NetherPopupOwnershipRegistry.cs" Condition="Exists('..\AutoNether\Services\NetherPopupOwnershipRegistry.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeFlowCoordinator.cs" Link="NetherRuntimeFlowCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeFlowCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherFloorEventSequenceTaskFlow.cs" Link="NetherFloorEventSequenceTaskFlow.cs" Condition="Exists('..\AutoNether\Services\NetherFloorEventSequenceTaskFlow.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRecoveredFloorEventTaskLease.cs" Link="NetherRecoveredFloorEventTaskLease.cs" Condition="Exists('..\AutoNether\Services\NetherRecoveredFloorEventTaskLease.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherContentAcquiredConfirmLease.cs" Link="NetherContentAcquiredConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherContentAcquiredConfirmLease.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherTreasureConfirmLease.cs" Link="NetherTreasureConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherTreasureConfirmLease.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeReceivedConfirmLease.cs" Link="NetherCodeReceivedConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherCodeReceivedConfirmLease.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherFloorEventSequenceNativeBinding.cs" Link="NetherFloorEventSequenceNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherFloorEventSequenceNativeBinding.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodePopupNativeBinding.cs" Link="NetherCodePopupNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherCodePopupNativeBinding.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeTransformNativeBinding.cs" Link="NetherCodeTransformNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherCodeTransformNativeBinding.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodePopupInteropResolver.cs" Link="NetherCodePopupInteropResolver.cs" Condition="Exists('..\AutoNether\Services\NetherCodePopupInteropResolver.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeConfirmTaskInvoker.cs" Link="NetherCodeConfirmTaskInvoker.cs" Condition="Exists('..\AutoNether\Services\NetherCodeConfirmTaskInvoker.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCodeCancelTaskInvoker.cs" Link="NetherCodeCancelTaskInvoker.cs" Condition="Exists('..\AutoNether\Services\NetherCodeCancelTaskInvoker.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherLifecycleInteropBindings.cs" Link="NetherLifecycleInteropBindings.cs" Condition="Exists('..\AutoNether\Services\NetherLifecycleInteropBindings.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherReadOnlyReconcileCoordinator.cs" Link="NetherReadOnlyReconcileCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherReadOnlyReconcileCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherReadOnlyReconcileNativeBinding.cs" Link="NetherReadOnlyReconcileNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherReadOnlyReconcileNativeBinding.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleSettlementCoordinator.cs" Link="NetherBattleSettlementCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleSettlementCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleTerminalObservationPolicy.cs" Link="NetherBattleTerminalObservationPolicy.cs" Condition="Exists('..\AutoNether\Services\NetherBattleTerminalObservationPolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleResultContinuationFlow.cs" Link="NetherBattleResultContinuationFlow.cs" Condition="Exists('..\AutoNether\Services\NetherBattleResultContinuationFlow.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleResultCodeCoordinator.cs" Link="NetherBattleResultCodeCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleResultCodeCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRecoveredCodeOfferCoordinator.cs" Link="NetherRecoveredCodeOfferCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherRecoveredCodeOfferCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherStartStatusParentCapture.cs" Link="NetherStartStatusParentCapture.cs" Condition="Exists('..\AutoNether\Services\NetherStartStatusParentCapture.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherCheckpointStartStatusParentCapture.cs" Link="NetherCheckpointStartStatusParentCapture.cs" Condition="Exists('..\AutoNether\Services\NetherCheckpointStartStatusParentCapture.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherUniTaskFaultDiagnostic.cs" Link="NetherUniTaskFaultDiagnostic.cs" Condition="Exists('..\AutoNether\Services\NetherUniTaskFaultDiagnostic.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherTransitionSnapshotCache.cs" Link="NetherTransitionSnapshotCache.cs" Condition="Exists('..\AutoNether\Services\NetherTransitionSnapshotCache.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherAppliedSnapshotCapturePolicy.cs" Link="NetherAppliedSnapshotCapturePolicy.cs" Condition="Exists('..\AutoNether\Services\NetherAppliedSnapshotCapturePolicy.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleResultNextNativeBinding.cs" Link="NetherBattleResultNextNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherBattleResultNextNativeBinding.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherFloorSceneReadiness.cs" Link="NetherFloorSceneReadiness.cs" Condition="Exists('..\AutoNether\Services\NetherFloorSceneReadiness.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleResultReboundReadiness.cs" Link="NetherBattleResultReboundReadiness.cs" Condition="Exists('..\AutoNether\Services\NetherBattleResultReboundReadiness.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherBattleIngressCoordinator.cs" Link="NetherBattleIngressCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherBattleIngressCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherResultSceneCoordinator.cs" Link="NetherResultSceneCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherResultSceneCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherContinueSceneCoordinator.cs" Link="NetherContinueSceneCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneCoordinator.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherContinueSceneTransitionEvidence.cs" Link="NetherContinueSceneTransitionEvidence.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneTransitionEvidence.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherRuntimeGenerationVisibility.cs" Link="NetherRuntimeGenerationVisibility.cs" Condition="Exists('..\AutoNether\Services\NetherRuntimeGenerationVisibility.cs')" />
-    <Compile Include="..\AutoNether\Services\NetherContinueSceneRuntimeCoordinator.cs" Link="NetherContinueSceneRuntimeCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherContinueSceneRuntimeCoordinator.cs')" />
+    <ProjectReference Include="..\AutoNether\AutoNether.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx.Core">
+      <HintPath>$(GameDir)\BepInEx\core\BepInEx.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP">
+      <HintPath>$(GameDir)\BepInEx\core\BepInEx.Unity.IL2CPP.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Content Include="$(GameDir)\BepInEx\core\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>

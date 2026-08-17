@@ -62,9 +62,26 @@ internal sealed record NetherRuntimePopupContext
     /// Recovery and Treasure do not carry this presentation argument and retain zero.
     /// </summary>
     public long TargetCharacterId { get; init; }
+    /// <summary>Exact rendered floor/node identity correlated with the Event popup.</summary>
+    public long FloorId { get; init; }
+    public long NodeId { get; init; }
     public int RawFloorType { get; init; }
     public IReadOnlyList<NetherEventOption> Options { get; init; } = Array.Empty<NetherEventOption>();
     public IReadOnlyList<NetherShopContent> ShopContents { get; init; } = Array.Empty<NetherShopContent>();
+    /// <summary>
+    /// Optional route commitment captured before the native popup was opened. A live popup must
+    /// match this identity before any option payment is dispatched.
+    /// </summary>
+    public NetherEventCommitment? ExpectedEventCommitment { get; init; }
+    /// <summary>
+    /// Route/pre-entry commitments keyed by the complete Event/part/floor/node/option identity.
+    /// A popup can expose several exact options, while only the option chosen before entry has a
+    /// committed projected state.
+    /// </summary>
+    public IReadOnlyDictionary<NetherEventCommitmentKey, NetherEventCommitment> ExpectedEventCommitments { get; init; } =
+        new Dictionary<NetherEventCommitmentKey, NetherEventCommitment>();
+    /// <summary>Exact mode/wallet facts used for Event reward ordering when available.</summary>
+    public NetherEventStrategyEvidence? EventStrategyEvidence { get; init; }
     /// <summary>
     /// Exact removal committed by the preceding accepted Recovery option. The native Change popup
     /// itself exposes only the owned Code list and cannot reconstruct Rest/Purification value.
@@ -149,6 +166,7 @@ internal sealed record NetherPopupDispatchDecision
     public bool HasEffectProjection { get; init; }
     public int ProjectedErosion { get; init; }
     public int HpDelta { get; init; }
+    public bool AllowsPartialActiveDeaths { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
 }
@@ -233,12 +251,49 @@ internal static class NetherPopupDispatchPolicy
             modifiers = mapped!;
         }
 
+        NetherEventStrategyEvidence? eventStrategyEvidence = popup.EventStrategyEvidence;
+        if (eventStrategyEvidence == null && settings.StrategyMode == NetherStrategyMode.Equipment)
+        {
+            // Equipment is an explicit setting; it does not require a speculative Research
+            // settlement projection to activate its exact reward ordering.
+            eventStrategyEvidence = new NetherEventStrategyEvidence
+            {
+                IsKnown = true,
+                Mode = NetherStrategyMode.Equipment,
+            };
+        }
+        if (popup.Kind == NetherRuntimePopupKind.Event
+            && settings.StrategyMode == NetherStrategyMode.Research
+            && (eventStrategyEvidence == null
+                || !eventStrategyEvidence.IsUsableFor(NetherStrategyMode.Research))
+            && !popup.Options.Any(option =>
+                option.StrategyEvidence?.IsUsableFor(NetherStrategyMode.Research) == true))
+        {
+            return Pause(
+                NetherPauseReason.BindingUnavailable,
+                "event-strategy-evidence-unavailable:"
+                    + (eventStrategyEvidence?.UnknownReason ?? "missing")
+            );
+        }
+
         return popup.Kind switch
         {
             NetherRuntimePopupKind.CodeOffer => new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.Code },
             NetherRuntimePopupKind.CodeTransform => FromCodeTransform(snapshot, popup),
             NetherRuntimePopupKind.Event when popup.RawFloorType == (int)NetherFloorNodeType.Event =>
-                FromEventDecision(EventPolicy.DecideEvent(snapshot, popup.Options, settings, modifiers), popup.TargetCharacterId),
+                FromEventDecision(
+                    EventPolicy.DecideEvent(
+                        snapshot,
+                        popup.Options,
+                        settings,
+                        modifiers,
+                        eventStrategyEvidence
+                    ),
+                    popup.TargetCharacterId,
+                    popup.ExpectedEventCommitment,
+                    popup.ExpectedEventCommitments,
+                    requireExpectedCommitment: popup.Options.Any(option => option.RequiresExactBinding)
+                ),
             NetherRuntimePopupKind.Event => Pause(NetherPauseReason.UnknownFloor, "event-popup-raw-type-mismatch:" + popup.RawFloorType),
             NetherRuntimePopupKind.Recovery => FromEventDecision(
                 EventPolicy.DecideRecovery(
@@ -248,9 +303,18 @@ internal static class NetherPopupDispatchPolicy
                     modifiers,
                     transformHardExclusions
                 ),
-                0
+                0,
+                popup.ExpectedEventCommitment,
+                popup.ExpectedEventCommitments,
+                requireExpectedCommitment: false
             ),
-            NetherRuntimePopupKind.Treasure => FromEventDecision(EventPolicy.DecideTreasure(snapshot, popup.Options, settings, modifiers), 0),
+            NetherRuntimePopupKind.Treasure => FromEventDecision(
+                EventPolicy.DecideTreasure(snapshot, popup.Options, settings, modifiers),
+                0,
+                popup.ExpectedEventCommitment,
+                popup.ExpectedEventCommitments,
+                requireExpectedCommitment: false
+            ),
             NetherRuntimePopupKind.Shop => FromShopDecision(EventPolicy.DecideShop(snapshot, popup.ShopContents, settings)),
             NetherRuntimePopupKind.Continue or NetherRuntimePopupKind.ReturnItems =>
                 new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.AwaitNativeFlow },
@@ -288,8 +352,60 @@ internal static class NetherPopupDispatchPolicy
 
     private static NetherPopupDispatchDecision FromEventDecision(
         NetherEventDecision decision,
-        long presentationCharacterId
-    ) => decision.Kind switch
+        long presentationCharacterId,
+        NetherEventCommitment? expectedCommitment,
+        IReadOnlyDictionary<NetherEventCommitmentKey, NetherEventCommitment>? expectedCommitments,
+        bool requireExpectedCommitment
+    )
+    {
+        NetherEventCommitment? selectedExpectedCommitment = null;
+        if (expectedCommitments is { Count: > 0 })
+        {
+            expectedCommitments.TryGetValue(
+                new NetherEventCommitmentKey(
+                    decision.EventId,
+                    decision.EventPartId,
+                    decision.FloorId,
+                    decision.NodeId,
+                    decision.OptionNumber
+                ),
+                out selectedExpectedCommitment
+            );
+        }
+        else
+        {
+            selectedExpectedCommitment = expectedCommitment;
+        }
+        if (decision.Kind == NetherEventDecisionKind.Select
+            && (requireExpectedCommitment && selectedExpectedCommitment == null
+                || selectedExpectedCommitment is NetherEventCommitment expected
+                && (decision.Commitment == null
+                    || !expected.IsValid
+                    || !expected.Matches(new NetherEventOption(
+                    decision.OptionNumber,
+                    decision.ExpectedEffects
+                )
+                    {
+                        EventId = decision.EventId,
+                        EventPartId = decision.EventPartId,
+                        FloorId = decision.FloorId,
+                        NodeId = decision.NodeId,
+                        BattleEvidence = decision.Battle,
+                        RewardEvidence = decision.Reward,
+                        PartialDeathEligibility = decision.PartialDeathEligibility,
+                        AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
+                        CommittedGoldMinimum = decision.CommittedGoldMinimum,
+                        CommittedKeyMinimum = decision.CommittedKeyMinimum,
+                }, decision.ProjectedErosion, decision.HpDelta, decision.Battle, decision.Reward,
+                    decision.ProjectedNetherGold, decision.ProjectedTreasureKeys))))
+        {
+            return Pause(
+                NetherPauseReason.StaleEventCommitment,
+                "event-commitment-mismatch-before-payment"
+            );
+        }
+
+        return decision.Kind switch
     {
         NetherEventDecisionKind.Select => new NetherPopupDispatchDecision
         {
@@ -302,14 +418,27 @@ internal static class NetherPopupDispatchPolicy
                 ExpectedEffects = decision.ExpectedEffects,
                 HasExpectedErosionDelta = true,
                 ExpectedErosionDelta = decision.ExpectedErosionDelta,
+                ProjectedErosion = decision.ProjectedErosion,
+                ProjectedHpDelta = decision.HpDelta,
+                ProjectedNetherGold = decision.ProjectedNetherGold,
+                ProjectedTreasureKeys = decision.ProjectedTreasureKeys,
+                CommittedGoldMinimum = decision.CommittedGoldMinimum,
+                CommittedKeyMinimum = decision.CommittedKeyMinimum,
+                EventId = decision.EventId,
+                EventPartId = decision.EventPartId,
+                EventFloorId = decision.FloorId,
+                EventNodeId = decision.NodeId,
+                EventCommitment = decision.Commitment,
             },
             HasEffectProjection = true,
             ProjectedErosion = decision.ProjectedErosion,
             HpDelta = decision.HpDelta,
+            AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
             Detail = "popup-event:" + decision.OptionNumber,
         },
         _ => Pause(decision.PauseReason, decision.Detail),
     };
+    }
 
     private static NetherPopupDispatchDecision FromShopDecision(NetherShopDecision decision) => decision.Kind switch
     {

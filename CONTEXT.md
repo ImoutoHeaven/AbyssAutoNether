@@ -389,3 +389,109 @@ _Avoid_: Treating all Events as one tier, putting a known rank-5 objective below
 **Late-Shop Encounter Priority**:
 The Equipment route objective after the floor-90 shop threshold. Current 130-floor MasterData corroborates the boundary operationally: floor-89 selected inventory still uses rank-4 bags, while floor 95 is the first shop floor whose possible selected inventories include rank-5 Gold bags priced at 300 Nether Gold. Subject to Route Safety Gate, the semantic order is `Terminal Boss > known Red rank-5 Treasure > known Gold rank-5 Treasure / Eligible Late Shop > Event Boss > Elite/Event MiniBoss > Normal Battle > Direct Code Offer > ordinary Event > Recovery`; a direct Gold-Treasure/Shop tie favours Treasure, and an ineligible Shop ranks below Recovery. This ordering is applied over the Visible-Branch Encounter Vector.
 _Avoid_: Shop priority before floor 90, relation possibility as actual inventory, granting settlement semantics to Event Boss, Shop outranking terminal Boss or known Red Treasure
+
+## Fresh native design boundary (2026-08-17)
+
+The current native design is authoritative for tickets 07–09. Fresh Docker read-only Cpp2IL runs
+used `Project.dll` SHA-256
+`53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300`, `GameAssembly.dll` SHA-256
+`573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb`, and
+`global-metadata.dat` SHA-256
+`ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5`. Exact commands and output
+anchors are recorded in `docs/agents/evidence-backed-strategy-modes-07-09-evidence.md`.
+
+The native `MNetherFloorEvents` row binds four `MNetherFloorEventParts` IDs; each part contains
+three raw target/parameter pairs and one raw content tuple. `MNetherFloorBattles` exposes a raw
+integer `type`, stage ID, and Code-drop ratio, but the fresh native type/member evidence does not
+prove a local semantic Boss/MiniBoss/Normal enum. `NetherEventPopupController` carries the exact
+Event row, part array, and presenter `_mCharacterId`, while
+`NetherApiDataStore.RequestNetherUpdateEventAsync` accepts only floor level/index, selected option
+number, and Code-change ID. Event/Part IDs therefore remain client-side commitment correlation;
+they are never invented as request arguments. Exact runtime battle options with no typed semantic
+provider are rejected locally, and raw battle type or Code-drop ratio is not used as a guessed tier.
+
+Fresh result evidence also shows `NetherResultRequestEntity` contains only Nether/map IDs and the
+insurance flag, `NetherResultResponseEntity.nether_code_points` is a post-result four-family
+outcome, and `NetherPointData.SpherePointRatio` is separate technology state. Research completion
+therefore remains unknown in production until a server-authoritative pre-settlement projection is
+available; policy accepts only an exact typed projection and never substitutes Code count,
+capacity, gauge, technology rate, settlement points, or displayed power.
+
+## Fresh native design boundary (2026-08-18 second-review repair)
+
+The second-review repair re-ran Cpp2IL in Docker with the game directory mounted read-only. The
+fresh game hashes, decompiled artifact hashes, exact command, and output anchors are recorded in
+`docs/agents/evidence-backed-strategy-modes-07-09-evidence.md` under `j-cx00jc`. The native design
+did not conflict with the ticket/spec contracts: `MNetherFloorEvents` declares four part IDs,
+`MNetherFloorEventParts` declares raw target/content rows, `MItems` and `MNetherFloorBattles`
+provide exact item/battle rows, and `NetherEventPopupController` exposes the popup's Event/part
+arrays. `NetherApiDataStore.RequestNetherUpdateEventAsync` still accepts only floor level, floor
+index, option number, and Code-change ID. Therefore EventId/EventPartId and floor/node identity
+are retained as an immutable client commitment and stale-guard key, while only the proven native
+floor/index/option/Code arguments are sent to the game. Raw battle `type` remains semantically
+unproven; production rejects a battle option lacking a typed semantic provider rather than
+guessing. Research's production completion projection remains unknown because native result
+`nether_code_points` is post-result settlement data and `SpherePointRatio` is technology state.
+
+## Fresh native design boundary (2026-08-18 third-review repair)
+
+Post-fix fresh native evidence is recorded under job `j-g1etxg` in
+`docs/agents/evidence-backed-strategy-modes-07-09-evidence.md`. It re-confirmed the exact native
+item/battle row fields and IDs, the four Event part references, the popup's Event/part arrays, and
+the floor/index/option/Code-only update signature. No native design conflict was found. Research
+therefore uses the effective target family after primary reroll exhaustion, while Event row
+identity remains option-local client evidence. Malformed item or battle rows retain their original
+native ID for local invalidation; a valid sibling with the same ID does not mask the malformed
+dependency, and unrelated exact options remain eligible.
+
+## Fresh native design boundary (2026-08-18 final spec-axis repair)
+
+The final spec-axis repair used fresh Docker Cpp2IL evidence from jobs `j-2rngms` (pre-fix) and
+`j-a9j9qd` (post-fix), both with `/c/Users/Eden/PixelAbyssX/dotabyss_x_cl` mounted as read-only
+`/game`; exact commands, logs, game hashes, and decompiled artifact hashes are recorded in
+`docs/agents/evidence-backed-strategy-modes-07-09-evidence.md`. The authoritative post-fix
+anchors remain `MNetherFloorBattles.cs:4-15`, `MNetherFloorEvents.cs:4-25`,
+`MNetherFloorEventParts.cs:4-29`, and `NetherApiDataStore.cs:284-290`.
+
+Native `MNetherFloorBattles.type` is only a raw integer in this build. Values 1–8 therefore do
+not prove Boss/MiniBoss/Normal semantics; production keeps exact battle, stage, and content
+identity but leaves the semantic tier unknown until an authoritative typed provider is present.
+The native Event update seam accepts only floor level, floor index, selected option number, and
+Code-change ID, so Event/Part IDs remain client-side commitment correlation. Research now resolves
+the effective target family after all primary rerolls and before hard eligibility, candidate
+filtering, capacity removal, retained-family resolution, and same-family strict-improvement
+decisions. No native/spec/context deviation was needed.
+
+## Fresh native design boundary (2026-08-18 closing repair)
+
+Closing repair evidence is Docker job `j-fy65yc`, with the game mounted read-only at `/game` and
+`CPP2IL_EXIT=0`/`DIFFABLE_EXIT=0`. `MNetherFloorEventParts.cs` hash
+`5ad97670122ba462fb0c9d4f9197fa7e934d988b148f70b307478b86da44e128` output lines 13-29 proves
+only raw target/parameter and content fields; `MNetherFloorBattles.cs` hash
+`7034adf207379ef2f42aa6eb8aa3155252928d08cfd1c4643635c61368cbd720` lines 7-15 proves raw
+battle type/stage/drop fields only; and `NetherApiDataStore.cs` hash
+`b970836a0c0457174405d227b3e100a41dcf3a7a3b7a8a6abe1d6fe036a18071` lines 287-288 proves the
+native Event update accepts floor level, floor index, selected option, and Code-change ID.
+Production consequently uses one shared Event mapping: target type 7 with a nonzero parameter and
+content type 160 with a nonzero content ID are unknown and fail-closed; Event/Part IDs remain
+client-only correlation, and raw battle tiers remain unknown. The closing public GREEN is
+`j-voopjz` (196/196); the final Docker gate records the exact amended HEAD from its
+`git rev-parse HEAD` output.
+
+## Fresh native design boundary (2026-08-18 raw ItemType overflow repair)
+
+Fresh read-only Docker Cpp2IL jobs `j-bghfub` (pre-fix) and `j-5l2ncz` (post-fix) both returned
+`CPP2IL_EXIT=0` and `DIFFABLE_EXIT=0`. `MItems.cs` hash
+`e69e8310aa256e60e356e84e857e1b7f92f056a952c03b96f9182e865cfd0d27`, output lines 4-19,
+has `MItems.type` as raw `long` at source line 11; `MNetherFloorEventParts.cs` hash
+`5ad97670122ba462fb0c9d4f9197fa7e934d988b148f70b307478b86da44e128`, output lines 4-29,
+retains raw Event target/parameter/content fields. The immutable game hashes were
+Project.dll `53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300`,
+GameAssembly.dll `573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb`, and
+global-metadata.dat `ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5`.
+
+No narrower closed native item-type domain is proven. Production therefore maps raw item types
+only within the existing Int32 evidence seam; a positive or negative raw value outside that
+domain is option-local unknown/paused in visible map, pre-entry, runtime, and commitment binding,
+with no checked cast escaping. This preserves native-first behavior without inventing an item
+type semantic domain.

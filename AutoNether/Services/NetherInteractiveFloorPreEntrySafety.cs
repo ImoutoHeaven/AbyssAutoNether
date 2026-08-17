@@ -110,11 +110,25 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyInput(
     /// resolver's event row; zero means the resolver's floor-master fallback is in effect.
     /// </summary>
     public long FloorExtendId { get; init; }
+    /// <summary>Stable runtime node coordinate paired with <see cref="FloorMasterId"/>.</summary>
+    public long FloorNodeId { get; init; }
     /// <summary>Current authoritative portfolio used to prove that target_type=7 has a removable code.</summary>
     public IReadOnlyList<NetherCodeState> CurrentCodes { get; init; } = Array.Empty<NetherCodeState>();
     public int CodeCapacity { get; init; }
     public IReadOnlyList<NetherInteractivePartialDeathEligibility> PartialDeathEligibility { get; init; } =
         Array.Empty<NetherInteractivePartialDeathEligibility>();
+    /// <summary>
+    /// Optional exact MItems/MNetherFloorBattles copies. Production supplies these rows; pure
+    /// legacy callers may omit them only for non-exact options.
+    /// </summary>
+    public IReadOnlyList<NetherStrategyItemMasterRow>? ItemRows { get; init; }
+    public IReadOnlyList<NetherStrategyBattleMasterRow>? BattleRows { get; init; }
+    /// <summary>
+    /// Exact route commitments keyed by native Event/part/option identity. Missing keys mean no
+    /// committed procurement for that option; invalid values make only that option unknown.
+    /// </summary>
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> CommittedProcurementByOption { get; init; } =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
 }
 
 /// <summary>
@@ -128,8 +142,35 @@ internal sealed record NetherInteractiveOptionProjection(
     IReadOnlyList<NetherEffect> ExpectedEffects
 )
 {
+    public long EventId { get; init; }
+    public long EventPartId { get; init; }
+    public long FloorId { get; init; }
+    public long NodeId { get; init; }
+    public bool IsKnown { get; init; } = true;
+    public string UnknownReason { get; init; } = string.Empty;
+    public bool HasRouteSafetyEvidence { get; init; }
+    public bool RouteSafetyAllowed { get; init; } = true;
+    public string RouteSafetyUnknownReason { get; init; } = string.Empty;
+    public NetherEventBattleEvidence? Battle { get; init; }
+    public NetherEventRewardEvidence? Reward { get; init; }
     public bool AllowsPartialActiveDeaths { get; init; }
+    public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
+    public bool IsMandatoryRankFiveKeyObjective { get; init; }
+    public bool HasCommittedProcurementEvidence { get; init; }
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
 }
+
+internal readonly record struct NetherInteractiveEventOptionKey(
+    long EventId,
+    long EventPartId,
+    int OptionNumber
+);
+
+internal sealed record NetherInteractiveEventPartIndex(
+    IReadOnlyDictionary<long, NetherFloorEventPartMasterRow> Rows,
+    IReadOnlySet<long> AmbiguousIds
+);
 
 /// <summary>
 /// Projection of the exact event row already represented by the server floor model. The route
@@ -146,18 +187,23 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyResult
         new Dictionary<long, int>();
     public IReadOnlyDictionary<long, NetherInteractiveOptionProjection> SafeOptionProjectionByEventId { get; init; } =
         new Dictionary<long, NetherInteractiveOptionProjection>();
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection> OptionProjectionByKey { get; init; } =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>();
     public NetherInteractiveWorstCaseProjection? WorstCaseProjection { get; init; }
 
     public static NetherInteractiveFloorPreEntrySafetyResult Safe(
         IReadOnlyDictionary<long, int>? safeOptions = null,
         IReadOnlyDictionary<long, NetherInteractiveOptionProjection>? projections = null,
-        NetherInteractiveWorstCaseProjection? worstCase = null
+        NetherInteractiveWorstCaseProjection? worstCase = null,
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? optionProjections = null
     ) => new()
     {
         IsSafe = true,
         PauseReason = NetherPauseReason.None,
         SafeOptionNumberByEventId = safeOptions ?? new Dictionary<long, int>(),
         SafeOptionProjectionByEventId = projections ?? new Dictionary<long, NetherInteractiveOptionProjection>(),
+        OptionProjectionByKey = optionProjections
+            ?? new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>(),
         WorstCaseProjection = worstCase,
     };
 
@@ -299,11 +345,16 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         {
             return Unknown(eventError);
         }
-        if (!TryIndexEventParts(input.EventPartRows, out IReadOnlyDictionary<long, NetherFloorEventPartMasterRow>? parts, out string partError))
+        if (!TryIndexEventParts(
+                input.EventPartRows,
+                out NetherInteractiveEventPartIndex? parts,
+                out string partError
+            ))
             return Unknown(partError);
 
         var safeOptions = new Dictionary<long, int>();
         var projections = new Dictionary<long, NetherInteractiveOptionProjection>();
+        var optionProjections = new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>();
         int worstErosion = int.MinValue;
         int worstHp = int.MaxValue;
         foreach (NetherFloorEventMasterRow row in resolvedRows!)
@@ -311,18 +362,27 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             if (!TryBuildOptions(
                     row,
                     parts!,
+                    input.ItemRows,
+                    input.BattleRows,
                     input.PartialDeathEligibility,
                     out IReadOnlyList<NetherEventOption>? options,
                     out string optionError
                 ))
                 return Unknown("event-row-" + row.EventId.ToString(CultureInfo.InvariantCulture) + ":" + optionError);
+            IReadOnlyList<NetherEventOption> optionsWithBudget = ApplyProcurementBudgets(
+                options!,
+                input.CommittedProcurementByOption
+            );
             if (!TrySelectSafeOption(
                     snapshot,
-                    options!,
+                    optionsWithBudget,
                     input.Settings!,
                     input.FloorKind,
+                    input.FloorMasterId,
+                    input.FloorNodeId > 0 ? input.FloorNodeId : input.FloorMasterId,
                     out int optionNumber,
                     out NetherInteractiveOptionProjection projection,
+                    out IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? rowProjections,
                     out NetherPauseReason rejection,
                     out string rejectionDetail
                 ))
@@ -334,6 +394,8 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             }
             safeOptions.Add(row.EventId, optionNumber);
             projections.Add(row.EventId, projection);
+            foreach (var optionProjection in rowProjections!)
+                optionProjections[optionProjection.Key] = optionProjection.Value;
             worstErosion = Math.Max(worstErosion, projection.ErosionDelta);
             worstHp = Math.Min(worstHp, projection.HpDelta);
         }
@@ -344,7 +406,8 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         return NetherInteractiveFloorPreEntrySafetyResult.Safe(
             safeOptions,
             projections,
-            new NetherInteractiveWorstCaseProjection(worstErosion, worstHp)
+            new NetherInteractiveWorstCaseProjection(worstErosion, worstHp),
+            optionProjections
         );
     }
 
@@ -408,7 +471,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
 
     private static bool TryIndexEventParts(
         IReadOnlyList<NetherFloorEventPartMasterRow>? rows,
-        out IReadOnlyDictionary<long, NetherFloorEventPartMasterRow>? indexed,
+        out NetherInteractiveEventPartIndex? indexed,
         out string error
     )
     {
@@ -420,28 +483,44 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         }
 
         var parts = new Dictionary<long, NetherFloorEventPartMasterRow>();
+        var ambiguous = new HashSet<long>();
         foreach (NetherFloorEventPartMasterRow row in rows)
         {
-            if (!row.HasRequiredFields || row.PartId <= 0)
+            if (!row.HasRequiredFields)
             {
-                error = "invalid-m-nether-floor-event-part";
-                return false;
+                // A malformed row has no dependable identity. It cannot invalidate a sibling
+                // option whose exact part ID still resolves.
+                if (row.PartId > 0)
+                {
+                    parts.Remove(row.PartId);
+                    ambiguous.Add(row.PartId);
+                }
+                continue;
             }
+            if (row.PartId <= 0)
+            {
+                continue;
+            }
+            if (ambiguous.Contains(row.PartId))
+                continue;
             if (!parts.TryAdd(row.PartId, row))
             {
                 error = "duplicate-m-nether-floor-event-part:" + row.PartId.ToString(CultureInfo.InvariantCulture);
-                return false;
+                parts.Remove(row.PartId);
+                ambiguous.Add(row.PartId);
             }
         }
 
-        indexed = parts;
+        indexed = new NetherInteractiveEventPartIndex(parts, ambiguous);
         error = string.Empty;
         return true;
     }
 
     private static bool TryBuildOptions(
         NetherFloorEventMasterRow row,
-        IReadOnlyDictionary<long, NetherFloorEventPartMasterRow> parts,
+        NetherInteractiveEventPartIndex parts,
+        IReadOnlyList<NetherStrategyItemMasterRow>? itemRows,
+        IReadOnlyList<NetherStrategyBattleMasterRow>? battleRows,
         IReadOnlyList<NetherInteractivePartialDeathEligibility> partialDeathEligibility,
         out IReadOnlyList<NetherEventOption>? options,
         out string error
@@ -452,13 +531,21 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         bool foundEmptyPart = false;
         var seen = new HashSet<long>();
         var mapped = new List<NetherEventOption>();
+        HashSet<long> ambiguousItemIds = new();
+        Dictionary<long, NetherStrategyItemMasterRow>? itemById = null;
+        if (itemRows != null)
+            itemById = BuildOptionRows(itemRows, value => value.Id, out ambiguousItemIds);
+        HashSet<long> ambiguousBattleIds = new();
+        Dictionary<long, NetherStrategyBattleMasterRow>? battleById = null;
+        if (battleRows != null)
+            battleById = BuildOptionRows(battleRows, value => value.Id, out ambiguousBattleIds);
         for (int index = 0; index < ids.Length; index++)
         {
             long id = ids[index];
             if (id < 0)
             {
-                error = "invalid-event-part-reference";
-                return false;
+                mapped.Add(UnknownOption(row.EventId, id, index + 1, "invalid-event-part-reference"));
+                continue;
             }
             if (id == 0)
             {
@@ -467,23 +554,56 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             }
             if (foundEmptyPart)
             {
-                error = "noncontiguous-event-part-reference";
-                return false;
+                mapped.Add(UnknownOption(row.EventId, id, index + 1, "noncontiguous-event-part-reference"));
+                continue;
             }
             if (!seen.Add(id))
             {
-                error = "duplicate-event-part-reference:" + id.ToString(CultureInfo.InvariantCulture);
-                return false;
+                mapped.Add(UnknownOption(
+                    row.EventId,
+                    id,
+                    index + 1,
+                    "duplicate-event-part-reference:" + id.ToString(CultureInfo.InvariantCulture)
+                ));
+                continue;
             }
-            if (!parts.TryGetValue(id, out NetherFloorEventPartMasterRow part))
+            if (parts.AmbiguousIds.Contains(id))
             {
-                error = "missing-m-nether-floor-event-part:" + id.ToString(CultureInfo.InvariantCulture);
-                return false;
+                mapped.Add(UnknownOption(
+                    row.EventId,
+                    id,
+                    index + 1,
+                    "duplicate-m-nether-floor-event-part:" + id.ToString(CultureInfo.InvariantCulture)
+                ));
+                continue;
             }
-            if (!TryMapPart(part, out IReadOnlyList<NetherEffect>? effects, out string partError))
+            if (!parts.Rows.TryGetValue(id, out NetherFloorEventPartMasterRow part))
             {
-                error = "event-part-" + id.ToString(CultureInfo.InvariantCulture) + ":" + partError;
-                return false;
+                mapped.Add(UnknownOption(
+                    row.EventId,
+                    id,
+                    index + 1,
+                    "missing-m-nether-floor-event-part:" + id.ToString(CultureInfo.InvariantCulture)
+                ));
+                continue;
+            }
+            if (!TryMapPart(
+                    part,
+                    itemById,
+                    ambiguousItemIds,
+                    battleById,
+                    ambiguousBattleIds,
+                    out IReadOnlyList<NetherEffect>? effects,
+                    out string partError
+                ))
+            {
+                mapped.Add(UnknownOption(
+                    row.EventId,
+                    id,
+                    index + 1,
+                    "event-part-" + id.ToString(CultureInfo.InvariantCulture) + ":" + partError
+                ));
+                continue;
             }
             NetherInteractivePartialDeathEligibility[] matchingEligibility = partialDeathEligibility
                 .Where(proof => proof != null
@@ -501,6 +621,8 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 EventId = row.EventId,
                 EventPartId = part.PartId,
                 PartialDeathEligibility = eligibility,
+                IsMandatoryRankFiveKeyObjective = eligibility?.AllowsHpPaidEventKey == true
+                    && eligibility.ExactTreasureRank == 5,
             });
         }
         if (mapped.Count == 0)
@@ -514,17 +636,80 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         return true;
     }
 
+    private static NetherEventOption UnknownOption(
+        long eventId,
+        long partId,
+        int optionNumber,
+        string reason
+    ) => new(optionNumber, [new NetherEffect(NetherEffectKind.Unknown, 0)
+    {
+        Known = false,
+        ContentKnown = false,
+    }])
+    {
+        EventId = eventId,
+        EventPartId = Math.Max(0, partId),
+        UnknownReason = reason,
+    };
+
+    private static Dictionary<long, T> BuildOptionRows<T>(
+        IEnumerable<T> rows,
+        Func<T, long> keySelector,
+        out HashSet<long> ambiguous
+    )
+    {
+        var mapped = new Dictionary<long, T>();
+        ambiguous = new HashSet<long>();
+        foreach (T row in rows)
+        {
+            long key = keySelector(row);
+            if (key <= 0 || ambiguous.Contains(key))
+                continue;
+            if (!mapped.TryAdd(key, row))
+            {
+                mapped.Remove(key);
+                ambiguous.Add(key);
+            }
+        }
+        return mapped;
+    }
+
     private static bool TryMapPart(
         NetherFloorEventPartMasterRow part,
+        IReadOnlyDictionary<long, NetherStrategyItemMasterRow>? itemById,
+        IReadOnlySet<long> ambiguousItemIds,
+        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow>? battleById,
+        IReadOnlySet<long> ambiguousBattleIds,
         out IReadOnlyList<NetherEffect>? effects,
         out string error
     )
     {
         effects = null;
         var mapped = new List<NetherEffect>();
-        if (!TryMapTarget(part.TargetType1, part.SelectParameter1, mapped, out error)
-            || !TryMapTarget(part.TargetType2, part.SelectParameter2, mapped, out error)
-            || !TryMapTarget(part.TargetType3, part.SelectParameter3, mapped, out error))
+        if (!TryMapTarget(
+                part.TargetType1,
+                part.SelectParameter1,
+                battleById,
+                ambiguousBattleIds,
+                mapped,
+                out error
+            )
+            || !TryMapTarget(
+                part.TargetType2,
+                part.SelectParameter2,
+                battleById,
+                ambiguousBattleIds,
+                mapped,
+                out error
+            )
+            || !TryMapTarget(
+                part.TargetType3,
+                part.SelectParameter3,
+                battleById,
+                ambiguousBattleIds,
+                mapped,
+                out error
+            ))
         {
             return false;
         }
@@ -538,16 +723,23 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             }
             NetherEffect? content = part.ContentType switch
             {
-                30 or 31 when part.ContentId > 0 => new NetherEffect(NetherEffectKind.Item, checked((int)part.Amount))
+                30 or 31 when part.ContentId > 0
+                    && TryResolveItemEvidence(
+                        part,
+                        itemById,
+                        ambiguousItemIds,
+                        out NetherEventRewardEvidence? rewardEvidence
+                    ) => new NetherEffect(NetherEffectKind.Item, checked((int)part.Amount))
+                {
+                    ContentId = part.ContentId,
+                    RewardEvidence = rewardEvidence,
+                },
+                160 when NetherEventNativeMapping.IsCodeOfferContentId(part.ContentId) => new NetherEffect(NetherEffectKind.AbyssCodeOffer, checked((int)part.Amount)),
+                165 when NetherEventNativeMapping.IsValidResourceContentId(part.ContentId) => new NetherEffect(NetherEffectKind.NetherGoldGain, checked((int)part.Amount))
                 {
                     ContentId = part.ContentId,
                 },
-                160 when part.ContentId == 0 => new NetherEffect(NetherEffectKind.AbyssCodeOffer, checked((int)part.Amount)),
-                165 => new NetherEffect(NetherEffectKind.NetherGoldGain, checked((int)part.Amount))
-                {
-                    ContentId = part.ContentId,
-                },
-                166 => new NetherEffect(NetherEffectKind.TreasureKeyGain, checked((int)part.Amount))
+                166 when NetherEventNativeMapping.IsValidResourceContentId(part.ContentId) => new NetherEffect(NetherEffectKind.TreasureKeyGain, checked((int)part.Amount))
                 {
                     ContentId = part.ContentId,
                 },
@@ -555,7 +747,9 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             };
             if (content == null)
             {
-                error = "unsupported-event-content-type:" + part.ContentType.ToString(CultureInfo.InvariantCulture);
+                error = part.ContentType is 30 or 31
+                    ? "event-item-master-row-unavailable:" + part.ContentId.ToString(CultureInfo.InvariantCulture)
+                    : "unsupported-event-content-type:" + part.ContentType.ToString(CultureInfo.InvariantCulture);
                 return false;
             }
             mapped.Add(content);
@@ -574,34 +768,96 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
     private static bool TryMapTarget(
         int rawType,
         long parameter,
+        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow>? battleById,
+        IReadOnlySet<long> ambiguousBattleIds,
         ICollection<NetherEffect> effects,
         out string error
     )
     {
-        error = string.Empty;
-        if (rawType == 0)
-            return true;
-        if (parameter < 0 || parameter > int.MaxValue || rawType is < 1 or > 8)
+        if (!NetherEventNativeMapping.TryMapTargetType(
+                rawType,
+                parameter,
+                out NetherEffectKind kind,
+                out int mappedAmount,
+                out error
+            ))
         {
-            error = "unsupported-event-target-type-or-parameter:" + rawType.ToString(CultureInfo.InvariantCulture);
             return false;
         }
+        if (rawType == 0)
+            return true;
 
-        NetherEffectKind kind = (NetherEffectKind)rawType;
         if (kind == NetherEffectKind.AbyssCodeTransform)
         {
-            // Native CreateModelByEventStarted treats target_type=7 as a boolean flow flag.
-            // select_parameter is not the replacement/new code ID (zero is a valid master value).
-            effects.Add(new NetherEffect(kind, 0));
+            effects.Add(new NetherEffect(kind, mappedAmount));
             return true;
         }
         if (kind == NetherEffectKind.Battle)
         {
-            effects.Add(new NetherEffect(kind, checked((int)parameter)) { IsOptionalBattle = true });
+            if (parameter == 0)
+            {
+                effects.Add(new NetherEffect(kind, 0) { IsOptionalBattle = true });
+                return true;
+            }
+            if (battleById == null
+                || ambiguousBattleIds.Contains(parameter)
+                || !battleById.TryGetValue(parameter, out NetherStrategyBattleMasterRow battle)
+                || !battle.HasRequiredFields
+                || battle.Id <= 0
+                || battle.BattleStageId <= 0
+                || battle.CodeDropRatio < 0)
+            {
+                error = "event-battle-master-row-unavailable:" + parameter.ToString(CultureInfo.InvariantCulture);
+                return false;
+            }
+            NetherEventBattleEvidence battleEvidence = NetherEventBattleEvidence.Unknown(
+                battle.Id,
+                "event-battle-semantic-tier-unavailable-for-raw-type:" + battle.BattleType
+            ) with
+            {
+                BattleStageId = battle.BattleStageId,
+                BattleType = battle.BattleType,
+                CodeDropRatio = battle.CodeDropRatio,
+            };
+            effects.Add(new NetherEffect(kind, mappedAmount)
+            {
+                IsOptionalBattle = true,
+                BattleEvidence = battleEvidence,
+            });
             return true;
         }
 
-        effects.Add(new NetherEffect(kind, checked((int)parameter)));
+        effects.Add(new NetherEffect(kind, mappedAmount));
+        return true;
+    }
+
+    private static bool TryResolveItemEvidence(
+        NetherFloorEventPartMasterRow part,
+        IReadOnlyDictionary<long, NetherStrategyItemMasterRow>? itemById,
+        IReadOnlySet<long> ambiguousItemIds,
+        out NetherEventRewardEvidence? rewardEvidence
+    )
+    {
+        rewardEvidence = null;
+        if (itemById == null)
+            return false;
+        if (ambiguousItemIds.Contains(part.ContentId)
+            || !itemById.TryGetValue(part.ContentId, out NetherStrategyItemMasterRow item)
+            || !item.HasRequiredFields
+            || item.Id <= 0
+            || !NetherEventNativeMapping.TryMapItemType(item.ItemType, out int itemType)
+            || !NetherEventNativeMapping.TryMapRewardRarity(item.Rarity, out NetherRewardRarity rarity)
+            || part.Amount is < 0 or > int.MaxValue)
+        {
+            return false;
+        }
+        rewardEvidence = new NetherEventRewardEvidence(
+            part.ContentId,
+            item.Id,
+            itemType,
+            rarity,
+            checked((int)part.Amount)
+        );
         return true;
     }
 
@@ -610,14 +866,19 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
         NetherFloorNodeType floorKind,
+        long floorId,
+        long nodeId,
         out int selectedOptionNumber,
         out NetherInteractiveOptionProjection selectedProjection,
+        out IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? allProjections,
         out NetherPauseReason rejection,
         out string detail
     )
     {
         selectedOptionNumber = 0;
         selectedProjection = default!;
+        var optionProjections = new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>();
+        allProjections = optionProjections;
         rejection = NetherPauseReason.NoSafeRoute;
         detail = "no-safe-event-option";
         var safeOptions = new List<NetherEventOption>();
@@ -631,6 +892,12 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             );
             if (decision.Kind != NetherEventDecisionKind.Select)
             {
+                optionProjections[OptionKey(option)] = UnknownProjection(
+                    option,
+                    floorId,
+                    nodeId,
+                    decision.Detail.Length == 0 ? "event-option-rejected" : decision.Detail
+                );
                 CaptureMoreSpecificRejection(decision, ref rejection, ref detail);
                 continue;
             }
@@ -638,6 +905,15 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             {
                 // A floor selected as interactive cannot prove a later battle's route/lease
                 // safety.  It is not an exit unless a non-battle option from this same row exists.
+                optionProjections[OptionKey(option)] = CreateProjection(
+                    decision,
+                    floorId,
+                    nodeId,
+                    isKnown: true,
+                    hasRouteSafetyEvidence: true,
+                    routeSafetyAllowed: false,
+                    routeSafetyUnknownReason: "event-battle-route-requires-post-selection-proof"
+                );
                 continue;
             }
             NetherRouteHpRule hpRule = MapOptionHpRule(floorKind, decision);
@@ -650,8 +926,26 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             {
                 rejection = NetherPauseReason.UnsafeHp;
                 detail = "event-option-hp-below-minimum";
+                optionProjections[OptionKey(option)] = CreateProjection(
+                    decision,
+                    floorId,
+                    nodeId,
+                    isKnown: true,
+                    hasRouteSafetyEvidence: true,
+                    routeSafetyAllowed: false,
+                    routeSafetyUnknownReason: detail
+                );
                 continue;
             }
+            optionProjections[OptionKey(option)] = CreateProjection(
+                decision,
+                floorId,
+                nodeId,
+                isKnown: true,
+                hasRouteSafetyEvidence: true,
+                routeSafetyAllowed: true,
+                routeSafetyUnknownReason: string.Empty
+            );
             safeOptions.Add(option);
         }
 
@@ -671,19 +965,12 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             return false;
         }
         selectedOptionNumber = selected.OptionNumber;
-        try
-        {
-            selectedProjection = new NetherInteractiveOptionProjection(
-                selected.OptionNumber,
-                checked(selected.ProjectedErosion - snapshot.ErosionPoint),
-                selected.HpDelta,
-                selected.ExpectedEffects.ToArray()
-            )
-            {
-                AllowsPartialActiveDeaths = selected.AllowsPartialActiveDeaths,
-            };
-        }
-        catch (OverflowException)
+        NetherInteractiveEventOptionKey selectedKey = new(
+            selected.EventId,
+            selected.EventPartId,
+            selected.OptionNumber
+        );
+        if (!optionProjections.TryGetValue(selectedKey, out selectedProjection!))
         {
             rejection = NetherPauseReason.UnknownEffect;
             detail = "event-option-projection-overflow";
@@ -691,6 +978,73 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         }
         return true;
     }
+
+    private static NetherInteractiveEventOptionKey OptionKey(NetherEventOption option) => new(
+        option.EventId,
+        option.EventPartId,
+        option.OptionNumber
+    );
+
+    private static NetherInteractiveOptionProjection CreateProjection(
+        NetherEventDecision decision,
+        long floorId,
+        long nodeId,
+        bool isKnown,
+        bool hasRouteSafetyEvidence,
+        bool routeSafetyAllowed,
+        string routeSafetyUnknownReason
+    ) => new(
+        decision.OptionNumber,
+        decision.ExpectedErosionDelta,
+        decision.HpDelta,
+        decision.ExpectedEffects.ToArray()
+    )
+    {
+        EventId = decision.EventId,
+        EventPartId = decision.EventPartId,
+        FloorId = floorId,
+        NodeId = nodeId,
+        IsKnown = isKnown,
+        UnknownReason = isKnown ? string.Empty : routeSafetyUnknownReason,
+        HasRouteSafetyEvidence = hasRouteSafetyEvidence,
+        RouteSafetyAllowed = routeSafetyAllowed,
+        RouteSafetyUnknownReason = routeSafetyUnknownReason,
+        Battle = decision.Battle,
+        Reward = decision.Reward,
+        AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
+        PartialDeathEligibility = decision.PartialDeathEligibility,
+        HasCommittedProcurementEvidence = decision.CommittedGoldMinimum > 0
+            || decision.CommittedKeyMinimum > 0,
+        CommittedGoldMinimum = decision.CommittedGoldMinimum,
+        CommittedKeyMinimum = decision.CommittedKeyMinimum,
+        IsMandatoryRankFiveKeyObjective = decision.PartialDeathEligibility?.AllowsHpPaidEventKey == true
+            && decision.PartialDeathEligibility.ExactTreasureRank == 5,
+    };
+
+    private static NetherInteractiveOptionProjection UnknownProjection(
+        NetherEventOption option,
+        long floorId,
+        long nodeId,
+        string rejectionDetail
+    ) => new(
+        option.OptionNumber,
+        0,
+        0,
+        option.Effects ?? Array.Empty<NetherEffect>()
+    )
+    {
+        EventId = option.EventId,
+        EventPartId = option.EventPartId,
+        FloorId = floorId,
+        NodeId = nodeId,
+        IsKnown = false,
+        UnknownReason = string.IsNullOrWhiteSpace(option.UnknownReason)
+            ? rejectionDetail
+            : option.UnknownReason,
+        HasRouteSafetyEvidence = false,
+        RouteSafetyAllowed = false,
+        RouteSafetyUnknownReason = rejectionDetail,
+    };
 
     private NetherEventDecision DecideInteractiveOption(
         NetherSnapshot snapshot,
@@ -729,6 +1083,38 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             [projection],
             new NetherInteractiveWorstCaseProjection(decision.ExpectedErosionDelta, decision.HpDelta)
         );
+    }
+
+    private static IReadOnlyList<NetherEventOption> ApplyProcurementBudgets(
+        IReadOnlyList<NetherEventOption> options,
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? budgets
+    )
+    {
+        if (options == null || budgets == null || budgets.Count == 0)
+            return options ?? Array.Empty<NetherEventOption>();
+
+        return options.Select(option =>
+        {
+            NetherInteractiveEventOptionKey key = OptionKey(option);
+            if (!budgets.TryGetValue(key, out NetherEventProcurementBudget budget))
+            {
+                return option;
+            }
+            if (!budget.IsValid)
+            {
+                return option with
+                {
+                    UnknownReason = string.IsNullOrWhiteSpace(option.UnknownReason)
+                        ? "event-option-invalid-committed-procurement-budget"
+                        : option.UnknownReason + ":invalid-committed-procurement-budget",
+                };
+            }
+            return option with
+            {
+                CommittedGoldMinimum = budget.GoldMinimum,
+                CommittedKeyMinimum = budget.KeyMinimum,
+            };
+        }).ToArray();
     }
 
     private static bool HasSafeHpFloor(

@@ -239,14 +239,14 @@ public class NetherBattleSettingsLeaseControllerLifecycleTests
 
     private sealed class LeaseHarness : IDisposable
     {
-        private readonly string _previousConfigPath;
+        private readonly string? _previousConfigPath;
 
         public LeaseHarness(bool autoEnabled, int speed)
         {
-            _previousConfigPath = BepInEx.Paths.ConfigPath;
+            _previousConfigPath = NetherBattleSettingsLease.ConfigPathOverrideForTests;
             ConfigPath = Path.Combine(Path.GetTempPath(), "abyssmod-controller-lease-tests-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(ConfigPath);
-            BepInEx.Paths.ConfigPath = ConfigPath;
+            NetherBattleSettingsLease.ConfigPathOverrideForTests = ConfigPath;
             Native = new NativeSettings(autoEnabled, speed);
             Lease = CreateLease(Native);
         }
@@ -283,7 +283,7 @@ public class NetherBattleSettingsLeaseControllerLifecycleTests
 
         public void Dispose()
         {
-            BepInEx.Paths.ConfigPath = _previousConfigPath;
+            NetherBattleSettingsLease.ConfigPathOverrideForTests = _previousConfigPath;
             if (Directory.Exists(ConfigPath))
                 Directory.Delete(ConfigPath, recursive: true);
         }

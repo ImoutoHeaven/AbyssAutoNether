@@ -5,6 +5,119 @@ namespace AutoNether.Tests;
 
 public class NetherActionReconcilePolicyTests
 {
+    [Theory]
+    [InlineData(26, -100, 110, 0)]
+    [InlineData(25, -99, 110, 0)]
+    [InlineData(25, -100, 111, 0)]
+    [InlineData(25, -100, 110, 1)]
+    public void Event_reconcile_rejects_projected_commitment_state_mismatch_even_when_identity_and_effects_match(
+        int committedErosion,
+        int committedHpDelta,
+        int committedGold,
+        int committedKeys
+    )
+    {
+        NetherEffect[] effects =
+        [
+            new(NetherEffectKind.Erosion, 5),
+            new(NetherEffectKind.Damage, 100),
+            new(NetherEffectKind.NetherGoldGain, 10),
+            new(NetherEffectKind.TreasureKeyUsed, 1),
+        ];
+        NetherSnapshot before = Snapshot(gold: 100) with
+        {
+            Characters = [new NetherCharacterState(1, 1_000)],
+            CharacterHpHash = "1:1000:1",
+        };
+        NetherSnapshot after = before with
+        {
+            ErosionPoint = 25,
+            NetherGold = 110,
+            TreasureKeyCount = 0,
+            Characters = [new NetherCharacterState(1, 900)],
+            CharacterHpHash = "1:900:1",
+        };
+        NetherEventCommitment commitment = new(
+            EventId: 9701,
+            EventPartId: 9702,
+            OptionNumber: 1,
+            Effects: effects,
+            ProjectedErosion: committedErosion,
+            HpDelta: committedHpDelta
+        )
+        {
+            FloorId = 10,
+            NodeId = 1,
+            ProjectedNetherGold = committedGold,
+            ProjectedTreasureKeys = committedKeys,
+        };
+        NetherPlannedAction action = new(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 1,
+            ExpectedEffects = effects,
+            EventId = 9701,
+            EventPartId = 9702,
+            EventFloorId = 10,
+            EventNodeId = 1,
+            EventCommitment = commitment,
+            ProjectedErosion = committedErosion,
+            ProjectedHpDelta = committedHpDelta,
+            ProjectedNetherGold = committedGold,
+            ProjectedTreasureKeys = committedKeys,
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(action, before, after)
+        );
+    }
+
+    [Fact]
+    public void Event_reconcile_applies_a_positive_procurement_commitment_when_minima_survive_the_handoff()
+    {
+        NetherEffect effect = new(NetherEffectKind.NetherGoldGain, 10);
+        NetherEventCommitment commitment = new(
+            EventId: 9731,
+            EventPartId: 9732,
+            OptionNumber: 1,
+            Effects: [effect],
+            ProjectedErosion: 20,
+            HpDelta: 0
+        )
+        {
+            FloorId = 10,
+            NodeId = 1,
+            ProjectedNetherGold = 110,
+            ProjectedTreasureKeys = 1,
+            CommittedGoldMinimum = 80,
+            CommittedKeyMinimum = 1,
+        };
+        NetherPlannedAction action = new(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 1,
+            ExpectedEffects = [effect],
+            EventId = 9731,
+            EventPartId = 9732,
+            EventFloorId = 10,
+            EventNodeId = 1,
+            EventCommitment = commitment,
+            ProjectedErosion = 20,
+            ProjectedHpDelta = 0,
+            ProjectedNetherGold = 110,
+            ProjectedTreasureKeys = 1,
+            CommittedGoldMinimum = 80,
+            CommittedKeyMinimum = 1,
+        };
+
+        NetherSnapshot before = Snapshot(gold: 100);
+        NetherSnapshot after = before with { NetherGold = 110 };
+
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(action, before, after)
+        );
+    }
+
     [Fact]
     public void Select_floor_requires_an_authoritative_floor_or_status_postcondition()
     {
@@ -227,7 +340,7 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
-    public void Same_master_floor_event_reconciles_one_server_selected_hp_update_and_combined_effects()
+    public void Same_master_floor_event_rejects_partial_server_selected_hp_update_and_combined_effects()
     {
         NetherSnapshot before = Snapshot(floorId: 364, floorLevel: 77, gold: 20) with
         {
@@ -295,11 +408,11 @@ public class NetherActionReconcilePolicyTests
             ],
         };
 
-        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, after));
     }
 
     [Fact]
-    public void Floor_94_event_reconciles_exact_server_selected_damage_and_item_reward()
+    public void Floor_94_event_rejects_partial_server_selected_damage_even_with_item_reward()
     {
         NetherSnapshot before = Snapshot(floorId: 430, floorLevel: 93, gold: 25) with
         {
@@ -369,7 +482,7 @@ public class NetherActionReconcilePolicyTests
             ],
         };
 
-        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, after));
     }
 
     [Fact]
@@ -587,7 +700,7 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
-    public void Composed_event_damage_accepts_exact_server_selected_scope_and_rejects_mixed_delta()
+    public void Composed_event_damage_requires_exact_partywide_scope_and_rejects_mixed_delta()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -677,11 +790,92 @@ public class NetherActionReconcilePolicyTests
             },
         };
 
-        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
-        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, wrongTarget));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, exact));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongTarget));
         Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, partyWide));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, mixedDelta));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, inactiveChanged));
+    }
+
+    [Fact]
+    public void Authorized_partial_death_event_applies_when_one_authoritative_survivor_remains()
+    {
+        NetherSnapshot before = PartialDeathBefore();
+        NetherSnapshot after = before with
+        {
+            Characters =
+            [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 300),
+            ],
+            CharacterHpHash = "1:0:0;2:300:1",
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(PartialDeathAction(), before, after)
+        );
+    }
+
+    [Fact]
+    public void Authorized_partial_death_event_rejects_full_party_death()
+    {
+        NetherSnapshot before = PartialDeathBefore();
+        NetherSnapshot after = before with
+        {
+            Characters =
+            [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 0, IsActive: false),
+            ],
+            CharacterHpHash = "1:0:0;2:0:0",
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(PartialDeathAction(), before, after)
+        );
+    }
+
+    [Fact]
+    public void Unauthorized_partial_death_event_rejects_a_true_to_false_character_transition()
+    {
+        NetherSnapshot before = PartialDeathBefore();
+        NetherSnapshot after = before with
+        {
+            Characters =
+            [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 300),
+            ],
+            CharacterHpHash = "1:0:0;2:300:1",
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(PartialDeathAction(allowPartialDeath: false), before, after)
+        );
+    }
+
+    [Fact]
+    public void Authorized_partial_death_event_rejects_exact_projected_state_mismatch()
+    {
+        NetherSnapshot before = PartialDeathBefore();
+        NetherSnapshot after = before with
+        {
+            ErosionPoint = 21,
+            Characters =
+            [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 300),
+            ],
+            CharacterHpHash = "1:0:0;2:300:1",
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(PartialDeathAction(), before, after)
+        );
     }
 
     [Fact]
@@ -754,7 +948,7 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
-    public void Live_floor_event_damage_and_erosion_heal_accept_one_exact_character_update()
+    public void Live_floor_event_damage_and_erosion_heal_reject_one_character_update()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -809,13 +1003,13 @@ public class NetherActionReconcilePolicyTests
         };
 
         Assert.Equal(
-            NetherActionOutcome.Applied,
+            NetherActionOutcome.Ambiguous,
             NetherActionReconcilePolicy.Evaluate(action, before, after)
         );
     }
 
     [Fact]
-    public void Server_selected_subset_event_damage_is_applied_when_one_active_character_changes_exactly()
+    public void Server_selected_subset_event_damage_is_rejected_when_another_living_character_is_unchanged()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -846,7 +1040,44 @@ public class NetherActionReconcilePolicyTests
         };
 
         Assert.Equal(
-            NetherActionOutcome.Applied,
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(action, before, after)
+        );
+    }
+
+    [Fact]
+    public void Ordinary_event_damage_rejects_partial_party_damage_when_every_living_character_is_committed()
+    {
+        NetherSnapshot before = Snapshot(floorId: 10) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 1000),
+                new NetherCharacterState(102, 1000),
+            },
+            CharacterHpHash = "101:1000:1;102:1000:1",
+        };
+        NetherSnapshot after = Snapshot(floorId: 11, floorLevel: 11) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(101, 900),
+                new NetherCharacterState(102, 1000),
+            },
+            CharacterHpHash = "101:900:1;102:1000:1",
+        };
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.Event,
+            NetherActionKind.SelectEventOption
+        ) with
+        {
+            OptionNumber = 3,
+            TargetCharacterId = 101,
+            ExpectedEffects = new[] { new NetherEffect(NetherEffectKind.Damage, 100) },
+        };
+
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
             NetherActionReconcilePolicy.Evaluate(action, before, after)
         );
     }
@@ -1332,4 +1563,64 @@ public class NetherActionReconcilePolicyTests
         Codes = codes ?? Array.Empty<NetherCodeState>(),
         AcquiredItems = items ?? Array.Empty<NetherRewardItem>(),
     };
+
+    private static NetherSnapshot PartialDeathBefore() => Snapshot() with
+    {
+        CurrentNodeId = 1,
+        ErosionPoint = 20,
+        NetherGold = 100,
+        TreasureKeyCount = 1,
+        Characters =
+        [
+            new NetherCharacterState(1, 100),
+            new NetherCharacterState(2, 400),
+        ],
+        CharacterHpHash = "1:100:1;2:400:1",
+    };
+
+    private static NetherPlannedAction PartialDeathAction(bool allowPartialDeath = true)
+    {
+        NetherEffect[] effects = [new NetherEffect(NetherEffectKind.Damage, 100)];
+        NetherInteractivePartialDeathEligibility proof = new(
+            NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,
+            EventId: 9901,
+            EventPartId: 9902,
+            ObjectiveNodeId: 1
+        )
+        {
+            IsKnown = true,
+            ObjectiveReachable = true,
+            ExactTreasureRank = 5,
+        };
+        NetherEventCommitment commitment = new(
+            EventId: 9901,
+            EventPartId: 9902,
+            OptionNumber: 1,
+            Effects: effects,
+            ProjectedErosion: 20,
+            HpDelta: -100
+        )
+        {
+            FloorId = 10,
+            NodeId = 1,
+            ProjectedNetherGold = 100,
+            ProjectedTreasureKeys = 1,
+            PartialDeathEligibility = allowPartialDeath ? proof : null,
+            AllowsPartialActiveDeaths = allowPartialDeath,
+        };
+        return new NetherPlannedAction(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 1,
+            ExpectedEffects = effects,
+            EventId = 9901,
+            EventPartId = 9902,
+            EventFloorId = 10,
+            EventNodeId = 1,
+            ProjectedErosion = 20,
+            ProjectedHpDelta = -100,
+            ProjectedNetherGold = 100,
+            ProjectedTreasureKeys = 1,
+            EventCommitment = commitment,
+        };
+    }
 }

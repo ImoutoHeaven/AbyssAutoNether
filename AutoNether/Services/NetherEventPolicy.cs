@@ -6,11 +6,293 @@ using System.Linq;
 
 namespace AutoNether.Services;
 
+internal enum NetherEventBattleTier
+{
+    Unknown = 0,
+    NormalBattle = 1,
+    MiniBoss = 2,
+    Boss = 3,
+}
+
+internal sealed record NetherEventBattleEvidence(
+    long BattleId,
+    long BattleStageId,
+    int BattleType,
+    int CodeDropRatio,
+    NetherEventBattleTier SemanticTier
+)
+{
+    public bool IsKnown => BattleId > 0
+        && BattleStageId > 0
+        && BattleType >= 0
+        && CodeDropRatio >= 0
+        && SemanticTier != NetherEventBattleTier.Unknown;
+
+    public string UnknownReason { get; init; } = string.Empty;
+
+    public static NetherEventBattleEvidence Unknown(
+        long battleId,
+        string reason
+    ) => new(battleId, 0, 0, 0, NetherEventBattleTier.Unknown)
+    {
+        UnknownReason = string.IsNullOrWhiteSpace(reason)
+            ? "event-battle-evidence-unavailable"
+            : reason,
+    };
+}
+
+internal sealed record NetherEventRewardEvidence(
+    long ContentId,
+    long ItemId,
+    int ItemType,
+    NetherRewardRarity Rarity,
+    int Amount
+)
+{
+    public bool IsKnown => ContentId > 0
+        && ItemId > 0
+        && ItemType >= 0
+        && NetherEventNativeMapping.IsKnownRewardRarity(Rarity)
+        && Amount >= 0;
+
+    public string UnknownReason { get; init; } = string.Empty;
+}
+
+internal readonly record struct NetherEventCommitmentKey(
+    long EventId,
+    long EventPartId,
+    long FloorId,
+    long NodeId,
+    int OptionNumber
+);
+
+/// <summary>
+/// Exact branch-local procurement state supplied by route/pre-entry evidence. A zero value means
+/// that no budget is committed for the option; it is never derived from a displayed reward or a
+/// speculative future node.
+/// </summary>
+internal readonly record struct NetherEventProcurementBudget(
+    int GoldMinimum,
+    int KeyMinimum
+)
+{
+    public bool IsValid => GoldMinimum >= 0 && KeyMinimum >= 0;
+}
+
+/// <summary>
+/// Immutable route-facing identity.  The native request still submits floor/option coordinates;
+/// this record proves which server master rows were used before that request was allowed.
+/// </summary>
+internal sealed record NetherEventCommitment(
+    long EventId,
+    long EventPartId,
+    int OptionNumber,
+    IReadOnlyList<NetherEffect> Effects,
+    int ProjectedErosion,
+    int HpDelta
+)
+{
+    /// <summary>Exact rendered floor master identity captured before the native update.</summary>
+    public long FloorId { get; init; }
+    /// <summary>Exact rendered floor/node coordinate captured before the native update.</summary>
+    public long NodeId { get; init; }
+    public NetherEventBattleEvidence? Battle { get; init; }
+    public NetherEventRewardEvidence? Reward { get; init; }
+    public int? ProjectedNetherGold { get; init; }
+    public int? ProjectedTreasureKeys { get; init; }
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
+    public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
+    public bool AllowsPartialActiveDeaths { get; init; }
+    public bool IsValid => EventId > 0
+        && EventPartId > 0
+        && FloorId > 0
+        && NodeId > 0
+        && OptionNumber > 0
+        && Effects != null
+        && Effects.Count is >= 1 and <= 4
+        && Effects.All(effect => effect != null
+            && effect.Known
+            && effect.ContentKnown
+            && effect.Kind != NetherEffectKind.Unknown)
+        && Effects
+            .Where(effect => effect.Kind == NetherEffectKind.Battle)
+            .All(effect => Battle != null && Battle.IsKnown)
+        && Effects
+            .Where(effect => effect.Kind == NetherEffectKind.Item)
+            .All(effect => Reward != null && Reward.IsKnown)
+        && ProjectedNetherGold.HasValue
+        && ProjectedTreasureKeys.HasValue
+        && CommittedGoldMinimum >= 0
+        && CommittedKeyMinimum >= 0
+        && (!AllowsPartialActiveDeaths
+            || PartialDeathEligibility?.IsKnown == true)
+        && (PartialDeathEligibility == null
+            || PartialDeathEligibility.IsKnown
+                && PartialDeathEligibility.EventId == EventId
+                && PartialDeathEligibility.EventPartId == EventPartId
+                && PartialDeathEligibility.ObjectiveNodeId == NodeId);
+
+    public bool Matches(NetherEventOption option) => option != null
+        && option.OptionNumber == OptionNumber
+        && option.EventId == EventId
+        && option.EventPartId == EventPartId
+        && option.FloorId == FloorId
+        && option.NodeId == NodeId
+        && option.ProjectedErosion == ProjectedErosion
+        && option.ProjectedHpDelta == HpDelta
+        && option.ProjectedNetherGold == ProjectedNetherGold
+        && option.ProjectedTreasureKeys == ProjectedTreasureKeys
+        && option.CommittedGoldMinimum == CommittedGoldMinimum
+        && option.CommittedKeyMinimum == CommittedKeyMinimum
+        && option.AllowsPartialActiveDeaths == AllowsPartialActiveDeaths
+        && PartialDeathMatches(PartialDeathEligibility, option.PartialDeathEligibility)
+        && NetherEventPolicy.EffectFingerprintsEqual(Effects, option.Effects)
+        && EvidenceMatches(
+            Battle,
+            option.BattleEvidence ?? option.Effects
+                .Select(effect => effect.BattleEvidence)
+                .FirstOrDefault(value => value != null)
+        )
+        && EvidenceMatches(
+            Reward,
+            option.RewardEvidence ?? option.Effects
+                .Select(effect => effect.RewardEvidence)
+                .FirstOrDefault(value => value != null)
+        );
+
+    public bool Matches(
+        NetherEventOption option,
+        int projectedErosion,
+        int hpDelta,
+        NetherEventBattleEvidence? battle,
+        NetherEventRewardEvidence? reward,
+        int? projectedNetherGold = null,
+        int? projectedTreasureKeys = null
+    ) => Matches(option with
+        {
+            ProjectedErosion = projectedErosion,
+            ProjectedHpDelta = hpDelta,
+            ProjectedNetherGold = projectedNetherGold,
+            ProjectedTreasureKeys = projectedTreasureKeys,
+        })
+        && EvidenceMatches(Battle, battle)
+        && EvidenceMatches(Reward, reward);
+
+    public bool Matches(NetherEventCommitment other) => other != null
+        && EventId == other.EventId
+        && EventPartId == other.EventPartId
+        && FloorId == other.FloorId
+        && NodeId == other.NodeId
+        && OptionNumber == other.OptionNumber
+        && ProjectedErosion == other.ProjectedErosion
+        && HpDelta == other.HpDelta
+        && ProjectedNetherGold == other.ProjectedNetherGold
+        && ProjectedTreasureKeys == other.ProjectedTreasureKeys
+        && CommittedGoldMinimum == other.CommittedGoldMinimum
+        && CommittedKeyMinimum == other.CommittedKeyMinimum
+        && AllowsPartialActiveDeaths == other.AllowsPartialActiveDeaths
+        && NetherEventPolicy.EffectFingerprintsEqual(Effects, other.Effects)
+        && EvidenceMatches(Battle, other.Battle)
+        && EvidenceMatches(Reward, other.Reward)
+        && PartialDeathMatches(PartialDeathEligibility, other.PartialDeathEligibility);
+
+    private static bool EvidenceMatches(
+        NetherEventBattleEvidence? expected,
+        NetherEventBattleEvidence? actual
+    ) => expected == null && actual == null
+        || expected != null
+            && actual != null
+            && expected.BattleId == actual.BattleId
+            && expected.BattleStageId == actual.BattleStageId
+            && expected.BattleType == actual.BattleType
+            && expected.CodeDropRatio == actual.CodeDropRatio
+            && expected.SemanticTier == actual.SemanticTier
+            && expected.UnknownReason == actual.UnknownReason;
+
+    private static bool EvidenceMatches(
+        NetherEventRewardEvidence? expected,
+        NetherEventRewardEvidence? actual
+    ) => expected == null && actual == null
+        || expected != null
+            && actual != null
+            && expected.ContentId == actual.ContentId
+            && expected.ItemId == actual.ItemId
+            && expected.ItemType == actual.ItemType
+            && expected.Rarity == actual.Rarity
+            && expected.Amount == actual.Amount
+            && expected.UnknownReason == actual.UnknownReason;
+
+    private static bool PartialDeathMatches(
+        NetherInteractivePartialDeathEligibility? expected,
+        NetherInteractivePartialDeathEligibility? actual
+    ) => expected == null && actual == null
+        || expected != null
+            && actual != null
+            && expected.Kind == actual.Kind
+            && expected.EventId == actual.EventId
+            && expected.EventPartId == actual.EventPartId
+            && expected.ObjectiveNodeId == actual.ObjectiveNodeId
+            && expected.IsKnown == actual.IsKnown
+            && expected.ObjectiveReachable == actual.ObjectiveReachable
+            && expected.ExactTreasureRank == actual.ExactTreasureRank
+            && expected.IsOnlyTerminalReachingRoute == actual.IsOnlyTerminalReachingRoute
+            && expected.NoBetterAffordableCurrencyKeySource == actual.NoBetterAffordableCurrencyKeySource
+            && expected.UnknownReason == actual.UnknownReason;
+}
+
+/// <summary>
+/// Mode facts already justified by route/strategy evidence.  Unknown fields never create a
+/// reward preference; callers may still use the legacy local safety ordering when no mode package
+/// is available.
+/// </summary>
+internal sealed record NetherEventStrategyEvidence
+{
+    public bool IsKnown { get; init; }
+    public NetherStrategyMode Mode { get; init; }
+    public bool ResearchIncomplete { get; init; }
+    public bool HasRankFiveTreasureObjective { get; init; }
+    public bool HasRouteEvidence { get; init; }
+    public bool HasResourceEvidence { get; init; }
+    public bool HasSemanticEvidence { get; init; }
+    public bool HasPartialDeathEvidence { get; init; }
+    public bool AllowsPartialActiveDeaths { get; init; }
+    public string UnknownReason { get; init; } = string.Empty;
+
+    public bool IsUsableFor(NetherStrategyMode requestedMode) =>
+        IsKnown
+        && Mode == requestedMode
+        && (requestedMode != NetherStrategyMode.Research
+            || HasRouteEvidence && HasResourceEvidence && HasSemanticEvidence);
+}
+
 internal sealed record NetherEventOption(int OptionNumber, IReadOnlyList<NetherEffect> Effects)
 {
     public long EventId { get; init; }
     public long EventPartId { get; init; }
+    public long FloorId { get; init; }
+    public long NodeId { get; init; }
+    public int? ProjectedErosion { get; init; }
+    public int? ProjectedHpDelta { get; init; }
+    public int? ProjectedNetherGold { get; init; }
+    public int? ProjectedTreasureKeys { get; init; }
     public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
+    public bool RequiresExactBinding { get; init; }
+    public string UnknownReason { get; init; } = string.Empty;
+    public bool HasRouteSafetyEvidence { get; init; }
+    public bool RouteSafetyAllowed { get; init; } = true;
+    public string RouteSafetyUnknownReason { get; init; } = string.Empty;
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
+    public bool IsMandatoryRankFiveKeyObjective { get; init; }
+    public NetherEventBattleEvidence? BattleEvidence { get; init; }
+    public NetherEventRewardEvidence? RewardEvidence { get; init; }
+    public bool AllowsPartialActiveDeaths { get; init; }
+    /// <summary>
+    /// Exact per-option route/resource/semantic facts. An unknown sibling must not poison another
+    /// option from the same native popup.
+    /// </summary>
+    public NetherEventStrategyEvidence? StrategyEvidence { get; init; }
 }
 
 internal enum NetherEventDecisionKind
@@ -28,6 +310,10 @@ internal sealed record NetherEventDecision
     public int ProjectedErosion { get; init; }
     public int ExpectedErosionDelta { get; init; }
     public int HpDelta { get; init; }
+    public int ProjectedNetherGold { get; init; }
+    public int ProjectedTreasureKeys { get; init; }
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
     /// <summary>
     /// Immutable authoritative effect payload for the selected native option.  Reconcile must
     /// compare this exact server-visible resource delta rather than treating an option click as
@@ -36,6 +322,14 @@ internal sealed record NetherEventDecision
     public IReadOnlyList<NetherEffect> ExpectedEffects { get; init; } = Array.Empty<NetherEffect>();
     public bool StartsBattleAfterSelection { get; init; }
     public bool AllowsPartialActiveDeaths { get; init; }
+    public long EventId { get; init; }
+    public long EventPartId { get; init; }
+    public long FloorId { get; init; }
+    public long NodeId { get; init; }
+    public NetherEventCommitment? Commitment { get; init; }
+    public NetherEventBattleEvidence? Battle { get; init; }
+    public NetherEventRewardEvidence? Reward { get; init; }
+    public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
 }
@@ -105,7 +399,26 @@ internal sealed class NetherEventPolicy
         isRecovery: false,
         NetherCodeTransformHardExclusionEvidence.Unknown(
             "code-transform-outside-recovery"
-        )
+        ),
+        strategyEvidence: null
+    );
+
+    public NetherEventDecision DecideEvent(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
+        NetherEventStrategyEvidence? strategyEvidence
+    ) => Decide(
+        snapshot,
+        options,
+        settings,
+        modifiers,
+        isRecovery: false,
+        NetherCodeTransformHardExclusionEvidence.Unknown(
+            "code-transform-outside-recovery"
+        ),
+        strategyEvidence
     );
 
     public NetherEventDecision DecideRecovery(
@@ -135,7 +448,15 @@ internal sealed class NetherEventPolicy
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers,
         NetherCodeTransformHardExclusionEvidence hardExclusions
-    ) => Decide(snapshot, options, settings, modifiers, isRecovery: true, hardExclusions);
+    ) => Decide(
+        snapshot,
+        options,
+        settings,
+        modifiers,
+        isRecovery: true,
+        hardExclusions,
+        strategyEvidence: null
+    );
 
     public NetherEventDecision DecideTreasure(
         NetherSnapshot snapshot,
@@ -173,6 +494,7 @@ internal sealed class NetherEventPolicy
                         EquipmentOptInEnabled = settings.EquipmentRecoveryCodeTransformEnabled,
                         IsRecovery = false,
                     },
+                    strategyEvidence: null,
                     out EventCandidate candidate,
                     out _
                 ))
@@ -198,6 +520,10 @@ internal sealed class NetherEventPolicy
         EventCandidate selected = candidates
             .OrderByDescending(candidate => candidate.Benefit)
             .ThenBy(candidate => candidate.Option.OptionNumber)
+            .ThenBy(candidate => candidate.Option.EventId)
+            .ThenBy(candidate => candidate.Option.EventPartId)
+            .ThenBy(candidate => candidate.Option.FloorId)
+            .ThenBy(candidate => candidate.Option.NodeId)
             .First();
         return Select(selected);
     }
@@ -251,7 +577,8 @@ internal sealed class NetherEventPolicy
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers,
         bool isRecovery,
-        NetherCodeTransformHardExclusionEvidence hardExclusions
+        NetherCodeTransformHardExclusionEvidence hardExclusions,
+        NetherEventStrategyEvidence? strategyEvidence
     )
     {
         ValidateInputs(snapshot, options, settings);
@@ -280,6 +607,7 @@ internal sealed class NetherEventPolicy
                     modifiers,
                     allowPartialActiveDeaths,
                     transformEligibility,
+                    strategyEvidence,
                     out EventCandidate candidate,
                     out NetherEventDecision rejection
                 ))
@@ -310,13 +638,19 @@ internal sealed class NetherEventPolicy
             // deterministic alternatives have zero clipped value.  Rank that committed recovery
             // action before their raw (but already saturated) effect amounts.
             .OrderByDescending(candidate => candidate.ReplacementCodeId > 0)
-            .ThenByDescending(candidate => belowHpSoftLimit && candidate.HpDelta > 0)
-            .ThenBy(candidate => candidate.ErosionDelta)
-            .ThenByDescending(candidate => candidate.HpDelta)
+            .ThenByDescending(candidate => strategyEvidence?.IsKnown == true
+                ? candidate.SemanticPriority
+                : belowHpSoftLimit && candidate.HpDelta > 0 ? 1 : 0)
+            .ThenBy(candidate => strategyEvidence?.IsKnown == true ? 0 : candidate.ErosionDelta)
+            .ThenByDescending(candidate => strategyEvidence?.IsKnown == true ? 0 : candidate.HpDelta)
             .ThenByDescending(candidate => candidate.SafeCodeBenefit)
             .ThenByDescending(candidate => candidate.Benefit)
             .ThenBy(candidate => candidate.OptionalBattle)
             .ThenBy(candidate => candidate.Option.OptionNumber)
+            .ThenBy(candidate => candidate.Option.EventId)
+            .ThenBy(candidate => candidate.Option.EventPartId)
+            .ThenBy(candidate => candidate.Option.FloorId)
+            .ThenBy(candidate => candidate.Option.NodeId)
             .First();
         return Select(selected);
     }
@@ -328,6 +662,7 @@ internal sealed class NetherEventPolicy
         IReadOnlyList<NetherErosionModifier> modifiers,
         bool allowPartialActiveDeaths,
         NetherCodeTransformEligibilityEvidence transformEligibility,
+        NetherEventStrategyEvidence? strategyEvidence,
         out EventCandidate candidate,
         out NetherEventDecision rejection
     )
@@ -340,9 +675,89 @@ internal sealed class NetherEventPolicy
             rejection = Pause(NetherPauseReason.UnknownEffect, "invalid-event-option");
             return false;
         }
+        if (!string.IsNullOrWhiteSpace(option.UnknownReason))
+        {
+            rejection = Pause(NetherPauseReason.UnknownMasterData, option.UnknownReason);
+            return false;
+        }
+        if (option.RequiresExactBinding
+            && (option.EventId <= 0
+                || option.EventPartId <= 0
+                || option.FloorId <= 0
+                || option.NodeId <= 0))
+        {
+            rejection = Pause(
+                NetherPauseReason.BindingUnavailable,
+                "event-binding-unavailable:" + option.OptionNumber
+            );
+            return false;
+        }
+        NetherEventStrategyEvidence? optionStrategyEvidence = option.StrategyEvidence ?? strategyEvidence;
+        if (option.RequiresExactBinding
+            && settings.StrategyMode == NetherStrategyMode.Research
+            && (optionStrategyEvidence == null
+                || !optionStrategyEvidence.IsUsableFor(NetherStrategyMode.Research)))
+        {
+            rejection = Pause(
+                NetherPauseReason.BindingUnavailable,
+                "event-option-strategy-evidence-unavailable:" + option.OptionNumber
+            );
+            return false;
+        }
+        if (option.HasRouteSafetyEvidence && !option.RouteSafetyAllowed)
+        {
+            rejection = Pause(
+                NetherPauseReason.UnsafeErosion,
+                string.IsNullOrWhiteSpace(option.RouteSafetyUnknownReason)
+                    ? "event-route-safety-rejected"
+                    : option.RouteSafetyUnknownReason
+            );
+            return false;
+        }
         if (option.Effects.Any(effect => !effect.Known || !effect.ContentKnown || effect.Kind == NetherEffectKind.Unknown || effect.Amount < 0))
         {
             rejection = Pause(NetherPauseReason.UnknownEffect, "unknown-event-effect");
+            return false;
+        }
+        if (option.RequiresExactBinding
+            && option.Effects.Any(effect => effect.Kind == NetherEffectKind.Item && effect.ContentId <= 0))
+        {
+            rejection = Pause(NetherPauseReason.UnknownMasterData, "event-item-content-binding-unavailable");
+            return false;
+        }
+        NetherEffect? battleEffect = option.Effects.FirstOrDefault(effect => effect.Kind == NetherEffectKind.Battle);
+        NetherEventBattleEvidence? battleEvidence = option.BattleEvidence ?? battleEffect?.BattleEvidence;
+        if (battleEffect != null && option.RequiresExactBinding
+            && (battleEvidence == null || !battleEvidence.IsKnown))
+        {
+            rejection = Pause(
+                NetherPauseReason.UnknownMasterData,
+                battleEvidence?.UnknownReason ?? "event-battle-row-unavailable"
+            );
+            return false;
+        }
+        if (battleEvidence != null && !battleEvidence.IsKnown)
+        {
+            rejection = Pause(
+                NetherPauseReason.UnknownMasterData,
+                string.IsNullOrWhiteSpace(battleEvidence.UnknownReason)
+                    ? "event-battle-row-unavailable"
+                    : battleEvidence.UnknownReason
+            );
+            return false;
+        }
+        NetherEventRewardEvidence? rewardEvidence = option.RewardEvidence
+            ?? option.Effects.Select(effect => effect.RewardEvidence).FirstOrDefault(reward => reward != null);
+        if (option.RequiresExactBinding
+            && option.Effects.Any(effect => effect.Kind == NetherEffectKind.Item)
+            && (rewardEvidence == null || !rewardEvidence.IsKnown))
+        {
+            rejection = Pause(
+                NetherPauseReason.UnknownMasterData,
+                rewardEvidence == null || rewardEvidence.UnknownReason.Length == 0
+                    ? "event-reward-row-unavailable"
+                    : rewardEvidence.UnknownReason
+            );
             return false;
         }
         if (option.Effects.Count(effect => effect.Kind == NetherEffectKind.AbyssCodeTransform) > 1
@@ -402,6 +817,32 @@ internal sealed class NetherEventPolicy
             );
             return false;
         }
+        if (!NetherEventResourceProjection.TryProject(
+                snapshot.NetherGold,
+                snapshot.TreasureKeyCount,
+                option.Effects,
+                out int projectedGold,
+                out int projectedKeys
+            ))
+        {
+            rejection = Pause(NetherPauseReason.UnknownMasterData, "event-resource-projection-unavailable");
+            return false;
+        }
+        int goldDelta = projectedGold - snapshot.NetherGold;
+        int keyDelta = projectedKeys - snapshot.TreasureKeyCount;
+        if (projectedGold < option.CommittedGoldMinimum
+            || projectedKeys < option.CommittedKeyMinimum)
+        {
+            rejection = Pause(NetherPauseReason.NoSafeRoute, "event-committed-budget-would-break");
+            return false;
+        }
+        bool crossesCommittedProcurementThreshold = CrossesCommittedProcurementThreshold(
+            option,
+            snapshot.NetherGold,
+            snapshot.TreasureKeyCount,
+            projectedGold,
+            projectedKeys
+        );
 
         NetherErosionProjection erosion = _erosionPolicy.ProjectEffects(
             snapshot.ErosionPoint,
@@ -423,21 +864,47 @@ internal sealed class NetherEventPolicy
             or NetherEffectKind.NetherGoldGain
             or NetherEffectKind.TreasureKeyGain
             or NetherEffectKind.AbyssCodeOffer);
+        int semanticPriority = optionStrategyEvidence?.IsKnown == true
+            ? ComputeSemanticPriority(option, optionStrategyEvidence, battleEvidence, rewardEvidence)
+            : option.Effects.Any(effect => effect.Kind is NetherEffectKind.AbyssCodeOffer
+                or NetherEffectKind.AbyssCodeTransform) ? 1 : 0;
+        if (crossesCommittedProcurementThreshold)
+        {
+            // A committed resource objective is a proven route obligation. It outranks ordinary
+            // Code/Gold semantics (600/400) while remaining below rank-five rewards and battle
+            // tiers already assigned by ComputeSemanticPriority.
+            semanticPriority = Math.Max(700, semanticPriority);
+        }
         candidate = new EventCandidate(
             option,
             erosion.ProjectedErosion,
             erosionDelta,
             hpDelta,
             replacementCodeId,
-            option.Effects.Any(effect => effect.Kind is NetherEffectKind.AbyssCodeOffer
-                or NetherEffectKind.AbyssCodeTransform) ? 1 : 0,
+            semanticPriority,
             benefit,
+            projectedGold,
+            projectedKeys,
             startsBattle,
             optionalBattle,
-            allowPartialActiveDeaths
+            allowPartialActiveDeaths,
+            semanticPriority,
+            battleEvidence,
+            rewardEvidence
         );
         return true;
     }
+
+    private static bool CrossesCommittedProcurementThreshold(
+        NetherEventOption option,
+        int currentGold,
+        int currentKeys,
+        int projectedGold,
+        int projectedKeys
+    ) => option.CommittedGoldMinimum > currentGold
+        && projectedGold >= option.CommittedGoldMinimum
+        || option.CommittedKeyMinimum > currentKeys
+        && projectedKeys >= option.CommittedKeyMinimum;
 
     private NetherCodeTransformEligibilityEvidence BuildTransformEligibility(
         NetherSnapshot snapshot,
@@ -558,6 +1025,96 @@ internal sealed class NetherEventPolicy
         && option.Effects.Count(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount > 0) == 1
         && option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyGain && effect.Amount == 1) == 1;
 
+    private static int ComputeSemanticPriority(
+        NetherEventOption option,
+        NetherEventStrategyEvidence? strategyEvidence,
+        NetherEventBattleEvidence? battleEvidence,
+        NetherEventRewardEvidence? rewardEvidence
+    )
+    {
+        if (strategyEvidence?.IsKnown != true)
+            return 0;
+        if (strategyEvidence.ResearchIncomplete
+            && (strategyEvidence.HasRankFiveTreasureObjective
+                && option.IsMandatoryRankFiveKeyObjective))
+        {
+            return 1_000;
+        }
+
+        if (battleEvidence?.IsKnown == true)
+        {
+            int battlePriority = battleEvidence.SemanticTier switch
+            {
+                NetherEventBattleTier.Boss => 800,
+                NetherEventBattleTier.MiniBoss => 750,
+                NetherEventBattleTier.NormalBattle => strategyEvidence.ResearchIncomplete
+                    ? battleEvidence.CodeDropRatio >= 1_000 ? 700 : 350
+                    : 650,
+                _ => 0,
+            };
+            if (battlePriority > 0)
+                return battlePriority;
+        }
+
+        bool hasCodeOffer = option.Effects.Any(effect => effect.Kind == NetherEffectKind.AbyssCodeOffer);
+        bool hasGold = option.Effects.Any(effect => effect.Kind == NetherEffectKind.NetherGoldGain);
+        if (strategyEvidence.ResearchIncomplete && hasCodeOffer)
+            return 600;
+
+        if (rewardEvidence?.IsKnown == true && rewardEvidence.ItemId > 0)
+        {
+            if (rewardEvidence.Rarity == NetherRewardRarity.Red && rewardEvidence.ItemType == 91)
+                return 950;
+            if (rewardEvidence.Rarity == NetherRewardRarity.Gold && rewardEvidence.ItemType == 91)
+                return 900;
+            return 500 + (int)rewardEvidence.Rarity * 10;
+        }
+        if (hasCodeOffer)
+            return 600;
+        if (hasGold)
+            return 400;
+        return 0;
+    }
+
+    internal static bool EffectFingerprintsEqual(
+        IReadOnlyList<NetherEffect>? left,
+        IReadOnlyList<NetherEffect>? right
+    )
+    {
+        if (left == null || right == null || left.Count != right.Count)
+            return false;
+        for (int index = 0; index < left.Count; index++)
+        {
+            NetherEffect a = left[index];
+            NetherEffect b = right[index];
+            if (a == null || b == null
+                || a.Kind != b.Kind
+                || a.Amount != b.Amount
+                || a.Known != b.Known
+                || a.ContentKnown != b.ContentKnown
+                || a.RatePermille != b.RatePermille
+                || a.ContentId != b.ContentId
+                || a.ReplacementCodeId != b.ReplacementCodeId
+                || a.IsOptionalBattle != b.IsOptionalBattle
+                || a.BattleEvidence?.BattleId != b.BattleEvidence?.BattleId
+                || a.BattleEvidence?.BattleStageId != b.BattleEvidence?.BattleStageId
+                || a.BattleEvidence?.BattleType != b.BattleEvidence?.BattleType
+                || a.BattleEvidence?.CodeDropRatio != b.BattleEvidence?.CodeDropRatio
+                || a.BattleEvidence?.SemanticTier != b.BattleEvidence?.SemanticTier
+                || a.BattleEvidence?.UnknownReason != b.BattleEvidence?.UnknownReason
+                || a.RewardEvidence?.ContentId != b.RewardEvidence?.ContentId
+                || a.RewardEvidence?.ItemId != b.RewardEvidence?.ItemId
+                || a.RewardEvidence?.ItemType != b.RewardEvidence?.ItemType
+                || a.RewardEvidence?.Rarity != b.RewardEvidence?.Rarity
+                || a.RewardEvidence?.Amount != b.RewardEvidence?.Amount
+                || a.RewardEvidence?.UnknownReason != b.RewardEvidence?.UnknownReason)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static NetherEventDecision Select(EventCandidate candidate) => new()
     {
         Kind = NetherEventDecisionKind.Select,
@@ -567,9 +1124,42 @@ internal sealed class NetherEventPolicy
         ProjectedErosion = candidate.ProjectedErosion,
         ExpectedErosionDelta = candidate.ErosionDelta,
         HpDelta = candidate.HpDelta,
+        ProjectedNetherGold = candidate.ProjectedNetherGold,
+        ProjectedTreasureKeys = candidate.ProjectedTreasureKeys,
+        CommittedGoldMinimum = candidate.Option.CommittedGoldMinimum,
+        CommittedKeyMinimum = candidate.Option.CommittedKeyMinimum,
         ExpectedEffects = candidate.Option.Effects.ToArray(),
         StartsBattleAfterSelection = candidate.StartsBattle,
         AllowsPartialActiveDeaths = candidate.AllowsPartialActiveDeaths,
+        EventId = candidate.Option.EventId,
+        EventPartId = candidate.Option.EventPartId,
+        FloorId = candidate.Option.FloorId,
+        NodeId = candidate.Option.NodeId,
+        PartialDeathEligibility = candidate.Option.PartialDeathEligibility,
+        Commitment = candidate.Option.RequiresExactBinding
+            ? new NetherEventCommitment(
+                candidate.Option.EventId,
+                candidate.Option.EventPartId,
+                candidate.Option.OptionNumber,
+                candidate.Option.Effects.ToArray(),
+                candidate.ProjectedErosion,
+                candidate.HpDelta
+            )
+            {
+                FloorId = candidate.Option.FloorId,
+                NodeId = candidate.Option.NodeId,
+                Battle = candidate.Battle,
+                Reward = candidate.Reward,
+                ProjectedNetherGold = candidate.ProjectedNetherGold,
+                ProjectedTreasureKeys = candidate.ProjectedTreasureKeys,
+                CommittedGoldMinimum = candidate.Option.CommittedGoldMinimum,
+                CommittedKeyMinimum = candidate.Option.CommittedKeyMinimum,
+                PartialDeathEligibility = candidate.Option.PartialDeathEligibility,
+                AllowsPartialActiveDeaths = candidate.AllowsPartialActiveDeaths,
+            }
+            : null,
+        Battle = candidate.Battle,
+        Reward = candidate.Reward,
     };
 
     private static NetherEventDecision Pause(NetherPauseReason reason, string detail) => new()
@@ -601,9 +1191,14 @@ internal sealed class NetherEventPolicy
         long ReplacementCodeId,
         int SafeCodeBenefit,
         int Benefit,
+        int ProjectedNetherGold,
+        int ProjectedTreasureKeys,
         bool StartsBattle,
         bool OptionalBattle,
-        bool AllowsPartialActiveDeaths
+        bool AllowsPartialActiveDeaths,
+        int SemanticPriority,
+        NetherEventBattleEvidence? Battle = null,
+        NetherEventRewardEvidence? Reward = null
     )
     {
         // Recovery must never select damage/erosion, but an otherwise neutral native option

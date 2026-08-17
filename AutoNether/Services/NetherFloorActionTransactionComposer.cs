@@ -91,11 +91,22 @@ internal static class NetherFloorActionTransactionComposer
             ExpectedEffects = retainedEffects,
             HasExpectedErosionDelta = erosionStage != null,
             ExpectedErosionDelta = erosionStage?.ExpectedErosionDelta ?? 0,
+            ProjectedErosion = stage.ProjectedErosion,
+            ProjectedHpDelta = stage.ProjectedHpDelta,
+            ProjectedNetherGold = stage.ProjectedNetherGold,
+            ProjectedTreasureKeys = stage.ProjectedTreasureKeys,
+            CommittedGoldMinimum = stage.CommittedGoldMinimum,
+            CommittedKeyMinimum = stage.CommittedKeyMinimum,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
             GoldCost = stage.GoldCost,
             CodeId = stage.CodeId,
             ReplaceCodeId = stage.ReplaceCodeId,
+            EventId = stage.EventId > 0 ? stage.EventId : settlement.EventId,
+            EventPartId = stage.EventPartId > 0 ? stage.EventPartId : settlement.EventPartId,
+            EventFloorId = stage.EventCommitment?.FloorId ?? settlement.EventFloorId,
+            EventNodeId = stage.EventCommitment?.NodeId ?? settlement.EventNodeId,
+            EventCommitment = stage.EventCommitment ?? settlement.EventCommitment,
         };
         return true;
     }
@@ -322,6 +333,15 @@ internal static class NetherFloorActionTransactionComposer
         {
             HasExpectedErosionDelta = settlement.HasExpectedErosionDelta,
             ExpectedErosionDelta = settlement.ExpectedErosionDelta,
+            ProjectedErosion = settlement.ProjectedErosion,
+            ProjectedHpDelta = settlement.ProjectedHpDelta,
+            ProjectedNetherGold = settlement.ProjectedNetherGold,
+            ProjectedTreasureKeys = settlement.ProjectedTreasureKeys,
+            CommittedGoldMinimum = settlement.CommittedGoldMinimum,
+            CommittedKeyMinimum = settlement.CommittedKeyMinimum,
+            EventId = settlement.EventId,
+            EventPartId = settlement.EventPartId,
+            EventCommitment = settlement.EventCommitment,
         });
         return IsWellFormedStage(stages[0]);
     }
@@ -367,6 +387,15 @@ internal static class NetherFloorActionTransactionComposer
         {
             HasExpectedErosionDelta = child.HasExpectedErosionDelta,
             ExpectedErosionDelta = child.ExpectedErosionDelta,
+            ProjectedErosion = child.ProjectedErosion,
+            ProjectedHpDelta = child.ProjectedHpDelta,
+            ProjectedNetherGold = child.ProjectedNetherGold,
+            ProjectedTreasureKeys = child.ProjectedTreasureKeys,
+            CommittedGoldMinimum = child.CommittedGoldMinimum,
+            CommittedKeyMinimum = child.CommittedKeyMinimum,
+            EventId = child.EventId,
+            EventPartId = child.EventPartId,
+            EventCommitment = child.EventCommitment,
         };
         return IsWellFormedStage(stage);
     }
@@ -387,11 +416,22 @@ internal static class NetherFloorActionTransactionComposer
             ExpectedEffects = stage.ExpectedEffects,
             HasExpectedErosionDelta = stage.HasExpectedErosionDelta,
             ExpectedErosionDelta = stage.ExpectedErosionDelta,
+            ProjectedErosion = stage.ProjectedErosion,
+            ProjectedHpDelta = stage.ProjectedHpDelta,
+            ProjectedNetherGold = stage.ProjectedNetherGold,
+            ProjectedTreasureKeys = stage.ProjectedTreasureKeys,
+            CommittedGoldMinimum = stage.CommittedGoldMinimum,
+            CommittedKeyMinimum = stage.CommittedKeyMinimum,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
             GoldCost = stage.GoldCost,
             CodeId = stage.CodeId,
             ReplaceCodeId = stage.ReplaceCodeId,
+            EventId = stage.EventId,
+            EventPartId = stage.EventPartId,
+            EventFloorId = stage.EventCommitment?.FloorId ?? 0,
+            EventNodeId = stage.EventCommitment?.NodeId ?? 0,
+            EventCommitment = stage.EventCommitment,
         };
         NetherSessionStatus intrinsic = GetTerminal(stage.PopupKind, child);
         return intrinsic == stage.ExpectedAfterStatus
@@ -543,6 +583,35 @@ internal static class NetherFloorActionTransactionComposer
         && action.ExpectedEffects != null
         && action.ExpectedEffects.Count > 0
         && !HasDuplicateEffectKeys(action.ExpectedEffects)
+        && (action.EventId == 0 && action.EventPartId == 0
+                && action.EventFloorId == 0 && action.EventNodeId == 0
+                && action.EventCommitment == null
+            || action.EventId > 0 && action.EventPartId > 0
+                && action.EventFloorId > 0 && action.EventNodeId > 0
+                && action.EventCommitment is NetherEventCommitment commitment
+                && commitment.IsValid
+                && commitment.FloorId == action.EventFloorId
+                && commitment.NodeId == action.EventNodeId
+                && commitment.Matches(new NetherEventOption(
+                    action.OptionNumber,
+                    action.ExpectedEffects
+                )
+                {
+                    EventId = action.EventId,
+                    EventPartId = action.EventPartId,
+                    FloorId = action.EventFloorId,
+                    NodeId = action.EventNodeId,
+                    ProjectedErosion = action.ProjectedErosion,
+                    ProjectedHpDelta = action.ProjectedHpDelta,
+                    ProjectedNetherGold = action.ProjectedNetherGold,
+                    ProjectedTreasureKeys = action.ProjectedTreasureKeys,
+                    CommittedGoldMinimum = action.CommittedGoldMinimum,
+                    CommittedKeyMinimum = action.CommittedKeyMinimum,
+                    BattleEvidence = commitment.Battle,
+                    RewardEvidence = commitment.Reward,
+                    PartialDeathEligibility = commitment.PartialDeathEligibility,
+                    AllowsPartialActiveDeaths = commitment.AllowsPartialActiveDeaths,
+                }))
         && action.ExpectedEffects.All(effect => effect != null
             && effect.Known
             && effect.ContentKnown

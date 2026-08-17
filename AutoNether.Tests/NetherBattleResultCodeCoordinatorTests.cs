@@ -397,6 +397,8 @@ public sealed class NetherBattleResultCodeCoordinatorTests
             }
             foreach (NetherCodeState removed in snapshot.Codes)
             {
+                if (IsOpposingFamily(candidate.Family, removed.Family))
+                    continue;
                 mutations[new NetherCodeMutationKey(candidate.CodeId, removed.CodeId)] = Mutation(
                     candidate.CodeId,
                     nativeValuePermille: Math.Max(100, removed.Power + 100),
@@ -406,6 +408,12 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         }
         return basis with { EquipmentMutationValuesByKey = mutations };
     }
+
+    private static bool IsOpposingFamily(NetherCodeFamily candidate, NetherCodeFamily held) =>
+        candidate == NetherCodeFamily.Rush && held == NetherCodeFamily.Impact
+        || candidate == NetherCodeFamily.Impact && held == NetherCodeFamily.Rush
+        || candidate == NetherCodeFamily.Safe && held == NetherCodeFamily.Risk
+        || candidate == NetherCodeFamily.Risk && held == NetherCodeFamily.Safe;
 
     private static NetherCodeEquipmentMutationEvidence Mutation(
         long candidateCodeId,

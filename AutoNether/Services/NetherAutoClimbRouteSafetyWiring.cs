@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 
 namespace AutoNether.Services;
 
@@ -14,6 +15,10 @@ internal sealed record NetherAutoClimbRouteSafetyDecision
     public NetherRoutePlan Route { get; init; } = new();
     public NetherRouteSafetyContext Context { get; init; } = new();
     public NetherBattleProjectionPayload? SelectedBattleProjection { get; init; }
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        EventProcurementCommitments { get; init; } =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+    public NetherRouteBranchIdentity? RouteIdentity { get; init; }
     public bool IsCombatSelectionMissingProjection { get; init; }
     /// <summary>
     /// The only SelectFloor action Controller may invoke.  A combat action is constructed here
@@ -83,6 +88,8 @@ internal sealed class NetherAutoClimbRouteSafetyWiring
             Route = plan.Route,
             Context = plan.Context,
             SelectedBattleProjection = projection,
+            EventProcurementCommitments = plan.EventProcurementCommitments,
+            RouteIdentity = plan.RouteIdentity,
             IsCombatSelectionMissingProjection = missingProjection,
             SelectFloorAction = selectFloorAction,
         };

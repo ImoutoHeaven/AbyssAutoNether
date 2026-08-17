@@ -22,6 +22,22 @@ Use lexicographic decision pipelines. Safety, hard exclusions, family compatibil
 
 **Fresh native-design deviation (2026-08-16):** Docker read-only inspection of current `Project.dll` SHA-256 `53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300` and `GameAssembly.dll` SHA-256 `573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb` disproved the earlier claim that current selectable Codes carry a 5/10/15-percent research-rate overwrite. `MNetherCodes` contains only identity/category/effect parameters/asset/power; `NetherCodeModel.CreateModel` constructs native/common ability or erosion effects; `NetherResultRequestEntity` sends no Code rate; and `CreateNetherResultModelAsync` consumes response `nether_code_points` only as four server settlement outcomes. `NetherPointData.SpherePointRatio` is separate research-tree technology. Current production therefore never manufactures a Code family/rate from those sources. The typed policy remains update-tolerant: a future authoritative selectable mechanic may supply exact family and overwrite rate, but missing evidence rejects only that candidate.
 
+**Fresh native-design boundary for tickets 07–09 (2026-08-17):** New Docker read-only Cpp2IL runs
+reconfirmed the same exact hashes and `DIFFABLE_EXIT=0`; the durable command/output anchors are
+recorded in [`evidence-backed-strategy-modes-07-09-evidence.md`](../agents/evidence-backed-strategy-modes-07-09-evidence.md).
+The current native `MNetherFloorEvents` row owns four exact Event-Part IDs, while
+`MNetherFloorEventParts` owns raw target/parameter/content fields and `MNetherFloorBattles` owns a
+raw integer battle `type`, stage ID, and Code-drop ratio. `NetherEventPopupController` retains the
+Event row, part array, and presenter `_mCharacterId`; `NetherApiDataStore.RequestNetherUpdateEventAsync`
+accepts floor level/index, selected option number, and optional Code-change ID, not Event or
+Event-Part IDs. Therefore Event/Part IDs are immutable client-side commitment correlation only,
+and the production action submits only the native request seam. Because the current native type
+has no freshly proven local Boss/MiniBoss/Normal semantic enum, an exact runtime battle option
+with no typed provider remains option-local unknown rather than being classified from raw `type`
+or `code_drop_ratio`. Likewise, settlement `nether_code_points` and technology
+`SpherePointRatio` do not prove a pre-settlement Research projection; production keeps that
+projection unknown and the policy fails closed until an authoritative projection is supplied.
+
 ## User Stories
 
 1. As a user, I can select `Equipment` or `Research` explicitly so the plugin never guesses my run objective.

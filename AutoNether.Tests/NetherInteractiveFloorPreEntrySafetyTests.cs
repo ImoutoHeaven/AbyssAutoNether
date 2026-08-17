@@ -176,6 +176,86 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         Assert.Equal(30, effect.Amount);
     }
 
+    [Theory]
+    [InlineData(165)]
+    [InlineData(166)]
+    public void Negative_resource_content_id_is_unknown_before_floor_entry(int contentType)
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Event,
+            events: [Event(100, 1001)],
+            parts:
+            [
+                Part(
+                    1001,
+                    targetType1: 0,
+                    parameter1: 0,
+                    contentType: contentType,
+                    contentId: -1,
+                    amount: 1
+                ),
+            ]
+        ));
+
+        Assert.False(result.IsSafe);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, result.PauseReason);
+        Assert.Contains("unsupported-event-content-type:" + contentType, result.Detail);
+    }
+
+    [Fact]
+    public void Out_of_domain_item_rarity_is_unknown_before_floor_entry()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(
+            Input(
+                NetherFloorNodeType.Event,
+                events: [Event(100, 1001)],
+                parts: [Part(1001, targetType1: 0, parameter1: 0, contentType: 30, contentId: 701, amount: 1)]
+            ) with
+            {
+                ItemRows = [new NetherStrategyItemMasterRow(701, 91, 999, 1, 99)],
+            }
+        );
+
+        Assert.False(result.IsSafe);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, result.PauseReason);
+        Assert.Contains("event-item-master-row-unavailable", result.Detail);
+    }
+
+    [Fact]
+    public void Nonzero_code_offer_content_id_remains_unknown_instead_of_using_a_runtime_only_identity()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Event,
+            events: [Event(100, 1001)],
+            parts: [Part(
+                1001,
+                targetType1: 0,
+                parameter1: 0,
+                contentType: 160,
+                contentId: 999,
+                amount: 1
+            )]
+        ));
+
+        Assert.False(result.IsSafe);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, result.PauseReason);
+        Assert.Contains("unsupported-event-content-type:160", result.Detail);
+    }
+
+    [Fact]
+    public void Nonzero_target_type_seven_parameter_is_unknown_and_does_not_open_code_transform_flow()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Event,
+            events: [Event(100, 1001)],
+            parts: [Part(1001, targetType1: 7, parameter1: 999)]
+        ));
+
+        Assert.False(result.IsSafe);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, result.PauseReason);
+        Assert.Contains("unsupported-event-target", result.Detail);
+    }
+
     [Fact]
     public void Native_code_transform_requires_prevalidated_opt_in_while_code_offer_remains_exact()
     {
@@ -244,7 +324,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
-    public void Structural_part_corruption_is_not_hidden_by_a_known_safe_option()
+    public void Missing_sibling_part_is_option_local_when_a_known_option_is_safe()
     {
         NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
             NetherFloorNodeType.Event,
@@ -252,9 +332,41 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             parts: [Part(1001, targetType1: (int)NetherEffectKind.Heal, parameter1: 1)]
         ));
 
-        Assert.False(result.IsSafe);
-        Assert.Equal(NetherPauseReason.UnknownMasterData, result.PauseReason);
-        Assert.Contains("missing-m-nether-floor-event-part:9999", result.Detail);
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(1, result.SafeOptionNumberByEventId[100]);
+        Assert.Contains(
+            result.OptionProjectionByKey,
+            entry => entry.Key.EventPartId == 9999 && !entry.Value.IsKnown
+        );
+    }
+
+    [Fact]
+    public void Malformed_event_part_is_option_local_when_a_sibling_option_is_exactly_safe()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Event,
+            events: [Event(100, 1001, 1002)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.Heal, parameter1: 1),
+                Part(1002, targetType1: 99, parameter1: 0),
+            ]
+        ));
+
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(1, result.SafeOptionNumberByEventId[100]);
+        Assert.Contains(
+            result.OptionProjectionByKey,
+            entry => entry.Key.EventId == 100
+                && entry.Key.EventPartId == 1001
+                && entry.Value.IsKnown
+        );
+        Assert.Contains(
+            result.OptionProjectionByKey,
+            entry => entry.Key.EventId == 100
+                && entry.Key.EventPartId == 1002
+                && !entry.Value.IsKnown
+        );
     }
 
     [Fact]

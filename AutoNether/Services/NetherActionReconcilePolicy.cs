@@ -207,11 +207,22 @@ internal static class NetherActionReconcilePolicy
             ExpectedEffects = stage.ExpectedEffects,
             HasExpectedErosionDelta = stage.HasExpectedErosionDelta,
             ExpectedErosionDelta = stage.ExpectedErosionDelta,
+            ProjectedErosion = stage.ProjectedErosion,
+            ProjectedHpDelta = stage.ProjectedHpDelta,
+            ProjectedNetherGold = stage.ProjectedNetherGold,
+            ProjectedTreasureKeys = stage.ProjectedTreasureKeys,
+            CommittedGoldMinimum = stage.CommittedGoldMinimum,
+            CommittedKeyMinimum = stage.CommittedKeyMinimum,
             ContentId = stage.ContentId,
             ContentAmount = stage.ContentAmount,
             GoldCost = stage.GoldCost,
             CodeId = stage.CodeId,
             ReplaceCodeId = stage.ReplaceCodeId,
+            EventId = stage.EventId,
+            EventPartId = stage.EventPartId,
+            EventFloorId = stage.EventCommitment?.FloorId ?? 0,
+            EventNodeId = stage.EventCommitment?.NodeId ?? 0,
+            EventCommitment = stage.EventCommitment,
         };
         return stage.PopupKind switch
         {
@@ -268,9 +279,55 @@ internal static class NetherActionReconcilePolicy
         {
             return NetherActionOutcome.Ambiguous;
         }
+        if ((action.EventId != 0
+                || action.EventPartId != 0
+                || action.EventFloorId != 0
+                || action.EventNodeId != 0
+                || action.EventCommitment != null)
+            && (action.EventId <= 0
+                || action.EventPartId <= 0
+                || action.EventFloorId <= 0
+                || action.EventNodeId <= 0
+                || action.EventCommitment is not NetherEventCommitment commitment
+                || !commitment.IsValid
+                || commitment.FloorId != action.EventFloorId
+                || commitment.NodeId != action.EventNodeId
+                || !commitment.Matches(new NetherEventOption(
+                    action.OptionNumber,
+                    action.ExpectedEffects
+                )
+                {
+                    EventId = action.EventId,
+                    EventPartId = action.EventPartId,
+                    FloorId = action.EventFloorId,
+                    NodeId = action.EventNodeId,
+                    ProjectedErosion = action.ProjectedErosion,
+                    ProjectedHpDelta = action.ProjectedHpDelta,
+                    ProjectedNetherGold = action.ProjectedNetherGold,
+                    ProjectedTreasureKeys = action.ProjectedTreasureKeys,
+                    CommittedGoldMinimum = action.CommittedGoldMinimum,
+                    CommittedKeyMinimum = action.CommittedKeyMinimum,
+                    BattleEvidence = commitment.Battle,
+                    RewardEvidence = commitment.Reward,
+                    PartialDeathEligibility = commitment.PartialDeathEligibility,
+                    AllowsPartialActiveDeaths = commitment.AllowsPartialActiveDeaths,
+                })))
+        {
+            return NetherActionOutcome.Ambiguous;
+        }
 
         try
         {
+            if (action.EventCommitment is NetherEventCommitment exactCommitment
+                && (after.ErosionPoint != exactCommitment.ProjectedErosion
+                    || exactCommitment.ProjectedNetherGold is not int projectedGold
+                    || after.NetherGold != projectedGold
+                    || exactCommitment.ProjectedTreasureKeys is not int projectedKeys
+                    || after.TreasureKeyCount != projectedKeys))
+            {
+                return UnchangedOrAmbiguous(before, after);
+            }
+
             int erosionDelta = action.HasExpectedErosionDelta
                 ? action.ExpectedErosionDelta
                 : action.ExpectedEffects.Sum(effect => effect.Kind switch
@@ -297,6 +354,11 @@ internal static class NetherActionReconcilePolicy
                 NetherEffectKind.Damage => -effect.Amount,
                 _ => 0,
             });
+            if (action.EventCommitment != null
+                && action.EventCommitment.HpDelta != hpDelta)
+            {
+                return UnchangedOrAmbiguous(before, after);
+            }
             bool hasHpEffect = hpDelta != 0;
             if (action.TargetCharacterId < 0)
                 return NetherActionOutcome.Ambiguous;
@@ -307,11 +369,18 @@ internal static class NetherActionReconcilePolicy
             if (!resourcesMatch)
                 return UnchangedOrAmbiguous(before, after);
 
+            NetherInteractivePartialDeathEligibility? partialDeathEligibility =
+                action.EventCommitment?.PartialDeathEligibility;
+            bool allowPartialActiveDeaths = action.EventCommitment?.AllowsPartialActiveDeaths == true
+                && partialDeathEligibility != null
+                && (partialDeathEligibility.AllowsTreasureHpPayment
+                    || partialDeathEligibility.AllowsHpPaidEventKey);
             if (hasHpEffect && !HasExactHpDelta(
                     before,
                     after,
                     hpDelta,
-                    allowSaturatedHealNoOp
+                    allowSaturatedHealNoOp,
+                    allowPartialActiveDeaths
                 ))
                 return UnchangedOrAmbiguous(before, after);
 
@@ -700,7 +769,8 @@ internal static class NetherActionReconcilePolicy
         NetherSnapshot before,
         NetherSnapshot after,
         int expectedDelta,
-        bool allowSaturatedHealNoOp
+        bool allowSaturatedHealNoOp,
+        bool allowPartialActiveDeaths
     )
     {
         if (before.Characters == null || after.Characters == null
@@ -714,6 +784,7 @@ internal static class NetherActionReconcilePolicy
             var afterByCharacterId = new Dictionary<long, NetherCharacterState>();
             var beforeCharacterIds = new HashSet<long>();
             bool hasActiveCharacter = false;
+            bool hasActiveSurvivor = false;
             bool observedAppliedEffect = false;
             bool allActiveCharactersSaturated = true;
             foreach (NetherCharacterState character in after.Characters)
@@ -725,8 +796,16 @@ internal static class NetherActionReconcilePolicy
             foreach (NetherCharacterState character in before.Characters)
             {
                 if (!beforeCharacterIds.Add(character.CharacterId)
-                    || !afterByCharacterId.TryGetValue(character.CharacterId, out NetherCharacterState observed)
-                    || observed.IsActive != character.IsActive)
+                    || !afterByCharacterId.TryGetValue(character.CharacterId, out NetherCharacterState observed))
+                {
+                    return false;
+                }
+
+                bool becameInactive = character.IsActive && !observed.IsActive;
+                if (observed.IsActive != character.IsActive
+                    && (!allowPartialActiveDeaths
+                        || !becameInactive
+                        || observed.HpPermille != 0))
                 {
                     return false;
                 }
@@ -748,11 +827,28 @@ internal static class NetherActionReconcilePolicy
                 bool saturated = expectedHp == character.HpPermille;
                 allActiveCharactersSaturated &= saturated;
 
-                // Event selection sends floor/option/code only; it never sends the popup's
-                // presentation character ID. The server owns the affected character set and
-                // returns t_nether_characters[], which the native client applies by returned ID.
-                // Accept any non-empty server-selected subset, but every changed member must
-                // carry the exact clamped effect and every non-selected member must be unchanged.
+                if (becameInactive)
+                {
+                    if (expectedHp != 0)
+                        return false;
+                    observedAppliedEffect = true;
+                    continue;
+                }
+                hasActiveSurvivor = true;
+
+                // An explicitly authorized partial-death commitment may vary the active set, but
+                // an ordinary Event commitment must prove exact projected HP for every living
+                // character. The native response is authoritative by character ID; a server-
+                // selected subset is not sufficient proof for the ordinary route.
+                if (!allowPartialActiveDeaths)
+                {
+                    if (expectedDelta < 0 && expectedHp <= 0)
+                        return false;
+                    if (observed.IsActive != character.IsActive || observed.HpPermille != expectedHp)
+                        return false;
+                    observedAppliedEffect |= !saturated;
+                    continue;
+                }
                 if (observed.HpPermille == expectedHp)
                 {
                     observedAppliedEffect |= !saturated;
@@ -762,7 +858,8 @@ internal static class NetherActionReconcilePolicy
                     return false;
             }
 
-            return observedAppliedEffect
+            return (observedAppliedEffect
+                    && (!allowPartialActiveDeaths || hasActiveSurvivor))
                 || (allowSaturatedHealNoOp
                     && expectedDelta > 0
                     && hasActiveCharacter

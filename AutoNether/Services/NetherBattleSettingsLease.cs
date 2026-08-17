@@ -37,6 +37,8 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
     private bool _recoveryPending;
     private string _lastStartupProbeFault = string.Empty;
 
+    internal static string? ConfigPathOverrideForTests { get; set; }
+
     public static NetherBattleSettingsLease Instance { get; } = new();
 
     public NetherBattleSettingsLeasePhase Phase => _state.Phase;
@@ -234,8 +236,11 @@ internal sealed class NetherBattleSettingsLease : IDisposable, INetherBattleSett
     {
         if (_initialized)
             return;
+        string configRoot = ConfigPathOverrideForTests
+            ?? Paths.ConfigPath
+            ?? Path.Combine(Path.GetTempPath(), "Abyss.AutoNether");
         _leasePath = Path.Combine(
-            Paths.ConfigPath,
+            configRoot,
             "Abyss.AutoNether",
             "battle-settings-lease.json"
         );

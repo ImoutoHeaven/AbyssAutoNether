@@ -7,6 +7,452 @@ using System.Linq;
 namespace AutoNether.Services;
 
 /// <summary>
+/// Owns exact procurement commitments produced by route/pre-entry evidence. This durable state is
+/// separate from the one-shot pending handoff because route-safety capture can be repeated before
+/// the native Event update. No native Event row or displayed resource creates a commitment.
+/// </summary>
+internal sealed class NetherRouteOwnedEventProcurementProducer
+{
+    private IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> _committed =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+    private NetherRouteBranchIdentity? _identity;
+
+    public NetherRouteBranchIdentity? CurrentIdentity => _identity;
+
+    /// <summary>
+    /// Replaces the current route-owned proof only when a new exact route proof exists. An empty
+    /// capture is not evidence that a previously captured branch disappeared; this distinction is
+    /// required because native FloorSelection capture can legitimately be repeated between popup
+    /// stages without exposing the same rows again.
+    /// </summary>
+    public void Commit(
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? commitments
+    )
+    {
+        if (commitments == null || commitments.Count == 0)
+            return;
+
+        Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> exact = Normalize(commitments);
+        if (exact.Count > 0)
+            _committed = exact;
+    }
+
+    /// <summary>
+    /// Replaces the durable proof with the exact selected route identity.  An empty map is a
+    /// meaningful recomputation for that branch and therefore clears the prior option map.
+    /// </summary>
+    public void Commit(
+        NetherRouteBranchIdentity identity,
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? commitments
+    )
+    {
+        if (!identity.IsValid)
+            return;
+        _identity = identity;
+        _committed = Normalize(commitments);
+    }
+
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> Capture() =>
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(_committed);
+
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        CaptureForSnapshot(NetherSnapshotFingerprint fingerprint) =>
+        _identity is { } identity && identity.SnapshotFingerprint == fingerprint
+            ? Capture()
+            : new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+
+    public NetherRouteBranchIdentity? IdentityForSnapshot(NetherSnapshotFingerprint fingerprint) =>
+        _identity is { } identity && identity.SnapshotFingerprint == fingerprint
+            ? identity
+            : null;
+
+    public void InvalidateForSnapshot(NetherSnapshotFingerprint fingerprint)
+    {
+        if (_identity is { } identity && identity.SnapshotFingerprint != fingerprint)
+            Clear();
+    }
+
+    public void Clear()
+    {
+        _committed = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        _identity = null;
+    }
+
+    public static IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        FromInteractivePreEntry(
+            NetherSnapshot snapshot,
+            NetherRoutePlan route,
+            NetherRuntimeInteractivePreEntryInputsResult? interactivePreEntry
+        )
+    {
+        var commitments = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        if (snapshot == null
+            || route?.BranchIdentity is not NetherRouteBranchIdentity identity
+            || !identity.Matches(snapshot, route.SelectedPathNodeIds)
+            || interactivePreEntry == null
+            || !interactivePreEntry.IsSuccess
+            || interactivePreEntry.SnapshotFingerprint != snapshot.Fingerprint)
+            return commitments;
+
+        foreach (NetherRuntimeInteractivePreEntryCaptureResult capture in interactivePreEntry.ByFloorNodeId.Values)
+        {
+            if (capture?.Input == null
+                || !route.SelectedPathNodeIds.Contains(capture.Input.FloorNodeId))
+            {
+                continue;
+            }
+            foreach ((NetherInteractiveEventOptionKey key, NetherInteractiveOptionProjection projection)
+                in capture.Safety.OptionProjectionByKey)
+            {
+                if (key.EventId <= 0
+                    || key.EventPartId <= 0
+                    || key.OptionNumber <= 0
+                    || !projection.HasCommittedProcurementEvidence)
+                {
+                    continue;
+                }
+
+                NetherEventProcurementBudget budget = new(
+                    projection.CommittedGoldMinimum,
+                    projection.CommittedKeyMinimum
+                );
+                if (budget.IsValid)
+                    commitments[key] = budget;
+            }
+        }
+        return commitments;
+    }
+
+    /// <summary>
+    /// Creates procurement minima only from a selected route's exact visible branch.  The Event
+    /// option must be present in both the pre-entry projection and the visible native row, and the
+    /// future Shop/Treasure source must be known, reachable through hard-safe nodes, and affordable
+    /// after the exact reward projection.  A missing or non-materialized source produces no budget.
+    /// </summary>
+    public static IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        FromSelectedVisibleBranch(
+            NetherSnapshot snapshot,
+            NetherRoutePlan route,
+            NetherRouteSafetyContext context,
+            NetherRuntimeInteractivePreEntryInputsResult? interactivePreEntry,
+            NetherStrategyVisibleMapEvidence? visibleMap
+        )
+    {
+        var commitments = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        if (snapshot == null
+            || route?.SelectedNode == null
+            || context == null
+            || interactivePreEntry == null
+            || !interactivePreEntry.IsSuccess
+            || route.BranchIdentity is not NetherRouteBranchIdentity identity
+            || !identity.Matches(snapshot, route.SelectedPathNodeIds)
+            || interactivePreEntry.SnapshotFingerprint != snapshot.Fingerprint
+            || visibleMap == null
+            || visibleMap.ContentRows == null)
+        {
+            return commitments;
+        }
+
+        IReadOnlyList<NetherFloorNode> floors = snapshot.Floors ?? Array.Empty<NetherFloorNode>();
+        foreach ((long nodeId, NetherRuntimeInteractivePreEntryCaptureResult capture) in interactivePreEntry.ByFloorNodeId)
+        {
+            if (capture?.Input == null
+                || !capture.IsCaptured
+                || !capture.Safety.IsSafe
+                || capture.Safety.OptionProjectionByKey == null
+                || !IsSafeNode(context, nodeId)
+                || !IsSelectedPathNode(route, nodeId)
+                || !HasSelectedTerminalPath(nodeId, route, floors, context))
+            {
+                continue;
+            }
+
+            foreach ((NetherInteractiveEventOptionKey key, NetherInteractiveOptionProjection projection)
+                in capture.Safety.OptionProjectionByKey)
+            {
+                if (key.EventId <= 0
+                    || key.EventPartId <= 0
+                    || key.OptionNumber <= 0
+                    || projection == null
+                    || projection.EventId != key.EventId
+                    || projection.EventPartId != key.EventPartId
+                    || projection.NodeId != nodeId
+                    || !projection.IsKnown
+                    || !projection.HasRouteSafetyEvidence
+                    || !projection.RouteSafetyAllowed
+                    || !HasExactVisibleOption(visibleMap, nodeId, key, projection)
+                    || !NetherEventResourceProjection.TryProject(
+                        snapshot.NetherGold,
+                        snapshot.TreasureKeyCount,
+                        projection.ExpectedEffects,
+                        out int projectedGold,
+                        out int projectedKeys
+                    ))
+                {
+                    continue;
+                }
+
+            int goldMinimum = FindAffordableShopMinimum(
+                    visibleMap.ContentRows,
+                    nodeId,
+                    route,
+                    floors,
+                    context,
+                    projectedGold,
+                    projection.ExpectedEffects.Any(effect => effect.Kind == NetherEffectKind.NetherGoldGain)
+                );
+            int keyMinimum = HasAffordableRankFiveTreasure(
+                    visibleMap.ContentRows,
+                    nodeId,
+                    route,
+                    floors,
+                    context,
+                    projectedKeys,
+                    projection.ExpectedEffects.Any(effect => effect.Kind == NetherEffectKind.TreasureKeyGain)
+                ) ? 1 : 0;
+                NetherEventProcurementBudget budget = new(goldMinimum, keyMinimum);
+                if (budget.GoldMinimum > 0 || budget.KeyMinimum > 0)
+                    commitments[key] = budget;
+            }
+        }
+        return commitments;
+    }
+
+    private static bool HasExactVisibleOption(
+        NetherStrategyVisibleMapEvidence visibleMap,
+        long nodeId,
+        NetherInteractiveEventOptionKey key,
+        NetherInteractiveOptionProjection projection
+    )
+    {
+        NetherStrategyVisibleContentRow[] rows = visibleMap.ContentRows
+            .Where(row => row != null
+                && row.Kind == NetherStrategyVisibleContentKind.Event
+                && row.NodeId == nodeId
+                && row.EventId == key.EventId
+                && row.EventPartId == key.EventPartId
+                && row.IsKnown)
+            .ToArray();
+        if (rows.Length != 1)
+            return false;
+        NetherStrategyVisibleEventOptionEvidence[] options = rows[0].EventOptions
+            .Where(option => option != null
+                && option.OptionNumber == key.OptionNumber
+                && option.EventPartId == key.EventPartId)
+            .ToArray();
+        if (options.Length != 1)
+            return false;
+        if (options[0].Effects.Any(effect => effect.IsPresent && !effect.IsKnown))
+            return false;
+        foreach (NetherEffect expected in projection.ExpectedEffects)
+        {
+            if (expected.Kind is not NetherEffectKind.NetherGoldGain and not NetherEffectKind.TreasureKeyGain)
+                continue;
+            if (!options[0].Effects.Any(effect => effect.IsPresent
+                    && effect.IsKnown
+                    && effect.EffectKind == expected.Kind
+                    && effect.Amount == expected.Amount
+                    && effect.ContentId == expected.ContentId))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int FindAffordableShopMinimum(
+        IReadOnlyList<NetherStrategyVisibleContentRow> rows,
+        long eventNodeId,
+        NetherRoutePlan route,
+        IReadOnlyList<NetherFloorNode> floors,
+        NetherRouteSafetyContext context,
+        int projectedGold,
+        bool requiresGoldReward
+    )
+    {
+        if (!requiresGoldReward)
+            return 0;
+        int[] costs = rows
+            .Where(row => row != null
+                && row.Kind == NetherStrategyVisibleContentKind.ShopInventory
+                && row.IsKnown
+                && row.UsesNetherGold
+                && IsPermittedGoldProcurement(row)
+                && row.Cost > 0
+                && projectedGold >= row.Cost
+                && row.NodeId != eventNodeId
+                && IsLaterOnSelectedPath(route, eventNodeId, row.NodeId)
+                && HasSelectedTerminalPath(row.NodeId, route, floors, context))
+            .Select(row => row.Cost)
+            .Distinct()
+            .OrderBy(cost => cost)
+            .ToArray();
+        return costs.Length == 0 ? 0 : costs[0];
+    }
+
+    private static bool IsPermittedGoldProcurement(NetherStrategyVisibleContentRow row) =>
+        row.Cost is 200 or 300 or 500
+        && row.Amount > 0
+        && row.UsesNetherGold;
+
+    private static bool HasAffordableRankFiveTreasure(
+        IReadOnlyList<NetherStrategyVisibleContentRow> rows,
+        long eventNodeId,
+        NetherRoutePlan route,
+        IReadOnlyList<NetherFloorNode> floors,
+        NetherRouteSafetyContext context,
+        int projectedKeys,
+        bool requiresKeyReward
+    )
+    {
+        if (!requiresKeyReward || projectedKeys < 1)
+            return false;
+        foreach (NetherStrategyVisibleContentRow treasure in rows.Where(row =>
+            row != null
+            && row.Kind == NetherStrategyVisibleContentKind.Treasure
+            && row.IsKnown
+            && row.NodeId != eventNodeId
+            && IsLaterOnSelectedPath(route, eventNodeId, row.NodeId)
+            && HasSelectedTerminalPath(row.NodeId, route, floors, context)))
+        {
+            NetherStrategyVisibleContentRow[] rewards = rows
+                .Where(row => row != null
+                    && row.Kind == NetherStrategyVisibleContentKind.Item
+                    && row.NodeId == treasure.NodeId
+                    && row.EventId == treasure.EventId
+                    && row.IsKnown)
+                .ToArray();
+            if (rewards.Length == 1
+                && rewards[0].ItemType == 91
+                && rewards[0].ItemRarity == (int)NetherRewardRarity.UniqueWeapon
+                && NetherEventNativeMapping.IsKnownRewardRarity((NetherRewardRarity)rewards[0].ItemRarity))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsSelectedPathNode(NetherRoutePlan route, long nodeId) =>
+        route.SelectedPathNodeIds != null && route.SelectedPathNodeIds.Contains(nodeId);
+
+    private static bool IsLaterOnSelectedPath(NetherRoutePlan route, long startNodeId, long targetNodeId)
+    {
+        if (route.SelectedPathNodeIds == null)
+            return false;
+        int startIndex = PathIndexOf(route.SelectedPathNodeIds, startNodeId);
+        int targetIndex = PathIndexOf(route.SelectedPathNodeIds, targetNodeId);
+        return startIndex >= 0 && targetIndex > startIndex;
+    }
+
+    private static bool HasSelectedTerminalPath(
+        long startNodeId,
+        NetherRoutePlan route,
+        IReadOnlyList<NetherFloorNode> floors,
+        NetherRouteSafetyContext context
+    )
+    {
+        if (route.SelectedPathNodeIds == null)
+            return false;
+        int startIndex = PathIndexOf(route.SelectedPathNodeIds, startNodeId);
+        if (startIndex < 0)
+            return false;
+        Dictionary<long, NetherFloorNode> nodes = floors
+            .Where(node => node != null && node.NodeId > 0)
+            .GroupBy(node => node.NodeId)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single());
+        for (int index = startIndex; index < route.SelectedPathNodeIds.Count; index++)
+        {
+            long nodeId = route.SelectedPathNodeIds[index];
+            if (!IsSafeNode(context, nodeId) || !nodes.TryGetValue(nodeId, out NetherFloorNode? node))
+                return false;
+            if (index == route.SelectedPathNodeIds.Count - 1)
+                return node.NodeType == NetherFloorNodeType.Boss;
+        }
+        return false;
+    }
+
+    private static int PathIndexOf(IReadOnlyList<long> path, long nodeId)
+    {
+        for (int index = 0; index < path.Count; index++)
+        {
+            if (path[index] == nodeId)
+                return index;
+        }
+        return -1;
+    }
+
+    private static bool IsSafeNode(NetherRouteSafetyContext context, long nodeId) =>
+        context.KnownNodeByFloorId.TryGetValue(nodeId, out bool known)
+        && known
+        && context.HardSafeByFloorId.TryGetValue(nodeId, out bool hardSafe)
+        && hardSafe;
+
+    private static Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> Normalize(
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? commitments
+    )
+    {
+        var exact = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        if (commitments == null)
+            return exact;
+        foreach ((NetherInteractiveEventOptionKey key, NetherEventProcurementBudget budget) in commitments)
+        {
+            if (IsUsableKey(key) && budget.IsValid)
+                exact[key] = budget;
+        }
+        return exact;
+    }
+
+    public static IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        FromCommitments(IReadOnlyDictionary<NetherEventCommitmentKey, NetherEventCommitment>? commitments)
+    {
+        var budgets = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        if (commitments == null)
+            return budgets;
+
+        foreach ((NetherEventCommitmentKey key, NetherEventCommitment commitment) in commitments)
+        {
+            if (commitment == null || !commitment.IsValid)
+                continue;
+            NetherEventProcurementBudget budget = new(
+                commitment.CommittedGoldMinimum,
+                commitment.CommittedKeyMinimum
+            );
+            if (budget.IsValid)
+            {
+                budgets[new NetherInteractiveEventOptionKey(key.EventId, key.EventPartId, key.OptionNumber)] = budget;
+            }
+        }
+        return budgets;
+    }
+
+    public static IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> Merge(
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? first,
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? second
+    )
+    {
+        var merged = first == null
+            ? new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>()
+            : first
+                .Where(pair => IsUsableKey(pair.Key) && pair.Value.IsValid)
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+        if (second != null)
+        {
+            foreach ((NetherInteractiveEventOptionKey key, NetherEventProcurementBudget budget) in second)
+            {
+                if (IsUsableKey(key) && budget.IsValid)
+                    merged[key] = budget;
+            }
+        }
+        return merged;
+    }
+
+    private static bool IsUsableKey(NetherInteractiveEventOptionKey key) =>
+        key.EventId > 0 && key.EventPartId > 0 && key.OptionNumber > 0;
+}
+
+/// <summary>
 /// The complete read-only runtime inputs consumed by production route planning.  Individual
 /// entries remain nullable/unknown so a missing master or runtime observation cannot be
 /// converted to the old permissive <c>current &lt; 100</c> / <c>HP &gt; 0</c> maps.
@@ -26,6 +472,21 @@ internal sealed record NetherRuntimeRouteSafetyData
         CodeHash = "nether-codes:unknown",
         Detail = "missing-active-code-erosion-projection",
     };
+    /// <summary>
+    /// Exact route-owned procurement commitments carried from the prior authoritative capture.
+    /// Native Event rows do not expose these hidden branch budgets; an absent entry means no
+    /// repository-owned commitment, never a guessed minimum.
+    /// </summary>
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> EventProcurementCommitments { get; init; } =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+    /// <summary>Identity of the route branch that produced <see cref="EventProcurementCommitments"/>.</summary>
+    public NetherRouteBranchIdentity? RouteIdentity { get; init; }
+    /// <summary>
+    /// Exact visible branch rows captured by the same FloorSelection owner.  Procurement
+    /// generation may use only known Shop/Treasure rows from this package; absent or
+    /// non-materialized inventory remains an unknown source.
+    /// </summary>
+    public NetherStrategyVisibleMapEvidence? VisibleMap { get; init; }
     public string Detail { get; init; } = string.Empty;
 }
 
@@ -40,6 +501,10 @@ internal sealed record NetherProductionRouteSafetyPlan
     public NetherRouteSafetyContext Context { get; init; } = new();
     public IReadOnlyDictionary<long, NetherBattleProjectionPayload> BattleProjectionByFloorId { get; init; } =
         new Dictionary<long, NetherBattleProjectionPayload>();
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        EventProcurementCommitments { get; init; } =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+    public NetherRouteBranchIdentity? RouteIdentity { get; init; }
 }
 
 /// <summary>
@@ -183,11 +648,40 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             PrimaryResearchFamily = settings.ResearchPrimaryFamily,
         });
         NetherRoutePlan route = _routePlanner.Plan(snapshot, context);
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> runtimeCommitments =
+            runtime.RouteIdentity is { } runtimeIdentity
+                && route.BranchIdentity is { } routeIdentity
+                && runtimeIdentity == routeIdentity
+                ? runtime.EventProcurementCommitments
+                : runtime.RouteIdentity == null
+                    ? runtime.EventProcurementCommitments
+                    : new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> routeCommitments =
+            NetherRouteOwnedEventProcurementProducer.Merge(
+                runtimeCommitments,
+                NetherRouteOwnedEventProcurementProducer.FromInteractivePreEntry(
+                    snapshot,
+                    route,
+                    interactivePreEntry
+                )
+            );
+        routeCommitments = NetherRouteOwnedEventProcurementProducer.Merge(
+            routeCommitments,
+            NetherRouteOwnedEventProcurementProducer.FromSelectedVisibleBranch(
+                snapshot,
+                route,
+                context,
+                interactivePreEntry,
+                runtime.VisibleMap
+            )
+        );
         return new NetherProductionRouteSafetyPlan
         {
             Route = route,
             Context = context,
             BattleProjectionByFloorId = payloads,
+            EventProcurementCommitments = routeCommitments,
+            RouteIdentity = route.BranchIdentity,
         };
     }
 

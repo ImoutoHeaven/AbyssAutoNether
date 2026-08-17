@@ -1711,6 +1711,94 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_derives_same_branch_gold_and_key_thresholds_without_manual_budget_injection()
+    {
+        NetherSnapshot routeStart = ScriptedRuntimeBridge.ProcurementRouteSnapshot(NetherSessionStatus.Play);
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = routeStart,
+            BindRouteSafetyHpToCurrentSnapshot = true,
+            VisibleMap = ScriptedRuntimeBridge.ProcurementVisibleMap(routeStart.Floors),
+            InteractivePreEntryFactory = ScriptedRuntimeBridge.ProcurementInteractivePreEntry,
+        };
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            new NetherBattleSettingsLeaseControllerLifecycle(new RecordingLeaseDriver(), retryIntervalUpdates: 1)
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            NetherInteractiveEventOptionKey goldKey = new(100, 1001, 1);
+            NetherInteractiveEventOptionKey keyKey = new(100, 1002, 2);
+            Assert.Equal(
+                new NetherEventProcurementBudget(200, 0),
+                bridge.CaptureRouteOwnedEventProcurementCommitments()[goldKey]
+            );
+            Assert.Equal(
+                new NetherEventProcurementBudget(0, 1),
+                bridge.CaptureRouteOwnedEventProcurementCommitments()[keyKey]
+            );
+            Assert.Contains(
+                bridge.BoundEventProcurementCommitments,
+                pair => pair.Key == goldKey && pair.Value.GoldMinimum == 200
+            );
+
+            NetherInteractiveFloorPreEntrySafetyResult unsafeSpend =
+                new NetherInteractiveFloorPreEntrySafety().Evaluate(
+                    ScriptedRuntimeBridge.ProcurementSpendInput(
+                        routeStart,
+                        goldKey,
+                        bridge.CaptureRouteOwnedEventProcurementCommitments()
+                    )
+                );
+            Assert.False(unsafeSpend.IsSafe);
+            Assert.Contains("event-committed-budget-would-break", unsafeSpend.Detail);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_controller_rejects_procurement_proof_from_an_alternate_safe_branch()
+    {
+        NetherSnapshot routeStart = ScriptedRuntimeBridge.ProcurementAlternateBranchSnapshot(NetherSessionStatus.Play);
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = routeStart,
+            BindRouteSafetyHpToCurrentSnapshot = true,
+            VisibleMap = ScriptedRuntimeBridge.ProcurementAlternateVisibleMap(routeStart.Floors),
+            InteractivePreEntryFactory = ScriptedRuntimeBridge.ProcurementAlternateInteractivePreEntry,
+        };
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            new NetherBattleSettingsLeaseControllerLifecycle(new RecordingLeaseDriver(), retryIntervalUpdates: 1)
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.Empty(bridge.CaptureRouteOwnedEventProcurementCommitments());
+            Assert.DoesNotContain(
+                bridge.BoundEventProcurementCommitments.Keys,
+                key => key.EventId == 100 && key.EventPartId == 1001
+            );
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_appends_event_then_code_popup_under_one_parent_and_one_get()
     {
         NetherSnapshot routeStart = ScriptedRuntimeBridge.InteractiveRouteSnapshot(NetherSessionStatus.Play, floorId: 1, gold: 10);
@@ -3474,6 +3562,122 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_reconciles_authorized_partial_treasure_death_with_a_survivor()
+    {
+        NetherInteractivePartialDeathEligibility proof = new(
+            NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,
+            EventId: 42,
+            EventPartId: 20044,
+            ObjectiveNodeId: 2
+        )
+        {
+            IsKnown = true,
+            ObjectiveReachable = true,
+            ExactTreasureRank = 5,
+        };
+        NetherEffect[] effects = [new NetherEffect(NetherEffectKind.Damage, 100)];
+        NetherEventCommitment commitment = new(
+            EventId: 42,
+            EventPartId: 20044,
+            OptionNumber: 1,
+            Effects: effects,
+            ProjectedErosion: 20,
+            HpDelta: -100
+        )
+        {
+            FloorId = 2,
+            NodeId = 2,
+            ProjectedNetherGold = 10,
+            ProjectedTreasureKeys = 0,
+            PartialDeathEligibility = proof,
+            AllowsPartialActiveDeaths = true,
+        };
+        NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
+            NetherSessionStatus.Play,
+            NetherFloorNodeType.Treasure,
+            floorId: 2,
+            gold: 10,
+            keys: 0,
+            hp: 300
+        ) with
+        {
+            ErosionPoint = 20,
+            Characters =
+            [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 300),
+            ],
+            CharacterHpHash = "1:0:0;2:300:1",
+            Floors = new[]
+            {
+                new NetherFloorNode(1, 1, 1, NetherFloorNodeType.Recovery)
+                {
+                    IsUnlocked = true,
+                },
+                new NetherFloorNode(2, 2, 2, NetherFloorNodeType.Treasure)
+                {
+                    IsUnlocked = true,
+                    PreviousFloorIds = new[] { 1L },
+                },
+                new NetherFloorNode(3, 3, 3, NetherFloorNodeType.Recovery)
+                {
+                    IsUnlocked = true,
+                    PreviousFloorIds = new[] { 2L },
+                },
+            },
+        };
+
+        RunOwnedFloorTransaction(
+            NetherFloorNodeType.Treasure,
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Treasure,
+                RawFloorType = (int)NetherFloorNodeType.Treasure,
+                ExpectedEventCommitment = commitment,
+                Options =
+                [
+                    new NetherEventOption(1, effects)
+                    {
+                        EventId = 42,
+                        EventPartId = 20044,
+                        FloorId = 2,
+                        NodeId = 2,
+                        RequiresExactBinding = true,
+                        ProjectedErosion = 20,
+                        ProjectedHpDelta = -100,
+                        ProjectedNetherGold = 10,
+                        ProjectedTreasureKeys = 0,
+                        PartialDeathEligibility = proof,
+                        AllowsPartialActiveDeaths = true,
+                    },
+                ],
+            },
+            new NetherFloorEventPartMasterRow(
+                20044,
+                (int)NetherEffectKind.Damage,
+                100,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ),
+            after,
+            NetherActionKind.SelectEventOption,
+            startHp: 100,
+            startCharacters:
+            [
+                new NetherCharacterState(1, 100),
+                new NetherCharacterState(2, 400),
+            ],
+            partialDeathEligibility: proof,
+            startKeys: 0
+        );
+    }
+
+    [Fact]
     public void Production_controller_reconciles_owned_recovery_with_exact_heal_contract()
     {
         NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
@@ -4291,7 +4495,9 @@ public class NetherAutoClimbControllerEndToEndTests
         bool assertNextRoute = false,
         NetherActiveCodeErosionProjection? activeCodeErosion = null,
         int startErosion = 20,
-        IReadOnlyList<NetherCharacterState>? startCharacters = null
+        IReadOnlyList<NetherCharacterState>? startCharacters = null,
+        NetherInteractivePartialDeathEligibility? partialDeathEligibility = null,
+        int startKeys = 1
     )
     {
         NetherActiveCodeErosionProjection codeProjection =
@@ -4301,6 +4507,7 @@ public class NetherAutoClimbControllerEndToEndTests
             kind,
             floorId: 1,
             gold: 10,
+            keys: startKeys,
             hp: startHp
         ) with
         {
@@ -4320,6 +4527,7 @@ public class NetherAutoClimbControllerEndToEndTests
             kind,
             floorId: 2,
             gold: 10,
+            keys: startKeys,
             hp: startHp
         ) with
         {
@@ -4342,7 +4550,13 @@ public class NetherAutoClimbControllerEndToEndTests
             RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(codeProjection),
             BindRouteSafetyHpToCurrentSnapshot = true,
             InteractivePreEntryFactory = (snapshot, settings) =>
-                ScriptedRuntimeBridge.OwnedInteractivePreEntry(snapshot, settings, kind, eventPart),
+                ScriptedRuntimeBridge.OwnedInteractivePreEntry(
+                    snapshot,
+                    settings,
+                    kind,
+                    eventPart,
+                    partialDeathEligibility
+                ),
         };
         var lease = new RecordingLeaseDriver();
         var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(lease, retryIntervalUpdates: 1);
@@ -4471,6 +4685,10 @@ public class NetherAutoClimbControllerEndToEndTests
         public NetherSnapshot? OwnedPopupAfterSnapshot { get; set; }
         public NetherSnapshot? CodeReloadAfterSnapshot { get; set; }
         public NetherRuntimeRouteSafetyData? RouteSafetyOverride { get; set; }
+        public NetherStrategyVisibleMapEvidence? VisibleMap { get; set; }
+        private readonly NetherRouteOwnedEventProcurementProducer _routeOwnedEventProcurementProducer = new();
+        public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> BoundEventProcurementCommitments { get; private set; } =
+            new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
         public bool BindRouteSafetyHpToCurrentSnapshot { get; set; }
         public NetherActiveCodeErosionProjection ActiveCodeErosion { get; set; } =
             KnownEmptyCodeProjection();
@@ -4616,23 +4834,58 @@ public class NetherAutoClimbControllerEndToEndTests
                     ),
                     snapshot
                 )
+                {
+                    VisibleMap = VisibleMap,
+                }
             );
             return mapped.IsMapped
                 ? NetherRuntimeStrategyEvidenceResult.Success(mapped.Package!)
                 : NetherRuntimeStrategyEvidenceResult.Failure(mapped.Detail);
         }
 
+        public void BeginRouteReplan(NetherSnapshotFingerprint snapshotFingerprint)
+        {
+            _routeOwnedEventProcurementProducer.Clear();
+            BoundEventProcurementCommitments =
+                new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        }
+
+        public void ObserveAuthoritativeRouteSnapshot(NetherSnapshotFingerprint snapshotFingerprint) =>
+            _routeOwnedEventProcurementProducer.InvalidateForSnapshot(snapshotFingerprint);
+
+        public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(NetherSnapshot snapshot) =>
+            TryCaptureRouteSafety(snapshot.Floors) with
+            {
+                EventProcurementCommitments = _routeOwnedEventProcurementProducer.CaptureForSnapshot(
+                    snapshot.Fingerprint
+                ),
+                RouteIdentity = _routeOwnedEventProcurementProducer.IdentityForSnapshot(snapshot.Fingerprint),
+            };
+
         public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors)
         {
             NetherRuntimeRouteSafetyData captured = RouteSafetyOverride ?? new()
             {
-                FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
-                {
-                    [2] = new NetherFloorMasterBounds(2, 0, 0, IsKnown: true, Detail: string.Empty),
-                    [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
-                },
+                FloorBoundsByFloorId = floors
+                    .Where(floor => floor.NodeType is NetherFloorNodeType.Battle
+                        or NetherFloorNodeType.MiniBoss
+                        or NetherFloorNodeType.Boss)
+                    .GroupBy(floor => floor.NodeId)
+                    .Where(group => group.Count() == 1)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => new NetherFloorMasterBounds(
+                            group.Single().FloorId,
+                            0,
+                            0,
+                            IsKnown: true,
+                            Detail: string.Empty
+                        )
+                    ),
                 ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 1000),
                 ActiveCodeErosion = ActiveCodeErosion,
+                EventProcurementCommitments = _routeOwnedEventProcurementProducer.Capture(),
+                VisibleMap = VisibleMap,
             };
             if (!BindRouteSafetyHpToCurrentSnapshot)
                 return captured;
@@ -4648,6 +4901,25 @@ public class NetherAutoClimbControllerEndToEndTests
                     : NetherRouteSafetyHpTestEvidence.FromStates(CurrentSnapshot.Characters),
             };
         }
+
+        public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+            CaptureRouteOwnedEventProcurementCommitments() =>
+            _routeOwnedEventProcurementProducer.Capture();
+
+        public void CommitRouteOwnedEventProcurementCommitments(
+            IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? commitments
+        ) => _routeOwnedEventProcurementProducer.Commit(commitments);
+
+        public void CommitRouteOwnedEventProcurementCommitments(
+            NetherRouteBranchIdentity identity,
+            IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? commitments
+        ) => _routeOwnedEventProcurementProducer.Commit(identity, commitments);
+
+        public void BindEventProcurementCommitments(
+            IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? commitments
+        ) => BoundEventProcurementCommitments = commitments == null
+            ? new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>()
+            : new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(commitments);
 
         public NetherRuntimeInteractivePreEntryInputsResult TryCaptureInteractivePreEntryInputs(
             NetherSnapshot snapshot,
@@ -4700,6 +4972,12 @@ public class NetherAutoClimbControllerEndToEndTests
                     : snapshot.Codes.Select(code => code.CodeId);
                 foreach (long removal in removals)
                 {
+                    if (removal > 0
+                        && snapshot.Codes.FirstOrDefault(code => code.CodeId == removal) is NetherCodeState held
+                        && IsOpposingFamily(candidate.Family, held.Family))
+                    {
+                        continue;
+                    }
                     NetherNativeBuffWindow[] after = before
                         .Where(window => window.CodeId != removal)
                         .Append(ScriptedCodeWindow(candidate.CodeId, 100))
@@ -4766,6 +5044,12 @@ public class NetherAutoClimbControllerEndToEndTests
                 RecoverableToFiftySeventyBand = true,
             };
         }
+
+        private static bool IsOpposingFamily(NetherCodeFamily candidate, NetherCodeFamily held) =>
+            candidate == NetherCodeFamily.Rush && held == NetherCodeFamily.Impact
+            || candidate == NetherCodeFamily.Impact && held == NetherCodeFamily.Rush
+            || candidate == NetherCodeFamily.Safe && held == NetherCodeFamily.Risk
+            || candidate == NetherCodeFamily.Risk && held == NetherCodeFamily.Safe;
 
         private static NetherMechanismValue KnownZeroMechanism() =>
             NetherMechanismValue.Quantified(
@@ -5442,6 +5726,289 @@ public class NetherAutoClimbControllerEndToEndTests
             MapHash = "interactive:" + status + ":" + floorId + ":" + gold,
         };
 
+        internal static NetherSnapshot ProcurementRouteSnapshot(NetherSessionStatus status) =>
+            InteractiveRouteSnapshot(status, floorId: 1, gold: 0) with
+            {
+                CurrentNodeId = 1,
+                TreasureKeyCount = 0,
+                Floors = new[]
+                {
+                    Floor(1, 1, NetherFloorNodeType.Recovery),
+                    Floor(2, 2, NetherFloorNodeType.Event, new[] { 1L }),
+                    Floor(3, 3, NetherFloorNodeType.Shop, new[] { 2L }),
+                    Floor(4, 4, NetherFloorNodeType.Treasure, new[] { 3L }),
+                    Floor(5, 5, NetherFloorNodeType.Boss, new[] { 4L }),
+                },
+            };
+
+        internal static NetherSnapshot ProcurementAlternateBranchSnapshot(NetherSessionStatus status) =>
+            ProcurementRouteSnapshot(status) with
+            {
+                Floors = new[]
+                {
+                    Floor(1, 1, NetherFloorNodeType.Recovery),
+                    Floor(2, 2, NetherFloorNodeType.Event, new[] { 1L }),
+                    Floor(3, 3, NetherFloorNodeType.Shop, new[] { 2L }),
+                    Floor(4, 4, NetherFloorNodeType.Treasure, new[] { 3L }),
+                    Floor(5, 5, NetherFloorNodeType.Boss, new[] { 4L }),
+                    Floor(6, 3, NetherFloorNodeType.Shop, new[] { 2L }),
+                    Floor(7, 4, NetherFloorNodeType.Treasure, new[] { 6L }),
+                    Floor(8, 5, NetherFloorNodeType.Boss, new[] { 7L }),
+                },
+            };
+
+        internal static NetherStrategyVisibleMapEvidence ProcurementVisibleMap(
+            IReadOnlyList<NetherFloorNode> floors
+        ) => new(
+            floors,
+            new NetherStrategyVisibleContentRow[]
+            {
+                ProcurementVisibleEvent(2, 100, 1001, 1, NetherEffectKind.NetherGoldGain, 200),
+                ProcurementVisibleEvent(2, 100, 1002, 2, NetherEffectKind.TreasureKeyGain, 1),
+                new NetherStrategyVisibleContentRow(
+                    NetherStrategyVisibleContentKind.ShopInventory,
+                    3,
+                    3001,
+                    3001
+                )
+                {
+                    IsKnown = true,
+                    Cost = 200,
+                    Amount = 1,
+                    UsesNetherGold = true,
+                },
+                new NetherStrategyVisibleContentRow(
+                    NetherStrategyVisibleContentKind.Treasure,
+                    4,
+                    4001,
+                    401
+                )
+                {
+                    IsKnown = true,
+                    EventId = 401,
+                    EventPartId = 4011,
+                },
+                new NetherStrategyVisibleContentRow(
+                    NetherStrategyVisibleContentKind.Item,
+                    4,
+                    4011,
+                    4011
+                )
+                {
+                    IsKnown = true,
+                    EventId = 401,
+                    EventPartId = 4011,
+                    ItemType = 91,
+                    ItemRarity = 5,
+                    Amount = 1,
+                },
+            }
+        );
+
+        internal static NetherStrategyVisibleMapEvidence ProcurementAlternateVisibleMap(
+            IReadOnlyList<NetherFloorNode> floors
+        ) => new(
+            floors,
+            new NetherStrategyVisibleContentRow[]
+            {
+                ProcurementVisibleEvent(2, 100, 1001, 1, NetherEffectKind.NetherGoldGain, 200),
+                new NetherStrategyVisibleContentRow(
+                    NetherStrategyVisibleContentKind.ShopInventory,
+                    6,
+                    6001,
+                    6001
+                )
+                {
+                    IsKnown = true,
+                    Cost = 200,
+                    Amount = 1,
+                    UsesNetherGold = true,
+                },
+            }
+        );
+
+        internal static NetherRuntimeInteractivePreEntryInputsResult ProcurementInteractivePreEntry(
+            NetherSnapshot snapshot,
+            NetherAutoClimbSettings settings
+        )
+        {
+            NetherInteractiveOptionProjection goldProjection = new(
+                1,
+                ErosionDelta: 0,
+                HpDelta: 0,
+                ExpectedEffects: new[] { new NetherEffect(NetherEffectKind.NetherGoldGain, 200) }
+            )
+            {
+                EventId = 100,
+                EventPartId = 1001,
+                FloorId = 2,
+                NodeId = 2,
+                IsKnown = true,
+                HasRouteSafetyEvidence = true,
+                RouteSafetyAllowed = true,
+            };
+            NetherInteractiveOptionProjection keyProjection = new(
+                2,
+                ErosionDelta: 0,
+                HpDelta: 0,
+                ExpectedEffects: new[] { new NetherEffect(NetherEffectKind.TreasureKeyGain, 1) }
+            )
+            {
+                EventId = 100,
+                EventPartId = 1002,
+                FloorId = 2,
+                NodeId = 2,
+                IsKnown = true,
+                HasRouteSafetyEvidence = true,
+                RouteSafetyAllowed = true,
+            };
+            NetherInteractiveOptionProjection treasureProjection = new(
+                1,
+                ErosionDelta: 0,
+                HpDelta: 0,
+                ExpectedEffects: new[] { new NetherEffect(NetherEffectKind.TreasureKeyGain, 1) }
+            )
+            {
+                EventId = 401,
+                EventPartId = 4011,
+                FloorId = 4,
+                NodeId = 4,
+                IsKnown = true,
+                HasRouteSafetyEvidence = true,
+                RouteSafetyAllowed = true,
+            };
+            var eventOptions = new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+            {
+                [new NetherInteractiveEventOptionKey(100, 1001, 1)] = goldProjection,
+                [new NetherInteractiveEventOptionKey(100, 1002, 2)] = keyProjection,
+            };
+            var entries = new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
+            foreach (NetherFloorNode floor in snapshot.Floors.Where(node =>
+                node.NodeType is NetherFloorNodeType.Event
+                    or NetherFloorNodeType.Recovery
+                    or NetherFloorNodeType.Shop
+                    or NetherFloorNodeType.Treasure))
+            {
+                NetherInteractiveFloorPreEntrySafetyInput input = new(
+                    floor.NodeType,
+                    floor.FloorId,
+                    new[] { new NetherFloorMasterBoundsRow(floor.FloorId, 0, 0) },
+                    Array.Empty<NetherFloorEventMasterRow>(),
+                    Array.Empty<NetherFloorEventPartMasterRow>(),
+                    snapshot.ErosionPoint,
+                    snapshot.Characters.Where(character => character.IsActive).Select(character => character.HpPermille).ToArray(),
+                    snapshot.NetherGold,
+                    snapshot.TreasureKeyCount,
+                    settings
+                )
+                {
+                    FloorNodeId = floor.NodeId,
+                };
+                NetherInteractiveFloorPreEntrySafetyResult safety = floor.NodeType switch
+                {
+                    NetherFloorNodeType.Event => NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [100] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [100] = goldProjection },
+                        new NetherInteractiveWorstCaseProjection(0, 0),
+                        eventOptions
+                    ),
+                    NetherFloorNodeType.Treasure => NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [401] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [401] = treasureProjection },
+                        new NetherInteractiveWorstCaseProjection(0, 0),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(401, 4011, 1)] = treasureProjection,
+                        }
+                    ),
+                    _ => NetherInteractiveFloorPreEntrySafetyResult.SafeNeutral(),
+                };
+                entries[floor.NodeId] = new NetherRuntimeInteractivePreEntryCaptureResult
+                {
+                    IsCaptured = true,
+                    Input = input,
+                    Safety = safety,
+                };
+            }
+            return NetherRuntimeInteractivePreEntryInputsResult.Success(entries, snapshot.Fingerprint);
+        }
+
+        internal static NetherRuntimeInteractivePreEntryInputsResult ProcurementAlternateInteractivePreEntry(
+            NetherSnapshot snapshot,
+            NetherAutoClimbSettings settings
+        ) => ProcurementInteractivePreEntry(snapshot, settings);
+
+        internal static NetherInteractiveFloorPreEntrySafetyInput ProcurementSpendInput(
+            NetherSnapshot snapshot,
+            NetherInteractiveEventOptionKey key,
+            IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> commitments
+        ) => new(
+            NetherFloorNodeType.Event,
+            2,
+            new[] { new NetherFloorMasterBoundsRow(2, 0, 0) },
+            new[] { new NetherFloorEventMasterRow(key.EventId, 2, 1, key.EventPartId, 0, 0, 0) },
+            new[]
+            {
+                new NetherFloorEventPartMasterRow(
+                    key.EventPartId,
+                    (int)NetherEffectKind.NetherGoldUsed,
+                    200,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                ),
+            },
+            snapshot.ErosionPoint,
+            new[] { 500 },
+            200,
+            snapshot.TreasureKeyCount,
+            new NetherAutoClimbSettings()
+        )
+        {
+            FloorNodeId = 2,
+            CommittedProcurementByOption = commitments,
+        };
+
+        private static NetherStrategyVisibleContentRow ProcurementVisibleEvent(
+            long nodeId,
+            long eventId,
+            long partId,
+            int optionNumber,
+            NetherEffectKind kind,
+            int amount
+        ) => new(NetherStrategyVisibleContentKind.Event, nodeId, eventId, partId)
+        {
+            EventId = eventId,
+            EventPartId = partId,
+            IsKnown = true,
+            EventOptions = new[]
+            {
+                new NetherStrategyVisibleEventOptionEvidence(
+                    optionNumber,
+                    partId,
+                    new[]
+                    {
+                        new NetherStrategyVisibleEventEffectEvidence(
+                            NetherStrategyVisibleEventEffectSource.Content,
+                            kind == NetherEffectKind.NetherGoldGain ? 165 : 166,
+                            0
+                        )
+                        {
+                            EffectKind = kind,
+                            Amount = amount,
+                            ContentId = 0,
+                            IsPresent = true,
+                            IsKnown = true,
+                        },
+                    }
+                ),
+            },
+        };
+
         internal static NetherRuntimeRouteSafetyData InteractiveRouteSafety(
             NetherActiveCodeErosionProjection? activeCodeErosion = null
         ) => new()
@@ -5548,7 +6115,8 @@ public class NetherAutoClimbControllerEndToEndTests
             NetherSnapshot snapshot,
             NetherAutoClimbSettings settings,
             NetherFloorNodeType kind,
-            NetherFloorEventPartMasterRow? eventPart = null
+            NetherFloorEventPartMasterRow? eventPart = null,
+            NetherInteractivePartialDeathEligibility? partialDeathEligibility = null
         )
         {
             IReadOnlyList<NetherFloorEventMasterRow>? eventRows = null;
@@ -5576,7 +6144,11 @@ public class NetherAutoClimbControllerEndToEndTests
                 Settings: settings
             )
             {
+                FloorNodeId = 2,
                 CanCloseShop = kind == NetherFloorNodeType.Shop,
+                PartialDeathEligibility = partialDeathEligibility == null
+                    ? Array.Empty<NetherInteractivePartialDeathEligibility>()
+                    : new[] { partialDeathEligibility },
             };
             NetherInteractiveFloorPreEntrySafetyResult safety = new NetherInteractiveFloorPreEntrySafety().Evaluate(input);
             return NetherRuntimeInteractivePreEntryInputsResult.Success(
@@ -5690,14 +6262,14 @@ public class NetherAutoClimbControllerEndToEndTests
 
     private sealed class StartupLeaseHarness : IDisposable
     {
-        private readonly string _previousConfigPath;
+        private readonly string? _previousConfigPath;
 
         public StartupLeaseHarness()
         {
-            _previousConfigPath = BepInEx.Paths.ConfigPath;
+            _previousConfigPath = NetherBattleSettingsLease.ConfigPathOverrideForTests;
             ConfigPath = Path.Combine(Path.GetTempPath(), "abyssmod-round4-startup-lease-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(ConfigPath);
-            BepInEx.Paths.ConfigPath = ConfigPath;
+            NetherBattleSettingsLease.ConfigPathOverrideForTests = ConfigPath;
             OriginalLease = CreateLease(new StartupLeaseNative(autoEnabled: false, speed: 1));
         }
 
@@ -5716,7 +6288,7 @@ public class NetherAutoClimbControllerEndToEndTests
 
         public void Dispose()
         {
-            BepInEx.Paths.ConfigPath = _previousConfigPath;
+            NetherBattleSettingsLease.ConfigPathOverrideForTests = _previousConfigPath;
             if (Directory.Exists(ConfigPath))
                 Directory.Delete(ConfigPath, recursive: true);
         }

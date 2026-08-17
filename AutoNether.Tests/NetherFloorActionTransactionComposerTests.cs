@@ -33,6 +33,182 @@ public class NetherFloorActionTransactionComposerTests
     }
 
     [Fact]
+    public void Event_composition_rejects_projected_commitment_state_mismatch_before_native_update()
+    {
+        NetherEffect effect = new(NetherEffectKind.NetherGoldGain, 10);
+        NetherEventCommitment commitment = new(
+            EventId: 9711,
+            EventPartId: 9712,
+            OptionNumber: 1,
+            Effects: [effect],
+            ProjectedErosion: 25,
+            HpDelta: 0
+        )
+        {
+            FloorId = 11,
+            NodeId = 1,
+            ProjectedNetherGold = 111,
+            ProjectedTreasureKeys = 0,
+        };
+        NetherPlannedAction child = new(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 1,
+            ExpectedEffects = [effect],
+            ProjectedErosion = 25,
+            ProjectedHpDelta = 0,
+            ProjectedNetherGold = 110,
+            ProjectedTreasureKeys = 0,
+            EventId = 9711,
+            EventPartId = 9712,
+            EventFloorId = 11,
+            EventNodeId = 1,
+            EventCommitment = commitment,
+        };
+
+        Assert.False(NetherFloorActionTransactionComposer.TryCompose(
+            Parent(),
+            Popup(NetherRuntimePopupKind.Event, 1),
+            child,
+            out _
+        ));
+    }
+
+    [Fact]
+    public void Event_composition_preserves_positive_procurement_minima_for_exact_commitment()
+    {
+        NetherEffect effect = new(NetherEffectKind.NetherGoldGain, 10);
+        NetherEventCommitment commitment = new(
+            EventId: 9721,
+            EventPartId: 9722,
+            OptionNumber: 1,
+            Effects: [effect],
+            ProjectedErosion: 25,
+            HpDelta: 0
+        )
+        {
+            FloorId = 11,
+            NodeId = 1,
+            ProjectedNetherGold = 111,
+            ProjectedTreasureKeys = 0,
+            CommittedGoldMinimum = 80,
+            CommittedKeyMinimum = 1,
+        };
+        NetherPlannedAction child = new(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 1,
+            ExpectedEffects = [effect],
+            ProjectedErosion = 25,
+            ProjectedHpDelta = 0,
+            ProjectedNetherGold = 111,
+            ProjectedTreasureKeys = 0,
+            CommittedGoldMinimum = 80,
+            CommittedKeyMinimum = 1,
+            EventId = 9721,
+            EventPartId = 9722,
+            EventFloorId = 11,
+            EventNodeId = 1,
+            EventCommitment = commitment,
+        };
+
+        Assert.True(NetherFloorActionTransactionComposer.TryCompose(
+            Parent(),
+            Popup(NetherRuntimePopupKind.Event, 1),
+            child,
+            out NetherPlannedAction composed
+        ));
+        Assert.Equal(80, composed.CommittedGoldMinimum);
+        Assert.Equal(1, composed.CommittedKeyMinimum);
+        Assert.Equal(80, Assert.Single(composed.OwnedPopupStages).CommittedGoldMinimum);
+        Assert.Equal(1, Assert.Single(composed.OwnedPopupStages).CommittedKeyMinimum);
+    }
+
+    [Fact]
+    public void Event_composition_retains_authorized_partial_death_commitment_for_reconcile()
+    {
+        NetherEffect[] effects = [new NetherEffect(NetherEffectKind.Damage, 100)];
+        NetherInteractivePartialDeathEligibility proof = new(
+            NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,
+            EventId: 9911,
+            EventPartId: 9912,
+            ObjectiveNodeId: 1
+        )
+        {
+            IsKnown = true,
+            ObjectiveReachable = true,
+            ExactTreasureRank = 5,
+        };
+        NetherEventCommitment commitment = new(
+            EventId: 9911,
+            EventPartId: 9912,
+            OptionNumber: 1,
+            Effects: effects,
+            ProjectedErosion: 20,
+            HpDelta: -100
+        )
+        {
+            FloorId = 11,
+            NodeId = 1,
+            ProjectedNetherGold = 100,
+            ProjectedTreasureKeys = 1,
+            PartialDeathEligibility = proof,
+            AllowsPartialActiveDeaths = true,
+        };
+        NetherPlannedAction child = new(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 1,
+            ExpectedEffects = effects,
+            EventId = 9911,
+            EventPartId = 9912,
+            EventFloorId = 11,
+            EventNodeId = 1,
+            ProjectedErosion = 20,
+            ProjectedHpDelta = -100,
+            ProjectedNetherGold = 100,
+            ProjectedTreasureKeys = 1,
+            EventCommitment = commitment,
+        };
+        NetherSnapshot before = new NetherSnapshot
+        {
+            Status = NetherSessionStatus.Play,
+            CurrentFloorId = 10,
+            CurrentNodeId = 1,
+            FloorLevel = 10,
+            ErosionPoint = 20,
+            NetherGold = 100,
+            TreasureKeyCount = 1,
+            Characters =
+            [
+                new NetherCharacterState(1, 100),
+                new NetherCharacterState(2, 400),
+            ],
+            CharacterHpHash = "1:100:1;2:400:1",
+        };
+        NetherSnapshot after = before with
+        {
+            CurrentFloorId = 11,
+            Characters =
+            [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 300),
+            ],
+            CharacterHpHash = "1:0:0;2:300:1",
+        };
+
+        Assert.True(NetherFloorActionTransactionComposer.TryCompose(
+            Parent(),
+            Popup(NetherRuntimePopupKind.Event, 1),
+            child,
+            out NetherPlannedAction composed
+        ));
+        Assert.True(composed.EventCommitment!.AllowsPartialActiveDeaths);
+        Assert.Equal(proof, composed.EventCommitment.PartialDeathEligibility);
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(composed, before, after)
+        );
+    }
+
+    [Fact]
     public void Event_triggered_battle_composes_exact_battle_terminal_instead_of_unknown()
     {
         var popup = new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.Event };

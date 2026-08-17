@@ -30,6 +30,32 @@ public class NetherActionProjectionCalibrationTests
     }
 
     [Fact]
+    public void Ordinary_event_projection_requires_exact_hp_for_every_living_character()
+    {
+        NetherSnapshot before = Snapshot(erosion: 20, hp: 1000) with
+        {
+            Characters = [
+                new NetherCharacterState(100, 1000),
+                new NetherCharacterState(101, 1000),
+            ],
+        };
+        var calibration = new NetherActionProjectionCalibration();
+        calibration.Expect(Decision(erosion: 25, hpDelta: -100), before);
+
+        NetherProjectionObservation observation = calibration.Observe(before with
+        {
+            ErosionPoint = 25,
+            Characters = [
+                new NetherCharacterState(100, 900),
+                new NetherCharacterState(101, 1000),
+            ],
+        });
+
+        Assert.True(observation.IsDrift);
+        Assert.Equal(NetherPauseReason.UnsafeHp, observation.PauseReason);
+    }
+
+    [Fact]
     public void Code_change_rebaselines_erosion_but_still_rejects_unexpected_damage()
     {
         var calibration = new NetherActionProjectionCalibration();
@@ -41,11 +67,91 @@ public class NetherActionProjectionCalibrationTests
         Assert.Equal(NetherPauseReason.UnsafeHp, observation.PauseReason);
     }
 
-    private static NetherEventDecision Decision(int erosion, int hpDelta) => new()
+    [Fact]
+    public void Authorized_partial_death_projection_accepts_a_dead_member_and_a_survivor()
+    {
+        NetherSnapshot before = Snapshot(erosion: 20, hp: 100) with
+        {
+            Characters = [
+                new NetherCharacterState(1, 100),
+                new NetherCharacterState(2, 400),
+            ],
+        };
+        var calibration = new NetherActionProjectionCalibration();
+        calibration.Expect(Decision(erosion: 20, hpDelta: -100, allowPartialActiveDeaths: true), before);
+
+        NetherProjectionObservation observation = calibration.Observe(before with
+        {
+            ErosionPoint = 20,
+            Characters = [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 300),
+            ],
+        });
+
+        Assert.False(observation.IsDrift);
+    }
+
+    [Fact]
+    public void Partial_death_projection_rejects_full_party_death()
+    {
+        NetherSnapshot before = Snapshot(erosion: 20, hp: 100) with
+        {
+            Characters = [
+                new NetherCharacterState(1, 100),
+                new NetherCharacterState(2, 400),
+            ],
+        };
+        var calibration = new NetherActionProjectionCalibration();
+        calibration.Expect(Decision(erosion: 20, hpDelta: -100, allowPartialActiveDeaths: true), before);
+
+        NetherProjectionObservation observation = calibration.Observe(before with
+        {
+            Characters = [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 0, IsActive: false),
+            ],
+        });
+
+        Assert.True(observation.IsDrift);
+        Assert.Equal(NetherPauseReason.UnsafeHp, observation.PauseReason);
+    }
+
+    [Fact]
+    public void Unauthorized_partial_death_projection_remains_fail_closed()
+    {
+        NetherSnapshot before = Snapshot(erosion: 20, hp: 100) with
+        {
+            Characters = [
+                new NetherCharacterState(1, 100),
+                new NetherCharacterState(2, 400),
+            ],
+        };
+        var calibration = new NetherActionProjectionCalibration();
+        calibration.Expect(Decision(erosion: 20, hpDelta: -100), before);
+
+        NetherProjectionObservation observation = calibration.Observe(before with
+        {
+            Characters = [
+                new NetherCharacterState(1, 0, IsActive: false),
+                new NetherCharacterState(2, 300),
+            ],
+        });
+
+        Assert.True(observation.IsDrift);
+        Assert.Equal(NetherPauseReason.UnsafeHp, observation.PauseReason);
+    }
+
+    private static NetherEventDecision Decision(
+        int erosion,
+        int hpDelta,
+        bool allowPartialActiveDeaths = false
+    ) => new()
     {
         Kind = NetherEventDecisionKind.Select,
         ProjectedErosion = erosion,
         HpDelta = hpDelta,
+        AllowsPartialActiveDeaths = allowPartialActiveDeaths,
     };
 
     private static NetherSnapshot Snapshot(int erosion, int hp, string codeHash = "same") => new()

@@ -195,6 +195,10 @@ internal static class NetherNativeMechanicProductionCapture
                 target
             )
             {
+                // Current MNetherCodes evidence does not prove a selectable research-rate
+                // overwrite. Keep the typed seam explicit and fail closed until an authoritative
+                // native field/control-flow source is captured.
+                ResearchRateOverwrite = NetherStrategyResearchRateOverwriteEvidence.NotPresent,
                 Duration = duration,
                 DurationKnown = durationKnown,
                 Cap = cap,

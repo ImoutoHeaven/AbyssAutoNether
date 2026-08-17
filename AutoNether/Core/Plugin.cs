@@ -26,6 +26,7 @@ public sealed class Plugin : BasePlugin
     {
         Log = base.Log;
         ConfigFile = base.Config;
+        Logger.Bind(Log);
 
         AutoNether.Config.Initialize();
         Instance = AddComponent<Hotkey>();
@@ -53,6 +54,7 @@ public sealed class Plugin : BasePlugin
     public override bool Unload()
     {
         NetherAutoClimbController.OnPluginUnload();
+        Logger.Unbind(Log);
         return base.Unload();
     }
 }

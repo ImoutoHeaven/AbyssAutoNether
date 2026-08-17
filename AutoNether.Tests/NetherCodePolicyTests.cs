@@ -98,6 +98,72 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
+    public void Equipment_can_replace_an_all_opposing_portfolio_when_native_retention_prefers_the_offer()
+    {
+        NetherCodeState rush = Code(10, NetherCodeFamily.Rush);
+        NetherCodeCandidate impactOffer = Candidate(21, NetherCodeFamily.Impact);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            rush,
+            impactOffer
+        ) with
+        {
+            FamilyRetentionByPair = new Dictionary<
+                NetherOpposedFamilyPair,
+                NetherFamilyRetentionEvidence
+            >
+            {
+                [NetherOpposedFamilyPair.RushImpact] =
+                    NetherFamilyRetentionEvidence.Known(NetherCodeFamily.Impact),
+            },
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 1, current: [rush]),
+            [impactOffer],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(impactOffer.CodeId, decision.SelectedCodeId);
+        Assert.Equal(rush.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Equipment_can_replace_the_reverse_all_opposing_portfolio_when_native_retention_prefers_the_offer()
+    {
+        NetherCodeState impact = Code(20, NetherCodeFamily.Impact);
+        NetherCodeCandidate rushOffer = Candidate(11, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 3)),
+            impact,
+            rushOffer
+        ) with
+        {
+            FamilyRetentionByPair = new Dictionary<
+                NetherOpposedFamilyPair,
+                NetherFamilyRetentionEvidence
+            >
+            {
+                [NetherOpposedFamilyPair.RushImpact] =
+                    NetherFamilyRetentionEvidence.Known(NetherCodeFamily.Rush),
+            },
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 1, current: [impact]),
+            [rushOffer],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(rushOffer.CodeId, decision.SelectedCodeId);
+        Assert.Equal(impact.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
     public void Crossing_effective_count_five_requires_every_active_character_matching_family_crest()
     {
         NetherCodeState[] fourRush =
@@ -774,6 +840,216 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
+    public void Equipment_evaluates_both_mixed_family_orientations_before_native_retention_can_reject_the_offer()
+    {
+        NetherCodeState rushHeld = Code(991233, NetherCodeFamily.Rush);
+        NetherCodeState impactHeld = Code(991234, NetherCodeFamily.Impact);
+        NetherCodeCandidate rushOffer = Candidate(991235, NetherCodeFamily.Rush);
+        NetherCodeCandidate impactOffer = Candidate(991236, NetherCodeFamily.Impact);
+
+        NetherCodePolicyEvidence rushEvidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            rushHeld,
+            impactHeld,
+            rushOffer
+        ) with
+        {
+            FamilyRetentionByPair = new Dictionary<
+                NetherOpposedFamilyPair,
+                NetherFamilyRetentionEvidence
+            >
+            {
+                [NetherOpposedFamilyPair.RushImpact] =
+                    NetherFamilyRetentionEvidence.Known(NetherCodeFamily.Impact),
+            },
+            EquipmentMutationValuesByKey = new Dictionary<NetherCodeMutationKey, NetherCodeEquipmentMutationEvidence>
+            {
+                [new NetherCodeMutationKey(rushOffer.CodeId, impactHeld.CodeId)] = Mutation(
+                    rushOffer.CodeId,
+                    impactHeld.CodeId,
+                    [CombatWindow(rushHeld.CodeId, value: 100), CombatWindow(impactHeld.CodeId, value: 100)],
+                    [CombatWindow(rushHeld.CodeId, value: 100), CombatWindow(rushOffer.CodeId, value: 300)]
+                ),
+            },
+        };
+        NetherCodeDecision rushDecision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [rushHeld, impactHeld]),
+            [rushOffer],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            rushEvidence
+        );
+
+        NetherCodePolicyEvidence impactEvidence = KnownEvidence(
+            Party(Member(1, 0, 2, 3)),
+            rushHeld,
+            impactHeld,
+            impactOffer
+        ) with
+        {
+            FamilyRetentionByPair = new Dictionary<
+                NetherOpposedFamilyPair,
+                NetherFamilyRetentionEvidence
+            >
+            {
+                [NetherOpposedFamilyPair.RushImpact] =
+                    NetherFamilyRetentionEvidence.Known(NetherCodeFamily.Rush),
+            },
+            EquipmentMutationValuesByKey = new Dictionary<NetherCodeMutationKey, NetherCodeEquipmentMutationEvidence>
+            {
+                [new NetherCodeMutationKey(impactOffer.CodeId, rushHeld.CodeId)] = Mutation(
+                    impactOffer.CodeId,
+                    rushHeld.CodeId,
+                    [CombatWindow(rushHeld.CodeId, value: 100), CombatWindow(impactHeld.CodeId, value: 100)],
+                    [CombatWindow(impactHeld.CodeId, value: 100), CombatWindow(impactOffer.CodeId, value: 300)]
+                ),
+            },
+        };
+        NetherCodeDecision impactDecision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [rushHeld, impactHeld]),
+            [impactOffer],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            impactEvidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, rushDecision.Kind);
+        Assert.Equal(rushOffer.CodeId, rushDecision.SelectedCodeId);
+        Assert.Equal(impactHeld.CodeId, rushDecision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Select, impactDecision.Kind);
+        Assert.Equal(impactOffer.CodeId, impactDecision.SelectedCodeId);
+        Assert.Equal(rushHeld.CodeId, impactDecision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Equipment_mixed_family_replacement_still_requires_strict_complete_portfolio_improvement()
+    {
+        NetherCodeState rushHeld = Code(991237, NetherCodeFamily.Rush);
+        NetherCodeState impactHeld = Code(991238, NetherCodeFamily.Impact);
+        NetherCodeCandidate rushOffer = Candidate(991239, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            rushHeld,
+            impactHeld,
+            rushOffer
+        ) with
+        {
+            FamilyRetentionByPair = new Dictionary<NetherOpposedFamilyPair, NetherFamilyRetentionEvidence>
+            {
+                [NetherOpposedFamilyPair.RushImpact] =
+                    NetherFamilyRetentionEvidence.Known(NetherCodeFamily.Impact),
+            },
+            EquipmentMutationValuesByKey = new Dictionary<NetherCodeMutationKey, NetherCodeEquipmentMutationEvidence>
+            {
+                [new NetherCodeMutationKey(rushOffer.CodeId, impactHeld.CodeId)] = Mutation(
+                    rushOffer.CodeId,
+                    impactHeld.CodeId,
+                    [CombatWindow(rushHeld.CodeId, value: 200), CombatWindow(impactHeld.CodeId, value: 200)],
+                    [CombatWindow(rushHeld.CodeId, value: 200), CombatWindow(rushOffer.CodeId, value: 200)]
+                ),
+            },
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [rushHeld, impactHeld]),
+            [rushOffer],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+    }
+
+    [Fact]
+    public void Equipment_evaluates_a_strict_complete_mutation_when_native_retention_favors_the_opposing_side()
+    {
+        NetherCodeState rushHeld = Code(991246, NetherCodeFamily.Rush);
+        NetherCodeState impactRemoved = Code(991247, NetherCodeFamily.Impact);
+        NetherCodeState impactRetained = Code(991248, NetherCodeFamily.Impact);
+        NetherCodeCandidate rushOffer = Candidate(991249, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            rushHeld,
+            impactRemoved,
+            impactRetained,
+            rushOffer
+        ) with
+        {
+            FamilyRetentionByPair = new Dictionary<NetherOpposedFamilyPair, NetherFamilyRetentionEvidence>
+            {
+                [NetherOpposedFamilyPair.RushImpact] =
+                    NetherFamilyRetentionEvidence.Known(NetherCodeFamily.Impact),
+            },
+            EquipmentMutationValuesByKey = new Dictionary<NetherCodeMutationKey, NetherCodeEquipmentMutationEvidence>
+            {
+                [new NetherCodeMutationKey(rushOffer.CodeId, impactRemoved.CodeId)] = Mutation(
+                    rushOffer.CodeId,
+                    impactRemoved.CodeId,
+                    [
+                        CombatWindow(rushHeld.CodeId, value: 100),
+                        CombatWindow(impactRemoved.CodeId, value: 100),
+                        CombatWindow(impactRetained.CodeId, value: 100),
+                    ],
+                    [
+                        CombatWindow(rushHeld.CodeId, value: 100),
+                        CombatWindow(rushOffer.CodeId, value: 400),
+                        CombatWindow(impactRetained.CodeId, value: 100),
+                    ]
+                ),
+            },
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 3, current: [rushHeld, impactRemoved, impactRetained]),
+            [rushOffer],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(rushOffer.CodeId, decision.SelectedCodeId);
+        Assert.Equal(impactRemoved.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Equipment_incompatible_threshold_replacement_still_requires_complete_portfolio_value()
+    {
+        NetherCodeState[] held =
+        [
+            Code(991240, NetherCodeFamily.Rush),
+            Code(991241, NetherCodeFamily.Rush),
+            Code(991242, NetherCodeFamily.Rush),
+            Code(991243, NetherCodeFamily.Rush),
+            Code(991244, NetherCodeFamily.Rush),
+        ];
+        NetherCodeCandidate unrelated = Candidate(991245, NetherCodeFamily.Safe);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 3)),
+            held.Cast<object>().Append(unrelated).ToArray()
+        ) with
+        {
+            EquipmentMutationValuesByKey = new Dictionary<NetherCodeMutationKey, NetherCodeEquipmentMutationEvidence>
+            {
+                [new NetherCodeMutationKey(unrelated.CodeId, held[0].CodeId)] = Mutation(
+                    unrelated.CodeId,
+                    held[0].CodeId,
+                    held.Select(code => CombatWindow(code.CodeId, value: 100)).ToArray(),
+                    held.Skip(1).Select(code => CombatWindow(code.CodeId, value: 100))
+                        .Append(CombatWindow(unrelated.CodeId, value: 100))
+                        .ToArray()
+                ),
+            },
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 5, current: held),
+            [unrelated],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Pause, decision.Kind);
+    }
+
+    [Fact]
     public void Research_rate_requires_exact_current_active_family_not_either_configured_family()
     {
         NetherCodeCandidate primaryRate = Candidate(991240, NetherCodeFamily.Rush);
@@ -819,7 +1095,7 @@ public class NetherCodePolicyTests
             evidence with { ActiveResearchFamily = NetherCodeFamily.Unknown }
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Keep, primaryActive.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Reload, primaryActive.Kind);
         Assert.Equal(NetherCodeDecisionKind.Select, secondaryActive.Kind);
         Assert.Equal(NetherCodeDecisionKind.Keep, activeUnknown.Kind);
     }
@@ -1047,6 +1323,519 @@ public class NetherCodePolicyTests
         Assert.Equal(NetherPauseReason.UnknownMasterData, unknown.PauseReason);
     }
 
+    [Fact]
+    public void Equipment_prefers_hard_excluded_removal_before_other_legal_removals_on_value_tie()
+    {
+        NetherCodeState hardExcluded = Code(992001, NetherCodeFamily.Rush);
+        NetherCodeState ordinary = Code(992002, NetherCodeFamily.Impact);
+        NetherCodeCandidate candidate = Candidate(992004, NetherCodeFamily.Safe);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 3)),
+            hardExcluded,
+            ordinary,
+            candidate
+        ) with
+        {
+            HardExcludedCodeIds = [hardExcluded.CodeId],
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [hardExcluded, ordinary]),
+            [candidate],
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(hardExcluded.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_spends_a_reroll_while_active_target_is_incomplete_even_above_equipment_reserve()
+    {
+        NetherCodeCandidate fallback = Candidate(992010, NetherCodeFamily.Impact);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            fallback
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0),
+        };
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(reloadCount: 1),
+            [fallback],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+                CodeReloadReserve = 99,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Reload, decision.Kind);
+    }
+
+    [Fact]
+    public void Research_spends_every_available_primary_reroll_then_falls_back_to_secondary_family()
+    {
+        NetherCodeCandidate secondary = Candidate(992011, NetherCodeFamily.Impact);
+
+        NetherCodeDecision first = ResearchRerollDecision(secondary, reloadCount: 2);
+        NetherCodeDecision second = ResearchRerollDecision(secondary, reloadCount: 1);
+        NetherCodeDecision exhausted = ResearchRerollDecision(secondary, reloadCount: 0);
+
+        Assert.Equal(NetherCodeDecisionKind.Reload, first.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Reload, second.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, exhausted.Kind);
+        Assert.Equal(secondary.CodeId, exhausted.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Research_capacity_removes_hard_excluded_opposed_code_before_ordinary_non_target_code()
+    {
+        NetherCodeState active = Code(992020, NetherCodeFamily.Rush);
+        NetherCodeState hardOpposed = Code(992021, NetherCodeFamily.Impact);
+        NetherCodeState ordinary = Code(992022, NetherCodeFamily.Safe);
+        NetherCodeCandidate target = Candidate(992023, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            active,
+            hardOpposed,
+            ordinary,
+            target
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0),
+            HardExcludedCodeIds = [hardOpposed.CodeId],
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 3, current: [active, hardOpposed, ordinary]),
+            [target],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(hardOpposed.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_removes_a_hard_excluded_completed_non_target_before_rejecting_the_target_offer()
+    {
+        NetherCodeState active = Code(992024, NetherCodeFamily.Rush);
+        NetherCodeState completedHardExcluded = Code(992025, NetherCodeFamily.Safe);
+        NetherCodeCandidate target = Candidate(992026, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            active,
+            completedHardExcluded,
+            target
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0)
+                .Select(row => row.Family == NetherCodeFamily.Safe
+                    ? row with { WalletPoints = 20_000 }
+                    : row)
+                .ToArray(),
+            HardExcludedCodeIds = [completedHardExcluded.CodeId],
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [active, completedHardExcluded]),
+            [target],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(completedHardExcluded.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_replaces_all_opposing_families_in_both_orientations()
+    {
+        NetherCodeState impact = Code(992027, NetherCodeFamily.Impact);
+        NetherCodeCandidate rushOffer = Candidate(992028, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence rushEvidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            impact,
+            rushOffer
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0),
+        };
+        NetherCodeDecision rushDecision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 1, current: [impact]),
+            [rushOffer],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            },
+            rushEvidence
+        );
+
+        NetherCodeState rush = Code(992029, NetherCodeFamily.Rush);
+        NetherCodeCandidate impactOffer = Candidate(992030, NetherCodeFamily.Impact);
+        NetherCodePolicyEvidence impactEvidence = KnownEvidence(
+            Party(Member(1, 0, 2, 3)),
+            rush,
+            impactOffer
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Impact,
+            Research = ResearchState(NetherCodeFamily.Impact, technologyRate: 0),
+        };
+        NetherCodeDecision impactDecision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 1, current: [rush]),
+            [impactOffer],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Impact,
+            },
+            impactEvidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, rushDecision.Kind);
+        Assert.Equal(impact.CodeId, rushDecision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Select, impactDecision.Kind);
+        Assert.Equal(rush.CodeId, impactDecision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_same_family_swap_is_used_when_completed_non_target_family_is_not_proven_surplus()
+    {
+        NetherCodeState active = Code(992030, NetherCodeFamily.Rush);
+        NetherCodeState completed = Code(992031, NetherCodeFamily.Safe);
+        NetherCodeCandidate replacement = Candidate(992032, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            active,
+            completed,
+            replacement
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0)
+                .Select(row => row.Family == NetherCodeFamily.Safe
+                    ? row with { WalletPoints = 20_000 }
+                    : row)
+                .ToArray(),
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [active, completed]),
+            [replacement],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+                ResearchSecondaryFamily = NetherCodeFamily.Safe,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(active.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_switches_to_secondary_only_after_primary_wallet_projection_is_complete()
+    {
+        NetherCodeCandidate secondary = Candidate(992040, NetherCodeFamily.Impact);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            secondary
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Impact,
+            Research = ResearchState(NetherCodeFamily.Impact, technologyRate: 0)
+                .Select(row => row.Family switch
+                {
+                    NetherCodeFamily.Rush => row with { WalletPoints = 19_900, ProjectedNormalSettlementPoints = 100 },
+                    NetherCodeFamily.Impact => row,
+                    _ => row,
+                })
+                .ToArray(),
+        };
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(),
+            [secondary],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+                ResearchSecondaryFamily = NetherCodeFamily.Impact,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(secondary.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Research_secondary_fallback_uses_secondary_same_family_strict_swap_after_all_reroll_epochs_rush_to_impact()
+    {
+        NetherCodeDecision first = SecondaryFallbackDecision(
+            NetherCodeFamily.Rush,
+            NetherCodeFamily.Impact,
+            reloadCount: 2
+        );
+        NetherCodeDecision second = SecondaryFallbackDecision(
+            NetherCodeFamily.Rush,
+            NetherCodeFamily.Impact,
+            reloadCount: 1
+        );
+        NetherCodeDecision exhausted = SecondaryFallbackDecision(
+            NetherCodeFamily.Rush,
+            NetherCodeFamily.Impact,
+            reloadCount: 0
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Reload, first.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Reload, second.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, exhausted.Kind);
+        Assert.Equal(993202, exhausted.RemoveCodeId);
+        Assert.Equal(993203, exhausted.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Research_secondary_fallback_uses_secondary_same_family_strict_swap_after_all_reroll_epochs_impact_to_rush()
+    {
+        NetherCodeDecision first = SecondaryFallbackDecision(
+            NetherCodeFamily.Impact,
+            NetherCodeFamily.Rush,
+            reloadCount: 2
+        );
+        NetherCodeDecision second = SecondaryFallbackDecision(
+            NetherCodeFamily.Impact,
+            NetherCodeFamily.Rush,
+            reloadCount: 1
+        );
+        NetherCodeDecision exhausted = SecondaryFallbackDecision(
+            NetherCodeFamily.Impact,
+            NetherCodeFamily.Rush,
+            reloadCount: 0
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Reload, first.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Reload, second.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, exhausted.Kind);
+        Assert.Equal(993302, exhausted.RemoveCodeId);
+        Assert.Equal(993303, exhausted.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Research_secondary_target_propagates_through_mixed_portfolio_gates_and_strict_swap_both_orientations()
+    {
+        foreach ((NetherCodeFamily primary, NetherCodeFamily secondary, long baseId) in new[]
+        {
+            (NetherCodeFamily.Rush, NetherCodeFamily.Impact, 993701L),
+            (NetherCodeFamily.Impact, NetherCodeFamily.Rush, 993711L),
+        })
+        {
+            NetherCodeState hardExcludedPrimary = Code(baseId, primary);
+            NetherCodeState ordinaryPrimary = Code(baseId + 1, primary);
+            NetherCodeState heldSecondary = Code(baseId + 2, secondary);
+            NetherCodeCandidate secondaryOffer = Candidate(baseId + 3, secondary);
+            NetherCodePolicyEvidence evidence = KnownEvidence(
+                Party(Member(1, 0, 2, 2)),
+                hardExcludedPrimary,
+                ordinaryPrimary,
+                heldSecondary,
+                secondaryOffer
+            ) with
+            {
+                ActiveResearchFamily = primary,
+                Research = ResearchState(primary, technologyRate: 0),
+                HardExcludedCodeIds = [hardExcludedPrimary.CodeId],
+            };
+
+            NetherCodeDecision mixed = new NetherCodePolicy().Decide(
+                Portfolio(
+                    capacity: 3,
+                    reloadCount: 0,
+                    current: [hardExcludedPrimary, ordinaryPrimary, heldSecondary]
+                ),
+                [secondaryOffer],
+                new NetherAutoClimbSettings
+                {
+                    StrategyMode = NetherStrategyMode.Research,
+                    ResearchPrimaryFamily = primary,
+                    ResearchSecondaryFamily = secondary,
+                    CodeReloadReserve = 99,
+                },
+                evidence
+            );
+
+            Assert.Equal(NetherCodeDecisionKind.Select, mixed.Kind);
+            Assert.Equal(secondaryOffer.CodeId, mixed.SelectedCodeId);
+            Assert.Equal(hardExcludedPrimary.CodeId, mixed.RemoveCodeId);
+
+            NetherCodeDecision sameFamily = SecondaryFallbackDecision(
+                primary,
+                secondary,
+                reloadCount: 0
+            );
+            Assert.Equal(NetherCodeDecisionKind.Select, sameFamily.Kind);
+            Assert.Equal(baseId == 993701L ? 993202 : 993302, sameFamily.RemoveCodeId);
+            Assert.Equal(baseId == 993701L ? 993203 : 993303, sameFamily.SelectedCodeId);
+        }
+    }
+
+    [Fact]
+    public void Research_hard_excluded_active_target_code_overrides_target_protection_when_legal()
+    {
+        NetherCodeState hardExcludedActive = Code(993401, NetherCodeFamily.Rush);
+        NetherCodeState ordinary = Code(993402, NetherCodeFamily.Safe);
+        NetherCodeCandidate target = Candidate(993403, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            hardExcludedActive,
+            ordinary,
+            target
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0),
+            HardExcludedCodeIds = [hardExcludedActive.CodeId],
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [hardExcludedActive, ordinary]),
+            [target],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(hardExcludedActive.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_hard_excluded_secondary_target_code_overrides_secondary_target_protection_when_legal()
+    {
+        NetherCodeState hardExcludedSecondary = Code(993501, NetherCodeFamily.Impact);
+        NetherCodeState ordinary = Code(993502, NetherCodeFamily.Safe);
+        NetherCodeCandidate target = Candidate(993503, NetherCodeFamily.Impact);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            hardExcludedSecondary,
+            ordinary,
+            target
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Impact,
+            Research = ResearchState(NetherCodeFamily.Impact, technologyRate: 0)
+                .Select(row => row.Family == NetherCodeFamily.Rush
+                    ? row with { WalletPoints = 20_000 }
+                    : row)
+                .ToArray(),
+            HardExcludedCodeIds = [hardExcludedSecondary.CodeId],
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [hardExcludedSecondary, ordinary]),
+            [target],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+                ResearchSecondaryFamily = NetherCodeFamily.Impact,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(hardExcludedSecondary.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_ordinary_active_target_code_remains_protected_without_typed_hard_exclusion()
+    {
+        NetherCodeState active = Code(993601, NetherCodeFamily.Rush);
+        NetherCodeState ordinary = Code(993602, NetherCodeFamily.Safe);
+        NetherCodeCandidate target = Candidate(993603, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            active,
+            ordinary,
+            target
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0),
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, current: [active, ordinary]),
+            [target],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(ordinary.CodeId, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Research_accepts_safe_active_reachable_unquantified_code_for_settlement_progress()
+    {
+        NetherCodeCandidate target = Candidate(992050, NetherCodeFamily.Rush);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            target
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0),
+            MechanismValuesByCodeId = new Dictionary<long, NetherMechanismValue>
+            {
+                [target.CodeId] = NetherMechanismValue.ReachableUnquantified(
+                    "research-trigger-reachable-cadence-unknown"
+                ),
+            },
+        };
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(),
+            [target],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            },
+            evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(target.CodeId, decision.SelectedCodeId);
+    }
+
     private static NetherCodeDecision Decide(
         NetherCodePortfolio portfolio,
         params NetherCodeCandidate[] candidates
@@ -1088,6 +1877,81 @@ public class NetherCodePolicyTests
         new NetherAutoClimbSettings { CodeReloadReserve = 1 },
         evidence
     );
+
+    private static NetherCodeDecision ResearchRerollDecision(
+        NetherCodeCandidate secondary,
+        int reloadCount
+    )
+    {
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            secondary
+        ) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Rush,
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 0),
+        };
+        return new NetherCodePolicy().Decide(
+            Portfolio(reloadCount: reloadCount),
+            [secondary],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+                ResearchSecondaryFamily = NetherCodeFamily.Impact,
+                CodeReloadReserve = 99,
+            },
+            evidence
+        );
+    }
+
+    private static NetherCodeDecision SecondaryFallbackDecision(
+        NetherCodeFamily primaryFamily,
+        NetherCodeFamily secondaryFamily,
+        int reloadCount
+    )
+    {
+        long lowerId = primaryFamily == NetherCodeFamily.Rush ? 993201 : 993301;
+        long higherId = primaryFamily == NetherCodeFamily.Rush ? 993202 : 993302;
+        long candidateId = primaryFamily == NetherCodeFamily.Rush ? 993203 : 993303;
+        NetherCodeState lower = Code(lowerId, secondaryFamily);
+        NetherCodeState higher = Code(higherId, secondaryFamily);
+        NetherCodeCandidate candidate = Candidate(candidateId, secondaryFamily);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 2)),
+            lower,
+            higher,
+            candidate
+        ) with
+        {
+            ActiveResearchFamily = primaryFamily,
+            Research = ResearchState(primaryFamily, technologyRate: 0)
+                .Select(row => row.Family == primaryFamily
+                    ? row with { WalletPoints = 20_000 }
+                    : row)
+                .ToArray(),
+            EquipmentMutationValuesByKey = KnownEvidence(
+                Party(Member(1, 0, 2, 2)),
+                lower,
+                higher,
+                candidate
+            ).EquipmentMutationValuesByKey
+                .Where(pair => pair.Key != new NetherCodeMutationKey(candidateId, lowerId))
+                .ToDictionary(pair => pair.Key, pair => pair.Value),
+        };
+        return new NetherCodePolicy().Decide(
+            Portfolio(capacity: 2, reloadCount: reloadCount, current: [lower, higher]),
+            [candidate],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = primaryFamily,
+                ResearchSecondaryFamily = secondaryFamily,
+                CodeReloadReserve = 99,
+            },
+            evidence
+        );
+    }
 
     private static NetherCodePolicyEvidence Evidence(
         long codeId,

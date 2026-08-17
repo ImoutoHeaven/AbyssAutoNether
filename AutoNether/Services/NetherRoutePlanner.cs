@@ -69,9 +69,48 @@ internal readonly record struct NetherRouteCandidateAudit(long FloorId, string R
     public string Detail { get; init; } = string.Empty;
 }
 
+/// <summary>
+/// Immutable identity for the route branch whose exact pre-entry evidence is allowed to produce
+/// procurement commitments.  The path fingerprint is derived from the existing horizon audit;
+/// it is not inferred from graph reachability or from an alternate safe branch.
+/// </summary>
+internal readonly record struct NetherRouteBranchIdentity(
+    NetherSnapshotFingerprint SnapshotFingerprint,
+    long CurrentNodeId,
+    long SelectedNodeId,
+    string SelectedPathFingerprint
+)
+{
+    public bool IsValid => SnapshotFingerprint.MapId > 0
+        && CurrentNodeId > 0
+        && SelectedNodeId > 0
+        && !string.IsNullOrEmpty(SelectedPathFingerprint);
+
+    public bool Matches(NetherSnapshot snapshot, IReadOnlyList<long> selectedPathNodeIds) =>
+        snapshot != null
+        && IsValid
+        && SnapshotFingerprint == snapshot.Fingerprint
+        && CurrentNodeId == snapshot.CurrentNodeId
+        && selectedPathNodeIds != null
+        && selectedPathNodeIds.Count > 1
+        && selectedPathNodeIds[0] == CurrentNodeId
+        && selectedPathNodeIds[1] == SelectedNodeId
+        && string.Equals(
+            SelectedPathFingerprint,
+            CreatePathFingerprint(selectedPathNodeIds),
+            StringComparison.Ordinal
+        );
+
+    public static string CreatePathFingerprint(IReadOnlyList<long> pathNodeIds) =>
+        pathNodeIds == null ? string.Empty : string.Join(">", pathNodeIds);
+}
+
 internal sealed record NetherRoutePlan
 {
     public NetherFloorNode? SelectedNode { get; init; }
+    public NetherSnapshotFingerprint? SourceSnapshotFingerprint { get; init; }
+    public IReadOnlyList<long> SelectedPathNodeIds { get; init; } = Array.Empty<long>();
+    public NetherRouteBranchIdentity? BranchIdentity { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string PauseDetail { get; init; } = string.Empty;
     public IReadOnlyList<NetherRouteCandidateAudit> Audit { get; init; } = Array.Empty<NetherRouteCandidateAudit>();
@@ -195,7 +234,54 @@ internal sealed class NetherRoutePlanner
             .First();
 
         audit.Add(new NetherRouteCandidateAudit(selected.Node.NodeId, "selected"));
-        return new NetherRoutePlan { SelectedNode = selected.Node, Audit = audit };
+        IReadOnlyList<long> selectedPathNodeIds = CreateSelectedPathNodeIds(
+            currentNodeId,
+            selected.Node,
+            context
+        );
+        NetherRouteBranchIdentity? branchIdentity = selectedPathNodeIds.Count == 0
+            ? null
+            : new NetherRouteBranchIdentity(
+                snapshot.Fingerprint,
+                currentNodeId,
+                selected.Node.NodeId,
+                NetherRouteBranchIdentity.CreatePathFingerprint(selectedPathNodeIds)
+            );
+        return new NetherRoutePlan
+        {
+            SelectedNode = selected.Node,
+            SourceSnapshotFingerprint = snapshot.Fingerprint,
+            SelectedPathNodeIds = selectedPathNodeIds,
+            BranchIdentity = branchIdentity,
+            Audit = audit,
+        };
+    }
+
+    private static IReadOnlyList<long> CreateSelectedPathNodeIds(
+        long currentNodeId,
+        NetherFloorNode selected,
+        NetherRouteSafetyContext context
+    )
+    {
+        NetherRouteHorizonSafetyEvaluation? horizon = context.HorizonEvaluation(selected.NodeId);
+        if (horizon == null
+            || !horizon.IsEligible
+            || horizon.Steps == null
+            || horizon.Steps.Count == 0)
+        {
+            return Array.Empty<long>();
+        }
+
+        var path = new List<long>(horizon.Steps.Count + 1) { currentNodeId };
+        foreach (NetherRouteHorizonStepAudit step in horizon.Steps)
+        {
+            if (step.NodeId <= 0 || path.Contains(step.NodeId))
+                return Array.Empty<long>();
+            path.Add(step.NodeId);
+        }
+        return path[1] == selected.NodeId
+            ? Array.AsReadOnly(path.ToArray())
+            : Array.Empty<long>();
     }
 
     private static bool TryCreateNodeIndex(

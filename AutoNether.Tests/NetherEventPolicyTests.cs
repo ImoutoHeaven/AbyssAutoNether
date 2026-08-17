@@ -87,6 +87,24 @@ public class NetherEventPolicyTests
     }
 
     [Fact]
+    public void Resource_projection_overflow_is_unknown_instead_of_throwing()
+    {
+        NetherEventDecision decision = EventPolicy().DecideEvent(
+            Snapshot(gold: 0),
+            [Option(
+                1,
+                new NetherEffect(NetherEffectKind.NetherGoldGain, int.MaxValue),
+                new NetherEffect(NetherEffectKind.NetherGoldGain, 1)
+            )],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Pause, decision.Kind);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, decision.PauseReason);
+        Assert.Contains("event-resource-projection", decision.Detail);
+    }
+
+    [Fact]
     public void Event_triggered_battle_is_marked_battle_only_after_event_selection()
     {
         NetherEventDecision decision = EventPolicy().DecideEvent(
@@ -260,6 +278,214 @@ public class NetherEventPolicyTests
         Assert.Equal(1, decision.OptionNumber);
     }
 
+    [Fact]
+    public void Exact_event_selection_retains_event_part_effect_and_reward_commitment()
+    {
+        NetherEffect item = new(NetherEffectKind.Item, 1)
+        {
+            ContentId = 7001,
+            RewardEvidence = new NetherEventRewardEvidence(
+                ContentId: 7001,
+                ItemId: 7001,
+                ItemType: 91,
+                Rarity: NetherRewardRarity.Gold,
+                Amount: 1
+            ),
+        };
+        NetherEventOption option = Option(1, item) with
+        {
+            EventId = 701,
+            EventPartId = 702,
+            RequiresExactBinding = true,
+            RewardEvidence = item.RewardEvidence,
+        };
+
+        NetherEventDecision decision = EventPolicy().DecideEvent(
+            Snapshot(),
+            [option],
+            Settings(),
+            [],
+            new NetherEventStrategyEvidence
+            {
+                IsKnown = true,
+                Mode = NetherStrategyMode.Equipment,
+            }
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        Assert.Equal(701, decision.EventId);
+        Assert.Equal(702, decision.EventPartId);
+        Assert.NotNull(decision.Commitment);
+        Assert.True(decision.Commitment!.IsValid);
+        Assert.Equal(7001, decision.Commitment.Reward!.ItemId);
+    }
+
+    [Fact]
+    public void Unknown_exact_event_option_is_local_and_does_not_block_another_bound_option()
+    {
+        NetherEventOption unknown = Option(1, new NetherEffect(NetherEffectKind.Item, 1)) with
+        {
+            EventId = 801,
+            EventPartId = 811,
+            RequiresExactBinding = true,
+            UnknownReason = "future-item-row-unavailable",
+        };
+        NetherEventOption known = Option(2, new NetherEffect(NetherEffectKind.NetherGoldGain, 50)) with
+        {
+            EventId = 801,
+            EventPartId = 812,
+            RequiresExactBinding = true,
+        };
+
+        NetherEventDecision decision = EventPolicy().DecideEvent(
+            Snapshot(),
+            [unknown, known],
+            Settings(),
+            []
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        Assert.Equal(2, decision.OptionNumber);
+        Assert.Equal(812, decision.EventPartId);
+    }
+
+    [Fact]
+    public void Mode_aware_event_rewards_prefer_equipment_rank_five_bag_over_direct_code_offer()
+    {
+        NetherEffect item = new(NetherEffectKind.Item, 1)
+        {
+            ContentId = 901,
+            RewardEvidence = new NetherEventRewardEvidence(901, 901, 91, NetherRewardRarity.Red, 1),
+        };
+        NetherEventDecision decision = EventPolicy().DecideEvent(
+            Snapshot(),
+            [
+                Option(1, new NetherEffect(NetherEffectKind.AbyssCodeOffer, 0)) with
+                {
+                    EventId = 9010,
+                    EventPartId = 9011,
+                    RequiresExactBinding = true,
+                },
+                Option(2, item) with
+                {
+                    EventId = 9010,
+                    EventPartId = 9012,
+                    RequiresExactBinding = true,
+                    RewardEvidence = item.RewardEvidence,
+                },
+            ],
+            Settings(),
+            [],
+            new NetherEventStrategyEvidence
+            {
+                IsKnown = true,
+                Mode = NetherStrategyMode.Equipment,
+            }
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        Assert.Equal(2, decision.OptionNumber);
+    }
+
+    [Fact]
+    public void Research_incomplete_mode_prefers_direct_code_offer_over_uncommitted_gold()
+    {
+        NetherEventDecision decision = EventPolicy().DecideEvent(
+            Snapshot(),
+            [
+                Option(1, new NetherEffect(NetherEffectKind.NetherGoldGain, 100)),
+                Option(2, new NetherEffect(NetherEffectKind.AbyssCodeOffer, 0)),
+            ],
+            Settings(),
+            [],
+            new NetherEventStrategyEvidence
+            {
+                IsKnown = true,
+                Mode = NetherStrategyMode.Research,
+                ResearchIncomplete = true,
+            }
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        Assert.Equal(2, decision.OptionNumber);
+    }
+
+    [Fact]
+    public void Exact_event_damage_checks_every_living_character_not_the_popup_presenter()
+    {
+        NetherSnapshot snapshot = Snapshot(hp: 500) with
+        {
+            Characters =
+            [
+                new NetherCharacterState(1, 500),
+                new NetherCharacterState(2, 100),
+            ],
+        };
+        NetherEventDecision decision = EventPolicy().DecideEvent(
+            snapshot,
+            [Option(1, new NetherEffect(NetherEffectKind.Damage, 150))],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Pause, decision.Kind);
+        Assert.Equal(NetherPauseReason.UnsafeHp, decision.PauseReason);
+    }
+
+    [Fact]
+    public void Exact_event_battle_row_is_required_and_normal_battle_tier_is_mode_aware()
+    {
+        NetherEventBattleEvidence normal = new(
+            BattleId: 9301,
+            BattleStageId: 9302,
+            BattleType: 1,
+            CodeDropRatio: 300,
+            SemanticTier: NetherEventBattleTier.NormalBattle
+        );
+        NetherEventOption exactBattle = Option(1, new NetherEffect(NetherEffectKind.Battle, 9301)) with
+        {
+            EventId = 9300,
+            EventPartId = 9303,
+            RequiresExactBinding = true,
+            BattleEvidence = normal,
+        };
+        NetherEventOption codeOffer = Option(2, new NetherEffect(NetherEffectKind.AbyssCodeOffer, 0)) with
+        {
+            EventId = 9300,
+            EventPartId = 9304,
+            RequiresExactBinding = true,
+        };
+
+        NetherEventDecision research = EventPolicy().DecideEvent(
+            Snapshot(),
+            [exactBattle, codeOffer],
+            Settings(),
+            [],
+            new NetherEventStrategyEvidence
+            {
+                IsKnown = true,
+                Mode = NetherStrategyMode.Research,
+                ResearchIncomplete = true,
+            }
+        );
+        NetherEventDecision equipment = EventPolicy().DecideEvent(
+            Snapshot(),
+            [exactBattle, codeOffer],
+            Settings(),
+            [],
+            new NetherEventStrategyEvidence
+            {
+                IsKnown = true,
+                Mode = NetherStrategyMode.Equipment,
+            }
+        );
+
+        Assert.Equal(2, research.OptionNumber);
+        Assert.Equal(1, equipment.OptionNumber);
+        Assert.NotNull(equipment.Commitment);
+        Assert.True(equipment.Commitment!.IsValid);
+        Assert.Equal(normal, equipment.Commitment.Battle);
+    }
+
     private static NetherEventPolicy EventPolicy() => new();
 
     private static NetherAutoClimbSettings Settings(
@@ -281,7 +507,11 @@ public class NetherEventPolicyTests
         Characters = [new NetherCharacterState(1, hp)],
     };
 
-    private static NetherEventOption Option(int number, params NetherEffect[] effects) => new(number, effects);
+    private static NetherEventOption Option(int number, params NetherEffect[] effects) => new(number, effects)
+    {
+        FloorId = 10,
+        NodeId = 1,
+    };
 
     private static NetherInteractivePartialDeathEligibility TreasureEligibility(long eventId, long partId) => new(
         NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,

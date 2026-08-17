@@ -13,7 +13,10 @@ internal readonly record struct NetherStrategyBattleMasterRow(
     int BattleType,
     long BattleStageId,
     int CodeDropRatio
-);
+)
+{
+    public bool HasRequiredFields { get; init; } = true;
+}
 
 /// <summary>Exact current MNetherFloorTreasures relation.</summary>
 internal readonly record struct NetherStrategyTreasureMasterRow(long Id, long MapFloorMasterId);
@@ -25,7 +28,10 @@ internal readonly record struct NetherStrategyItemMasterRow(
     int Rarity,
     int Value,
     int PossessionLimit
-);
+)
+{
+    public bool HasRequiredFields { get; init; } = true;
+}
 
 internal sealed record NetherStrategyShopInventoryCapture(
     bool IsMaterialized,
@@ -88,11 +94,11 @@ internal static class NetherStrategyVisibleEvidenceMapper
                 "invalid-visible-evidence-capture-contract"
             );
         }
-        if (!TryUnique(request.BattleRows, row => row.Id, out Dictionary<long, NetherStrategyBattleMasterRow> battleById)
+        if (!TryUniqueOptionMaster(request.BattleRows, row => row.Id, row => row.HasRequiredFields, out Dictionary<long, NetherStrategyBattleMasterRow> battleById)
             || !TryUnique(request.TreasureRows, row => row.Id, out Dictionary<long, NetherStrategyTreasureMasterRow> treasureById)
-            || !TryUnique(request.EventRows, row => row.EventId, out Dictionary<long, NetherFloorEventMasterRow> eventById)
-            || !TryUnique(request.EventPartRows, row => row.PartId, out Dictionary<long, NetherFloorEventPartMasterRow> partById)
-            || !TryUnique(request.ItemRows, row => row.Id, out Dictionary<long, NetherStrategyItemMasterRow> itemById))
+            || !TryUniqueOptionMaster(request.EventRows, row => row.EventId, row => row.HasRequiredFields, out Dictionary<long, NetherFloorEventMasterRow> eventById)
+            || !TryUniqueEventPartRows(request.EventPartRows, out Dictionary<long, NetherFloorEventPartMasterRow> partById)
+            || !TryUniqueOptionMaster(request.ItemRows, row => row.Id, row => row.HasRequiredFields, out Dictionary<long, NetherStrategyItemMasterRow> itemById))
         {
             return NetherStrategyVisibleEvidenceCaptureResult.Failure(
                 "duplicate-or-invalid-visible-master-row"
@@ -290,11 +296,33 @@ internal static class NetherStrategyVisibleEvidenceMapper
     )
     {
         long[] partIds = { eventRow.PartId1, eventRow.PartId2, eventRow.PartId3, eventRow.PartId4 };
+        var seenPartIds = new HashSet<long>();
+        bool foundEmptyPart = false;
         for (int index = 0; index < partIds.Length; index++)
         {
             long partId = partIds[index];
-            if (partId <= 0)
+            if (partId == 0)
+            {
+                foundEmptyPart = true;
                 continue;
+            }
+            if (partId < 0 || foundEmptyPart || !seenPartIds.Add(partId))
+            {
+                rows.Add(Unknown(
+                    NetherStrategyVisibleContentKind.Event,
+                    floor,
+                    partId < 0
+                        ? "invalid-event-part-reference:" + partId
+                        : foundEmptyPart
+                            ? "noncontiguous-event-part-reference:" + partId
+                            : "duplicate-event-part-reference:" + partId,
+                    masterRowId: eventRow.EventId,
+                    contentId: Math.Max(0, partId),
+                    eventId: eventRow.EventId,
+                    eventPartId: Math.Max(0, partId)
+                ));
+                continue;
+            }
             if (!partById.TryGetValue(partId, out NetherFloorEventPartMasterRow part))
             {
                 rows.Add(Unknown(
@@ -408,15 +436,25 @@ internal static class NetherStrategyVisibleEvidenceMapper
                     : "absent-event-target-has-parameter:" + partId + ":" + (int)source,
             };
         }
-        bool known = rawType is >= 1 and <= 8 && parameter >= 0;
+        bool mapped = NetherEventNativeMapping.TryMapTargetType(
+            rawType,
+            parameter,
+            out NetherEffectKind mappedKind,
+            out int mappedAmount,
+            out string mappingDetail
+        );
+        bool battleSemanticKnown = mapped && rawType != (int)NetherEffectKind.Battle;
         return new NetherStrategyVisibleEventEffectEvidence(source, rawType, parameter)
         {
-            EffectKind = known ? (NetherEffectKind)rawType : NetherEffectKind.Unknown,
+            EffectKind = mapped ? mappedKind : NetherEffectKind.Unknown,
+            Amount = mapped ? mappedAmount : parameter,
             IsPresent = true,
-            IsKnown = known,
-            UnknownReason = known
-                ? string.Empty
-                : "unsupported-event-target-type-or-parameter:" + partId + ":" + rawType,
+            IsKnown = battleSemanticKnown,
+            UnknownReason = !mapped
+                ? mappingDetail + ":part=" + partId
+                : battleSemanticKnown
+                    ? string.Empty
+                    : "event-battle-semantic-tier-unavailable-for-raw-type:" + partId,
         };
     }
 
@@ -444,9 +482,9 @@ internal static class NetherStrategyVisibleEvidenceMapper
         NetherEffectKind kind = part.ContentType switch
         {
             30 or 31 when part.ContentId > 0 => NetherEffectKind.Item,
-            160 when part.ContentId == 0 => NetherEffectKind.AbyssCodeOffer,
-            165 when part.ContentId >= 0 => NetherEffectKind.NetherGoldGain,
-            166 when part.ContentId >= 0 => NetherEffectKind.TreasureKeyGain,
+            160 when NetherEventNativeMapping.IsCodeOfferContentId(part.ContentId) => NetherEffectKind.AbyssCodeOffer,
+            165 when NetherEventNativeMapping.IsValidResourceContentId(part.ContentId) => NetherEffectKind.NetherGoldGain,
+            166 when NetherEventNativeMapping.IsValidResourceContentId(part.ContentId) => NetherEffectKind.TreasureKeyGain,
             _ => NetherEffectKind.Unknown,
         };
         bool known = kind != NetherEffectKind.Unknown && part.Amount >= 0;
@@ -478,7 +516,10 @@ internal static class NetherStrategyVisibleEvidenceMapper
     )
     {
         NetherStrategyItemMasterRow item = default;
-        bool itemKnown = part.ContentId > 0 && itemById.TryGetValue(part.ContentId, out item);
+        bool itemKnown = part.ContentId > 0
+            && itemById.TryGetValue(part.ContentId, out item)
+            && NetherEventNativeMapping.TryMapItemType(item.ItemType, out _)
+            && NetherEventNativeMapping.IsKnownRewardRarity((NetherRewardRarity)item.Rarity);
         rows.Add(new NetherStrategyVisibleContentRow(
             NetherStrategyVisibleContentKind.Item,
             floor.NodeId,
@@ -554,9 +595,12 @@ internal static class NetherStrategyVisibleEvidenceMapper
         BattleType = battle.BattleType,
         BattleStageId = battle.BattleStageId,
         CodeDropRatio = battle.CodeDropRatio,
-        IsKnown = battle.Id > 0 && battle.BattleStageId > 0 && battle.CodeDropRatio >= 0,
-        UnknownReason = battle.Id > 0 && battle.BattleStageId > 0 && battle.CodeDropRatio >= 0
-            ? string.Empty
+        IsKnown = false,
+        UnknownReason = battle.HasRequiredFields
+                && battle.Id > 0
+                && battle.BattleStageId > 0
+                && battle.CodeDropRatio >= 0
+            ? "event-battle-semantic-tier-unavailable-for-raw-type:" + battle.BattleType
             : "invalid-battle-master-row:" + battle.Id,
     };
 
@@ -598,6 +642,7 @@ internal static class NetherStrategyVisibleEvidenceMapper
                 Cost = Math.Max(0, content.Price),
                 Rank = Math.Max(0, (int)content.Rarity),
                 ItemType = content.ItemType,
+                UsesNetherGold = content.UsesNetherGold,
                 IsKnown = known,
                 UnknownReason = known ? string.Empty : "invalid-shop-inventory-row:" + content.ContentId,
             });
@@ -633,6 +678,66 @@ internal static class NetherStrategyVisibleEvidenceMapper
             long key = keySelector(row);
             if (key <= 0 || !mapped.TryAdd(key, row))
                 return false;
+        }
+        return true;
+    }
+
+    private static bool TryUniqueOptionMaster<T>(
+        IEnumerable<T> source,
+        Func<T, long> keySelector,
+        Func<T, bool> isValid,
+        out Dictionary<long, T> mapped
+    )
+    {
+        mapped = new Dictionary<long, T>();
+        var ambiguous = new HashSet<long>();
+        foreach (T row in source)
+        {
+            long key = keySelector(row);
+            if (key <= 0)
+                continue;
+            if (!isValid(row))
+            {
+                mapped.Remove(key);
+                ambiguous.Add(key);
+                continue;
+            }
+            if (ambiguous.Contains(key))
+                continue;
+            if (!mapped.TryAdd(key, row))
+            {
+                mapped.Remove(key);
+                ambiguous.Add(key);
+            }
+        }
+        return true;
+    }
+
+    private static bool TryUniqueEventPartRows(
+        IEnumerable<NetherFloorEventPartMasterRow> source,
+        out Dictionary<long, NetherFloorEventPartMasterRow> mapped
+    )
+    {
+        mapped = new Dictionary<long, NetherFloorEventPartMasterRow>();
+        var ambiguous = new HashSet<long>();
+        foreach (NetherFloorEventPartMasterRow row in source)
+        {
+            if (!row.HasRequiredFields)
+            {
+                if (row.PartId > 0)
+                {
+                    mapped.Remove(row.PartId);
+                    ambiguous.Add(row.PartId);
+                }
+                continue;
+            }
+            if (row.PartId <= 0 || ambiguous.Contains(row.PartId))
+                continue;
+            if (!mapped.TryAdd(row.PartId, row))
+            {
+                mapped.Remove(row.PartId);
+                ambiguous.Add(row.PartId);
+            }
         }
         return true;
     }

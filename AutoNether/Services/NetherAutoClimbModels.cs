@@ -113,6 +113,8 @@ internal enum NetherPauseReason
     ContinueRebindTimeout,
     ContinueRebindWrongScene,
     ContinueSettlementWrongTarget,
+    /// <summary>The foreground Event no longer matches the immutable option commitment.</summary>
+    StaleEventCommitment,
     ResultLifecycleFault,
     ResultLifecycleCanceled,
     TargetReachedOutsideCheckpoint,
@@ -475,6 +477,13 @@ internal sealed record NetherEffect(NetherEffectKind Kind, int Amount)
     public long ContentId { get; init; }
     public long ReplacementCodeId { get; init; }
     public bool IsOptionalBattle { get; init; }
+    /// <summary>
+    /// Exact native battle row for target_type=8.  A missing row is option-local unknown evidence;
+    /// the integer Amount remains the raw server parameter for audit output.
+    /// </summary>
+    public NetherEventBattleEvidence? BattleEvidence { get; init; }
+    /// <summary>Exact MItems/content identity when this effect is an Event reward.</summary>
+    public NetherEventRewardEvidence? RewardEvidence { get; init; }
 }
 
 internal sealed record NetherRewardItem(long ItemId, int Amount)
@@ -649,6 +658,15 @@ internal sealed record NetherFloorPopupStage(
     /// <summary>True when erosion includes active code/category modifiers, not only raw effects.</summary>
     public bool HasExpectedErosionDelta { get; init; }
     public int ExpectedErosionDelta { get; init; }
+    public int ProjectedErosion { get; init; }
+    public int ProjectedHpDelta { get; init; }
+    public int ProjectedNetherGold { get; init; }
+    public int ProjectedTreasureKeys { get; init; }
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
+    public long EventId { get; init; }
+    public long EventPartId { get; init; }
+    public NetherEventCommitment? EventCommitment { get; init; }
 }
 
 internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
@@ -671,6 +689,13 @@ internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
     /// <summary>Exact projected erosion delta after active code/category modifiers.</summary>
     public bool HasExpectedErosionDelta { get; init; }
     public int ExpectedErosionDelta { get; init; }
+    /// <summary>Exact projected Event state retained for downstream commitment validation.</summary>
+    public int ProjectedErosion { get; init; }
+    public int ProjectedHpDelta { get; init; }
+    public int ProjectedNetherGold { get; init; }
+    public int ProjectedTreasureKeys { get; init; }
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
     public long ContentId { get; init; }
     public int ContentAmount { get; init; }
     public int GoldCost { get; init; }
@@ -700,6 +725,12 @@ internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
     /// </summary>
     public IReadOnlyList<NetherFloorPopupStage> OwnedPopupStages { get; init; }
         = Array.Empty<NetherFloorPopupStage>();
+    /// <summary>Exact Event identity carried through the owned parent transaction.</summary>
+    public long EventId { get; init; }
+    public long EventPartId { get; init; }
+    public long EventFloorId { get; init; }
+    public long EventNodeId { get; init; }
+    public NetherEventCommitment? EventCommitment { get; init; }
     public NetherBattleSettlementContract? BattleSettlement { get; init; }
     /// <summary>Set only for a safety-approved combat floor before its native selection parent begins.</summary>
     public NetherBattleProjectionPayload? BattleProjection { get; init; }

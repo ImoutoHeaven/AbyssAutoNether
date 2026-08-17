@@ -208,11 +208,24 @@ Commit as `refactor: own AutoNether config and runtime state`.
 
 - [ ] **Step 1: Run the full test suite and resolve only migration regressions**
 
-Run `dotnet test AutoNether.Tests/AutoNether.Tests.csproj -c Release`. Preserve all relevant migrated tests; do not make tests pass by deleting valid route/native-flow coverage.
+Run the clean, self-contained Docker restore/test command below. `NuGet.config` at the repository
+root supplies nuget.org, the BepInEx feed, and the Samboy feed, so this command intentionally has no
+ad-hoc `--source` or `--source` workaround flags. Keep the game mount read-only and preserve all
+relevant migrated tests; do not make tests pass by deleting valid route/native-flow coverage.
+
+~~~text
+MSYS_NO_PATHCONV=1 docker run --rm --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly -w /src mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim bash -lc 'set -euo pipefail; export ABYSS_GAME_DIR=/game; export NUGET_PACKAGES=/tmp/nuget; dotnet test AutoNether.Tests/AutoNether.Tests.csproj -c Release --nologo --logger "console;verbosity=minimal"'
+~~~
+
+Fresh clean-cache execution `j-g4xeyq` restored both projects from the repository-configured
+sources and passed 1184/1184. The pre-fix clean-cache RED `j-urwq7m` failed with NU1101 for
+`BepInEx.Unity.IL2CPP` and `BepInEx.PluginInfoProps` because only nuget.org was visible.
 
 - [ ] **Step 2: Build against the read-only current game**
 
-Mount the game directory as `/game:ro`, set `ABYSS_GAME_DIR=/game`, and run `dotnet build AutoNether/AutoNether.csproj -c Release`. Expected: 0 errors and 0 warnings.
+Mount the game directory as `/game:ro`, set `ABYSS_GAME_DIR=/game`, and run the Release build in
+the same Docker image with the repository's `NuGet.config`; expected result is 0 errors and 0
+warnings.
 
 - [ ] **Step 3: Audit the binary and package**
 
@@ -226,6 +239,42 @@ Document standalone F12 behavior, optional F11 coexistence, independent toggles,
 
 Run `scripts/verify-product-isolation.sh`, full tests, `scripts/verify-release.sh`, read-only Release build, `git diff --check`, and `git status`. Report exact test counts and remaining live-only IL2CPP validation boundary.
 
+Historical pre-repair Docker gate record (not final): task-group HEAD `1e1e7a0d6f0215910e9b7d1254c7771d217326ea`, parent
+`5f3de38572d5526e73e8576ffe505669c1c8dbc3`; threshold-focused `j-l9m0j6` passed 111/111,
+expanded focused `j-529vvn` passed 230/230, full `j-nyu1bj` passed 1186/1186, and Release
+`j-3ulak2` passed with 0 warnings/0 errors. Read-only evidence audit `j-ju3ij7` recorded
+`EVIDENCE_AUDIT_PASS=1`, `PRODUCT_ISOLATION_PASS=1`, and `DIFF_CHECK_EXIT=0` with
+`/game` mounted read-only. The threshold RED/GREEN are `j-kmf1l2` (2 failures) and
+`j-1ro4y6` (2/2), supported by fresh native decomp `j-86iu89` (`CPP2IL_EXIT=0`,
+`DIFFABLE_EXIT=0`).
+
+Current final-repair pre-amend record: worktree HEAD `beb8824604298da985965bad332b24ac9d7845c7`,
+parent `5f3de38572d5526e73e8576ffe505669c1c8dbc3`; focused `j-b6bdes` passed 128/128,
+expanded `j-g23akv` passed 337/337, full `j-n7g4ih` passed 1201/1201, and Release `j-dbw8t4`
+passed with 0 warnings/0 errors. Read-only audit `j-1lixdk` passed product isolation and
+`git diff --check`. The final SHA is intentionally not duplicated in this pre-amend plan text:
+the plan is part of the amended tree, so embedding a commit's own object ID changes that object;
+the post-amend Docker audit prints the exact final HEAD/parent/tree and is authoritative.
+
+Current procurement-repair pre-amend record: `HEAD=b837c5ce1822b3b05990ff34df62ad75a974877e`,
+parent `5f3de38572d5526e73e8576ffe505669c1c8dbc3`. Fresh public RED `j-xyz67j` was 3/3
+failures; GREEN `j-3l24iu` was 3/3; focused `j-4gqmbu` was 123/123; expanded `j-u32ye3` was
+189/189; full `j-eg7dic` was 1208/1208; and Release `j-hrbptk` was 0 warnings/0 errors.
+Fresh RO native decomp jobs `j-p18rn7` and `j-phv0bh` both returned CPP2IL/DIFFABLE exit 0 and
+used `/game` read-only. The post-amend Docker audit and
+`refs/notes/logic-overhaul-evidence` remain authoritative for the final SHA/tree and isolation /
+diff results because the plan itself is part of the amended tree.
+
 - [ ] **Step 6: Commit**
 
 Commit as `build: complete standalone AutoNether migration`.
+
+Current raw-ItemType-overflow pre-amend record: `HEAD=ffa3ef96ba7862456e668195fdea6207b69543a5`,
+parent `5f3de38572d5526e73e8576ffe505669c1c8dbc3`. Fresh public RED `j-lzlkcg` failed 1/1
+with the exact positive raw `ItemType=2147483648` overflow; GREEN `j-ofgd9w` passed 1/1.
+Warning-free focused `j-8dph58` passed 207/207, expanded `j-ie7n3h` passed 477/477, full
+`j-1y9bfs` passed 1209/1209, and Release/isolation/diff `j-gwj93w` passed Release 0 warnings/0
+errors, product isolation, and diff check 0. Fresh RO native Cpp2IL `j-bghfub` and post-fix
+`j-5l2ncz` both passed with `MItems.cs` hash
+`e69e8310aa256e60e356e84e857e1b7f92f056a952c03b96f9182e865cfd0d27` and raw `long type` at
+source line 11. The post-amend Docker audit and Git note remain authoritative for final SHA/tree.
