@@ -91,6 +91,8 @@
     <Compile Include="..\AutoNether\Services\NetherRecoveredFloorEventTaskLease.cs" Link="NetherRecoveredFloorEventTaskLease.cs" Condition="Exists('..\AutoNether\Services\NetherRecoveredFloorEventTaskLease.cs')" />
     <Compile Include="..\AutoNether\Services\NetherContentAcquiredConfirmLease.cs" Link="NetherContentAcquiredConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherContentAcquiredConfirmLease.cs')" />
     <Compile Include="..\AutoNether\Services\NetherTreasureConfirmLease.cs" Link="NetherTreasureConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherTreasureConfirmLease.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherTreasureConfirmationCoordinator.cs" Link="NetherTreasureConfirmationCoordinator.cs" Condition="Exists('..\AutoNether\Services\NetherTreasureConfirmationCoordinator.cs')" />
+    <Compile Include="..\AutoNether\Services\NetherTreasureAnimationNativeBinding.cs" Link="NetherTreasureAnimationNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherTreasureAnimationNativeBinding.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodeReceivedConfirmLease.cs" Link="NetherCodeReceivedConfirmLease.cs" Condition="Exists('..\AutoNether\Services\NetherCodeReceivedConfirmLease.cs')" />
     <Compile Include="..\AutoNether\Services\NetherFloorEventSequenceNativeBinding.cs" Link="NetherFloorEventSequenceNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherFloorEventSequenceNativeBinding.cs')" />
     <Compile Include="..\AutoNether\Services\NetherCodePopupNativeBinding.cs" Link="NetherCodePopupNativeBinding.cs" Condition="Exists('..\AutoNether\Services\NetherCodePopupNativeBinding.cs')" />

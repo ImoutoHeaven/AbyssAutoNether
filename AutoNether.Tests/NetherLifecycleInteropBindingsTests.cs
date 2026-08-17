@@ -154,6 +154,67 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
+    public void Packaged_treasure_confirmation_exposes_exact_open_animation_readiness_gate()
+    {
+        // Fresh Cpp2IL recovery from GameAssembly SHA-256 573fa800... proves the order:
+        // RequestNetherUpdateEventAsync -> PlayOpenTreasureAnimationSequenceAsync -> Open state.
+        // The automation may invoke Skip only after observing that exact state.
+        using var packaged = PackagedProjectAssembly.Load();
+        Type popup = packaged.RequireType(NetherTreasureAnimationNativeBinding.PopupTypeName);
+        Type animatorExtensions = packaged.RequireType(
+            NetherTreasureAnimationNativeBinding.AnimatorExtensionsTypeName
+        );
+        const BindingFlags instanceFlags =
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        const BindingFlags staticFlags =
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+        PropertyInfo openAnimation = Assert.Single(
+            popup.GetProperties(staticFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.OpenAnimationMemberName
+        );
+        Assert.Equal("Project.AnimatorNameWithHash", openAnimation.PropertyType.FullName);
+        PropertyInfo animationHash = Assert.Single(
+            openAnimation.PropertyType.GetProperties(instanceFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.AnimationHashMemberName
+        );
+        Assert.Equal(typeof(int), animationHash.PropertyType);
+
+        PropertyInfo animator = Assert.Single(
+            popup.GetProperties(instanceFlags),
+            property => property.Name
+                == NetherTreasureAnimationNativeBinding.AnimatorMemberName
+        );
+        Assert.Equal("UnityEngine.Animator", animator.PropertyType.FullName);
+
+        Assert.True(
+            NetherLifecycleInteropBindings.TryResolveExactMethod(
+                animatorExtensions,
+                NetherTreasureAnimationNativeBinding.IsOpenAnimationDescriptor,
+                staticFlags,
+                out string stateError,
+                out MethodInfo? isOpenState
+            ),
+            stateError
+        );
+        Assert.NotNull(isOpenState);
+
+        Assert.True(
+            NetherLifecycleInteropBindings.TryResolveExactMethod(
+                popup,
+                NetherTreasureAnimationNativeBinding.SkipAnimationDescriptor,
+                instanceFlags,
+                out string skipError,
+                out MethodInfo? skip
+            ),
+            skipError
+        );
+        Assert.NotNull(skip);
+    }
+
+    [Fact]
     public void Packaged_event_update_protocol_has_no_character_target_and_returns_character_status_updates()
     {
         using var packaged = PackagedProjectAssembly.Load();

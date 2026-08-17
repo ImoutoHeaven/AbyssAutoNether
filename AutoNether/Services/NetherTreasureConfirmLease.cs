@@ -7,7 +7,7 @@ namespace AutoNether.Services;
 internal enum NetherTreasureConfirmStage
 {
     Idle,
-    AwaitingSkipInvocation,
+    AwaitingOpenAnimation,
     AwaitingSkipTask,
     AwaitingResumePump,
     AwaitingConfirmTap,
@@ -47,7 +47,7 @@ internal sealed class NetherTreasureConfirmLease
             return false;
 
         _owner = owner;
-        Stage = NetherTreasureConfirmStage.AwaitingSkipInvocation;
+        Stage = NetherTreasureConfirmStage.AwaitingOpenAnimation;
         return true;
     }
 
@@ -57,10 +57,17 @@ internal sealed class NetherTreasureConfirmLease
         return Stage != NetherTreasureConfirmStage.Idle && _owner.IsValid;
     }
 
-    public bool TryClaimSkip(NetherTreasureConfirmOwner owner) =>
-        Transition(
+    /// <summary>
+    /// Claims the one-shot skip only after the current popup animator has been observed in the
+    /// packaged Open state. OnConfirm merely starts the server request; it is not readiness.
+    /// </summary>
+    public bool TryClaimSkip(
+        NetherTreasureConfirmOwner owner,
+        bool openAnimationObserved
+    ) => openAnimationObserved
+        && Transition(
             owner,
-            NetherTreasureConfirmStage.AwaitingSkipInvocation,
+            NetherTreasureConfirmStage.AwaitingOpenAnimation,
             NetherTreasureConfirmStage.AwaitingSkipTask
         );
 
