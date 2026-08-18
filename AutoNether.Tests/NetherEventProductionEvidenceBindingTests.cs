@@ -891,6 +891,16 @@ public sealed class NetherEventProductionEvidenceBindingTests
         NetherEffect damage = new(NetherEffectKind.Damage, 1);
         NetherSnapshot snapshot = Snapshot();
         NetherRuntimePopupContext popup = Popup(711, 712, damage);
+        NetherRankFiveTreasureIdentity objective = new(9001, 9002, 9003);
+        NetherRankFiveKeyProcurementCommitment procurement = new()
+        {
+            Objective = objective,
+            SourceKind = NetherKeyProcurementSourceKind.HpPaidEventKey,
+            SourceNodeId = snapshot.CurrentNodeId,
+            SourceEventId = 711,
+            SourceEventPartId = 712,
+            SourceOptionNumber = 1,
+        };
         NetherInteractivePartialDeathEligibility proof = new(
             NetherInteractivePartialDeathObjectiveKind.HpPaidEventKeyForRank5Treasure,
             711,
@@ -912,7 +922,9 @@ public sealed class NetherEventProductionEvidenceBindingTests
                 damage,
                 null,
                 allowsPartialActiveDeaths: true,
-                partialDeathEligibility: proof
+                partialDeathEligibility: proof,
+                rankFiveCommitment: procurement,
+                rankFiveObjective: objective
             ),
             new NetherAutoClimbSettings { StrategyMode = NetherStrategyMode.Equipment }
         );
@@ -922,7 +934,121 @@ public sealed class NetherEventProductionEvidenceBindingTests
         Assert.True(bound.Options[0].StrategyEvidence!.HasRankFiveTreasureObjective);
         NetherEventCommitment commitment = Assert.Single(bound.ExpectedEventCommitments).Value;
         Assert.Equal(proof, commitment.PartialDeathEligibility);
+        Assert.Equal(procurement, commitment.RankFiveKeyProcurementCommitment);
+        Assert.Equal(objective, commitment.RankFiveTreasureObjective);
         Assert.True(commitment.IsValid);
+    }
+
+    [Fact]
+    public void Production_rank_five_event_commitment_survives_binding_dispatch_and_reconciliation()
+    {
+        NetherEffect gain = new(NetherEffectKind.NetherGoldGain, 10);
+        NetherSnapshot snapshot = Snapshot();
+        NetherRuntimePopupContext popup = Popup(711, 712, gain);
+        NetherRankFiveTreasureIdentity objective = new(9001, 9002, 9003);
+        NetherRankFiveKeyProcurementCommitment procurement = new()
+        {
+            Objective = objective,
+            SourceKind = NetherKeyProcurementSourceKind.EventGold150,
+            SourceNodeId = snapshot.CurrentNodeId,
+            SourceEventId = 711,
+            SourceEventPartId = 712,
+            SourceOptionNumber = 1,
+            GoldCost = 150,
+        };
+        NetherAutoClimbSettings settings = new() { StrategyMode = NetherStrategyMode.Equipment };
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            popup,
+            Package(snapshot, research: null, gain, settings),
+            Interactive(
+                snapshot,
+                popup,
+                gain,
+                reward: null,
+                rankFiveCommitment: procurement,
+                rankFiveObjective: objective
+            ),
+            settings
+        );
+        NetherPopupDispatchDecision dispatched = NetherPopupDispatchPolicy.Decide(snapshot, bound, settings);
+
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, dispatched.Kind);
+        Assert.Equal(procurement, dispatched.Action.EventCommitment!.RankFiveKeyProcurementCommitment);
+        Assert.Equal(objective, dispatched.Action.EventCommitment.RankFiveTreasureObjective);
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(
+                dispatched.Action,
+                snapshot,
+                snapshot with { NetherGold = 110 }
+            )
+        );
+    }
+
+    [Fact]
+    public void Production_rank_five_shop_commitment_survives_binding_dispatch_and_reconciliation()
+    {
+        NetherSnapshot snapshot = Snapshot();
+        NetherRankFiveTreasureIdentity objective = new(9001, 9002, 9003);
+        NetherRankFiveKeyProcurementCommitment procurement = new()
+        {
+            Objective = objective,
+            SourceKind = NetherKeyProcurementSourceKind.ShopGold200,
+            SourceNodeId = 3,
+            SourceContentId = 3001,
+            GoldCost = 200,
+        };
+        NetherRankFiveKeyProcurementDecision decision = new()
+        {
+            IsKnown = true,
+            HasMandatoryObjective = true,
+            Objective = objective,
+            SourceKind = NetherKeyProcurementSourceKind.ShopGold200,
+            GoldCost = 200,
+            Commitment = procurement,
+        };
+        NetherRuntimePopupContext popup = new()
+        {
+            Kind = NetherRuntimePopupKind.Shop,
+            ShopContents =
+            [
+                new NetherShopContent(3001, 0, 0, NetherRewardRarity.NoEffect, 200, usesNetherGold: true)
+                {
+                    IsTreasureKey = true,
+                },
+            ],
+        };
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.BindRankFiveShopCommitment(
+            popup,
+            decision
+        );
+        NetherAutoClimbSettings settings = new()
+        {
+            StrategyMode = NetherStrategyMode.Equipment,
+            ShopMode = NetherShopMode.EquipmentBags,
+        };
+        NetherPopupDispatchDecision dispatched = NetherPopupDispatchPolicy.Decide(
+            snapshot with { NetherGold = 250 },
+            bound,
+            settings
+        );
+
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, dispatched.Kind);
+        Assert.Equal(NetherActionKind.BuyShopItem, dispatched.Action.Kind);
+        Assert.Equal(bound.ShopProcurementCommitment, dispatched.Action.ShopProcurementCommitment);
+        Assert.Equal(
+            NetherActionOutcome.Applied,
+            NetherActionReconcilePolicy.Evaluate(
+                dispatched.Action,
+                snapshot with { NetherGold = 250 },
+                snapshot with
+                {
+                    NetherGold = 50,
+                    AcquiredItems = [new NetherRewardItem(3001, 1)],
+                }
+            )
+        );
     }
 
     [Fact]
@@ -1093,7 +1219,9 @@ public sealed class NetherEventProductionEvidenceBindingTests
         NetherEffect effect,
         NetherEventRewardEvidence? reward,
         bool allowsPartialActiveDeaths = false,
-        NetherInteractivePartialDeathEligibility? partialDeathEligibility = null
+        NetherInteractivePartialDeathEligibility? partialDeathEligibility = null,
+        NetherRankFiveKeyProcurementCommitment? rankFiveCommitment = null,
+        NetherRankFiveTreasureIdentity? rankFiveObjective = null
     )
     {
         NetherEventOption option = popup.Options[0];
@@ -1115,6 +1243,8 @@ public sealed class NetherEventProductionEvidenceBindingTests
             PartialDeathEligibility = partialDeathEligibility,
             IsMandatoryRankFiveKeyObjective = partialDeathEligibility?.AllowsHpPaidEventKey == true
                 && partialDeathEligibility.ExactTreasureRank == 5,
+            RankFiveKeyProcurementCommitment = rankFiveCommitment,
+            RankFiveTreasureObjective = rankFiveObjective,
         };
         return NetherRuntimeInteractivePreEntryInputsResult.Success(
             new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>

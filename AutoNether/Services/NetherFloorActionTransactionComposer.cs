@@ -107,6 +107,7 @@ internal static class NetherFloorActionTransactionComposer
             EventFloorId = stage.EventCommitment?.FloorId ?? settlement.EventFloorId,
             EventNodeId = stage.EventCommitment?.NodeId ?? settlement.EventNodeId,
             EventCommitment = stage.EventCommitment ?? settlement.EventCommitment,
+            ShopProcurementCommitment = stage.ShopProcurementCommitment ?? settlement.ShopProcurementCommitment,
         };
         return true;
     }
@@ -342,6 +343,7 @@ internal static class NetherFloorActionTransactionComposer
             EventId = settlement.EventId,
             EventPartId = settlement.EventPartId,
             EventCommitment = settlement.EventCommitment,
+            ShopProcurementCommitment = settlement.ShopProcurementCommitment,
         });
         return IsWellFormedStage(stages[0]);
     }
@@ -396,6 +398,7 @@ internal static class NetherFloorActionTransactionComposer
             EventId = child.EventId,
             EventPartId = child.EventPartId,
             EventCommitment = child.EventCommitment,
+            ShopProcurementCommitment = child.ShopProcurementCommitment,
         };
         return IsWellFormedStage(stage);
     }
@@ -432,6 +435,7 @@ internal static class NetherFloorActionTransactionComposer
             EventFloorId = stage.EventCommitment?.FloorId ?? 0,
             EventNodeId = stage.EventCommitment?.NodeId ?? 0,
             EventCommitment = stage.EventCommitment,
+            ShopProcurementCommitment = stage.ShopProcurementCommitment,
         };
         NetherSessionStatus intrinsic = GetTerminal(stage.PopupKind, child);
         return intrinsic == stage.ExpectedAfterStatus
@@ -611,6 +615,8 @@ internal static class NetherFloorActionTransactionComposer
                     RewardEvidence = commitment.Reward,
                     PartialDeathEligibility = commitment.PartialDeathEligibility,
                     AllowsPartialActiveDeaths = commitment.AllowsPartialActiveDeaths,
+                    RankFiveKeyProcurementCommitment = commitment.RankFiveKeyProcurementCommitment,
+                    RankFiveTreasureObjective = commitment.RankFiveTreasureObjective,
                 }))
         && action.ExpectedEffects.All(effect => effect != null
             && effect.Known
@@ -640,5 +646,15 @@ internal static class NetherFloorActionTransactionComposer
     }
 
     private static bool IsExactShopBuy(NetherPlannedAction action) =>
-        action.ContentId > 0 && action.ContentAmount > 0 && action.GoldCost >= 0;
+        action.ContentId > 0
+        && action.ContentAmount > 0
+        && action.GoldCost >= 0
+        && (action.ShopProcurementCommitment == null
+            || action.ShopProcurementCommitment.IsValid
+                && (!action.ShopProcurementCommitment.RequiresRankFiveKey
+                    || action.ShopProcurementCommitment.KeyContentId == action.ContentId
+                        && action.ShopProcurementCommitment.KeyCost == action.GoldCost)
+                && (!action.ShopProcurementCommitment.RequiresRankFiveBag
+                    || action.ShopProcurementCommitment.BagContentId == action.ContentId
+                        && action.ShopProcurementCommitment.BagCost == action.GoldCost));
 }

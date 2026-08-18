@@ -19,6 +19,11 @@ internal sealed record NetherAutoClimbRouteSafetyDecision
         EventProcurementCommitments { get; init; } =
         new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
     public NetherRouteBranchIdentity? RouteIdentity { get; init; }
+    public NetherRankFiveKeyProcurementDecision RankFiveKeyProcurement { get; init; } =
+        NetherRankFiveKeyProcurementDecision.Unknown("rank-five-procurement-not-evaluated");
+    public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> RecoveryBranchSafetyByPartId { get; init; } =
+        new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+    public NetherCodeTransformEligibilityEvidence? RecoveryTransformEligibility { get; init; }
     public bool IsCombatSelectionMissingProjection { get; init; }
     /// <summary>
     /// The only SelectFloor action Controller may invoke.  A combat action is constructed here
@@ -90,6 +95,9 @@ internal sealed class NetherAutoClimbRouteSafetyWiring
             SelectedBattleProjection = projection,
             EventProcurementCommitments = plan.EventProcurementCommitments,
             RouteIdentity = plan.RouteIdentity,
+            RankFiveKeyProcurement = plan.RankFiveKeyProcurement,
+            RecoveryBranchSafetyByPartId = plan.RecoveryBranchSafetyByPartId,
+            RecoveryTransformEligibility = plan.RecoveryTransformEligibility,
             IsCombatSelectionMissingProjection = missingProjection,
             SelectFloorAction = selectFloorAction,
         };

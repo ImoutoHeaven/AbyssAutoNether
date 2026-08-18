@@ -667,6 +667,7 @@ internal sealed record NetherFloorPopupStage(
     public long EventId { get; init; }
     public long EventPartId { get; init; }
     public NetherEventCommitment? EventCommitment { get; init; }
+    public NetherShopProcurementCommitment? ShopProcurementCommitment { get; init; }
 }
 
 internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
@@ -731,6 +732,7 @@ internal readonly record struct NetherPlannedAction(NetherActionKind Kind)
     public long EventFloorId { get; init; }
     public long EventNodeId { get; init; }
     public NetherEventCommitment? EventCommitment { get; init; }
+    public NetherShopProcurementCommitment? ShopProcurementCommitment { get; init; }
     public NetherBattleSettlementContract? BattleSettlement { get; init; }
     /// <summary>Set only for a safety-approved combat floor before its native selection parent begins.</summary>
     public NetherBattleProjectionPayload? BattleProjection { get; init; }

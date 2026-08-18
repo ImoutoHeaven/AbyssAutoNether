@@ -1111,6 +1111,12 @@ internal sealed record NetherStrategyVisibleContentRow(
     public int ItemPossessionLimit { get; init; }
     /// <summary>Exact shop-row currency flag copied from MNetherFloorShopContents.consume_content_type.</summary>
     public bool UsesNetherGold { get; init; }
+    /// <summary>
+    /// Explicit key-product semantic. The current native shop row exposes raw content fields but
+    /// no closed key enum, so production leaves this false unless an authoritative mapper proves
+    /// the product identity.
+    /// </summary>
+    public bool IsTreasureKey { get; init; }
     public bool IsKnown { get; init; } = true;
     public string UnknownReason { get; init; } = string.Empty;
     public IReadOnlyList<NetherStrategyNamedValue> RawValues { get; init; } =

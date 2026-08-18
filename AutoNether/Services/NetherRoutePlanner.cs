@@ -24,6 +24,12 @@ internal sealed record NetherRouteSafetyContext
     public IReadOnlyDictionary<long, bool> RequiresUserPauseByFloorId { get; init; } = new Dictionary<long, bool>();
     public IReadOnlyDictionary<long, NetherRouteHorizonSafetyEvaluation> HorizonEvaluationByFloorId
         { get; init; } = new Dictionary<long, NetherRouteHorizonSafetyEvaluation>();
+    /// <summary>
+    /// Exact visible rank-five Treasure nodes proven on a current branch. The planner only treats
+    /// an objective as reachable when the selected candidate's already-safe horizon contains it;
+    /// this prevents an alternate branch's Treasure from creating a global priority.
+    /// </summary>
+    public IReadOnlySet<long> MandatoryRankFiveKeyObjectiveNodeIds { get; init; } = new HashSet<long>();
 
     public bool IsHpSafe(long floorId) => !HpSafeByFloorId.TryGetValue(floorId, out bool safe) || safe;
     public bool IsKnown(long floorId) => !KnownNodeByFloorId.TryGetValue(floorId, out bool known) || known;
@@ -51,6 +57,13 @@ internal sealed record NetherRouteSafetyContext
         HorizonEvaluationByFloorId.TryGetValue(floorId, out NetherRouteHorizonSafetyEvaluation? value)
             ? value
             : null;
+
+    public bool HasMandatoryRankFiveKeyObjective(long floorId)
+    {
+        NetherRouteHorizonSafetyEvaluation? horizon = HorizonEvaluation(floorId);
+        return horizon?.Steps != null
+            && horizon.Steps.Any(step => MandatoryRankFiveKeyObjectiveNodeIds.Contains(step.NodeId));
+    }
 
     public string DiagnosticDetail(long floorId)
     {
@@ -223,6 +236,8 @@ internal sealed class NetherRoutePlanner
         Candidate selected = safeCandidates
             .OrderByDescending(candidate => candidate.HardSafe)
             .ThenByDescending(candidate => candidate.TerminalReachable)
+            .ThenByDescending(candidate => candidate.Node.NodeType == NetherFloorNodeType.Boss)
+            .ThenByDescending(candidate => context.HasMandatoryRankFiveKeyObjective(candidate.Node.NodeId))
             .ThenBy(candidate => candidate.ProjectedErosionDelta)
             .ThenByDescending(candidate => candidate.ProjectedHpDelta)
             .ThenByDescending(candidate => candidate.SafeCodeOpportunity)

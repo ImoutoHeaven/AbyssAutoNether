@@ -171,7 +171,7 @@ public class NetherEventPolicyTests
             Snapshot(hp: 500, keys: 0),
             [
                 Option(1, new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1)),
-                Option(2, new NetherEffect(NetherEffectKind.Damage, 200)) with
+                Option(2, new NetherEffect(NetherEffectKind.Damage, 80)) with
                 {
                     EventId = 42,
                     EventPartId = 1002,
@@ -255,10 +255,12 @@ public class NetherEventPolicyTests
     [Fact]
     public void Recovery_prefers_erosion_heal_over_neutral_choice()
     {
-        NetherEventDecision decision = EventPolicy().DecideRecovery(
+        NetherEventDecision decision = EventPolicy().DecideRecoveryForRouteAnalysis(
             Snapshot(erosion: 70),
             [Option(1, new NetherEffect(NetherEffectKind.Item, 1)), Option(2, new NetherEffect(NetherEffectKind.ErosionHeal, 3))],
-            Settings()
+            Settings(),
+            [],
+            NetherCodeTransformHardExclusionEvidence.Unknown("test-route-analysis")
         );
 
         Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
@@ -268,10 +270,12 @@ public class NetherEventPolicyTests
     [Fact]
     public void Recovery_allows_a_completely_neutral_safe_fallback_when_no_positive_choice_exists()
     {
-        NetherEventDecision decision = EventPolicy().DecideRecovery(
+        NetherEventDecision decision = EventPolicy().DecideRecoveryForRouteAnalysis(
             Snapshot(erosion: 70),
             [Option(1, new NetherEffect(NetherEffectKind.NetherGoldUsed, 0))],
-            Settings()
+            Settings(),
+            [],
+            NetherCodeTransformHardExclusionEvidence.Unknown("test-route-analysis")
         );
 
         Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
@@ -429,6 +433,55 @@ public class NetherEventPolicyTests
 
         Assert.Equal(NetherEventDecisionKind.Pause, decision.Kind);
         Assert.Equal(NetherPauseReason.UnsafeHp, decision.PauseReason);
+    }
+
+    [Theory]
+    [InlineData(40, false)]
+    [InlineData(80, true)]
+    [InlineData(120, false)]
+    public void Hp_paid_rank_five_event_key_requires_exactly_eighty_damage(
+        int damage,
+        bool expectedSelection
+    )
+    {
+        NetherEventDecision decision = EventPolicy().DecideEvent(
+            Snapshot(hp: 100) with
+            {
+                Characters =
+                [
+                    new NetherCharacterState(1, 100),
+                    new NetherCharacterState(2, 500),
+                ],
+            },
+            [
+                Option(
+                    1,
+                    new NetherEffect(NetherEffectKind.Damage, damage),
+                    new NetherEffect(NetherEffectKind.TreasureKeyGain, 1)
+                ) with
+                {
+                    EventId = 7001,
+                    EventPartId = 7002,
+                    PartialDeathEligibility = new NetherInteractivePartialDeathEligibility(
+                        NetherInteractivePartialDeathObjectiveKind.HpPaidEventKeyForRank5Treasure,
+                        7001,
+                        7002,
+                        7003
+                    )
+                    {
+                        IsKnown = true,
+                        ObjectiveReachable = true,
+                        ExactTreasureRank = 5,
+                        NoBetterAffordableCurrencyKeySource = true,
+                    },
+                },
+            ],
+            Settings()
+        );
+
+        Assert.Equal(expectedSelection, decision.Kind == NetherEventDecisionKind.Select);
+        if (!expectedSelection)
+            Assert.Equal(NetherPauseReason.NoSafeRoute, decision.PauseReason);
     }
 
     [Fact]

@@ -35,6 +35,10 @@ internal sealed record NetherRuntimeInteractivePreEntryCaptureRequest(
         Array.Empty<NetherInteractivePartialDeathEligibility>();
     public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> CommittedProcurementByOption { get; init; } =
         new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+    public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> RecoveryBranchSafetyByPartId { get; init; } =
+        new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+    public bool RequireCompleteRecoveryBranchSafety { get; init; }
+    public NetherRankFiveKeyProcurementDecision? RankFiveKeyProcurement { get; init; }
 }
 
 /// <summary>
@@ -140,6 +144,10 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
             BattleRows = battleRows,
             PartialDeathEligibility = request.PartialDeathEligibility
                 ?? Array.Empty<NetherInteractivePartialDeathEligibility>(),
+            RecoveryBranchSafetyByPartId = request.RecoveryBranchSafetyByPartId
+                ?? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(),
+            RequireCompleteRecoveryBranchSafety = request.RequireCompleteRecoveryBranchSafety,
+            RankFiveKeyProcurement = request.RankFiveKeyProcurement,
             CommittedProcurementByOption = request.CommittedProcurementByOption
                 ?? new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(),
         };

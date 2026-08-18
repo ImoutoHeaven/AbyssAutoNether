@@ -104,6 +104,8 @@ internal sealed record NetherEventCommitment(
     public int CommittedKeyMinimum { get; init; }
     public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
     public bool AllowsPartialActiveDeaths { get; init; }
+    public NetherRankFiveKeyProcurementCommitment? RankFiveKeyProcurementCommitment { get; init; }
+    public NetherRankFiveTreasureIdentity? RankFiveTreasureObjective { get; init; }
     public bool IsValid => EventId > 0
         && EventPartId > 0
         && FloorId > 0
@@ -127,6 +129,8 @@ internal sealed record NetherEventCommitment(
         && CommittedKeyMinimum >= 0
         && (!AllowsPartialActiveDeaths
             || PartialDeathEligibility?.IsKnown == true)
+        && (RankFiveKeyProcurementCommitment == null || RankFiveKeyProcurementCommitment.IsValid)
+        && (RankFiveTreasureObjective == null || RankFiveTreasureObjective.Value.IsValid)
         && (PartialDeathEligibility == null
             || PartialDeathEligibility.IsKnown
                 && PartialDeathEligibility.EventId == EventId
@@ -146,6 +150,8 @@ internal sealed record NetherEventCommitment(
         && option.CommittedGoldMinimum == CommittedGoldMinimum
         && option.CommittedKeyMinimum == CommittedKeyMinimum
         && option.AllowsPartialActiveDeaths == AllowsPartialActiveDeaths
+        && Equals(RankFiveKeyProcurementCommitment, option.RankFiveKeyProcurementCommitment)
+        && RankFiveTreasureObjective == option.RankFiveTreasureObjective
         && PartialDeathMatches(PartialDeathEligibility, option.PartialDeathEligibility)
         && NetherEventPolicy.EffectFingerprintsEqual(Effects, option.Effects)
         && EvidenceMatches(
@@ -192,6 +198,8 @@ internal sealed record NetherEventCommitment(
         && CommittedGoldMinimum == other.CommittedGoldMinimum
         && CommittedKeyMinimum == other.CommittedKeyMinimum
         && AllowsPartialActiveDeaths == other.AllowsPartialActiveDeaths
+        && Equals(RankFiveKeyProcurementCommitment, other.RankFiveKeyProcurementCommitment)
+        && RankFiveTreasureObjective == other.RankFiveTreasureObjective
         && NetherEventPolicy.EffectFingerprintsEqual(Effects, other.Effects)
         && EvidenceMatches(Battle, other.Battle)
         && EvidenceMatches(Reward, other.Reward)
@@ -266,6 +274,39 @@ internal sealed record NetherEventStrategyEvidence
             || HasRouteEvidence && HasResourceEvidence && HasSemanticEvidence);
 }
 
+internal enum NetherRecoveryBranchKind
+{
+    Unknown = 0,
+    Rest,
+    Purification,
+    Transform,
+}
+
+/// <summary>
+/// Exact proof for one Recovery option's complete visible continuation. The native Recovery
+/// popup supplies only the local action; route policy may use this record only after the complete
+/// next visible branch has been captured. An absent proof preserves compatibility with legacy
+/// callers, while a supplied but invalid proof is fail-closed.
+/// </summary>
+internal sealed record NetherRecoveryBranchSafetyEvidence
+{
+    public NetherRecoveryBranchKind BranchKind { get; init; }
+    public bool IsKnown { get; init; }
+    public bool IsCompleteVisibleBranch { get; init; }
+    public bool IsNextVisibleBranchSafe { get; init; }
+    public string UnknownReason { get; init; } = string.Empty;
+    /// <summary>
+    /// Exact held-Code transform eligibility captured with the same Recovery branch. It is
+    /// carried through route binding so the complete popup cannot reconstruct transform safety
+    /// from a later child popup or from a display-only Code list.
+    /// </summary>
+    public NetherCodeTransformEligibilityEvidence? TransformEligibility { get; init; }
+
+    public bool IsAuthoritative => IsKnown
+        && IsCompleteVisibleBranch
+        && BranchKind != NetherRecoveryBranchKind.Unknown;
+}
+
 internal sealed record NetherEventOption(int OptionNumber, IReadOnlyList<NetherEffect> Effects)
 {
     public long EventId { get; init; }
@@ -293,6 +334,9 @@ internal sealed record NetherEventOption(int OptionNumber, IReadOnlyList<NetherE
     /// option from the same native popup.
     /// </summary>
     public NetherEventStrategyEvidence? StrategyEvidence { get; init; }
+    public NetherRecoveryBranchSafetyEvidence? RecoveryBranchSafety { get; init; }
+    public NetherRankFiveKeyProcurementCommitment? RankFiveKeyProcurementCommitment { get; init; }
+    public NetherRankFiveTreasureIdentity? RankFiveTreasureObjective { get; init; }
 }
 
 internal enum NetherEventDecisionKind
@@ -327,6 +371,8 @@ internal sealed record NetherEventDecision
     public long FloorId { get; init; }
     public long NodeId { get; init; }
     public NetherEventCommitment? Commitment { get; init; }
+    public NetherRankFiveKeyProcurementCommitment? RankFiveKeyProcurementCommitment { get; init; }
+    public NetherRankFiveTreasureIdentity? RankFiveTreasureObjective { get; init; }
     public NetherEventBattleEvidence? Battle { get; init; }
     public NetherEventRewardEvidence? Reward { get; init; }
     public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
@@ -355,6 +401,12 @@ internal readonly record struct NetherShopContent(
     public bool Known => known;
     /// <summary>Exact MNetherFloorShopContents.content_type; retained for strategy evidence.</summary>
     public int RawContentType { get; init; }
+    /// <summary>
+    /// Explicit key-product evidence. The current native shop transport exposes only raw content
+    /// fields; until a mapper proves this semantic, the value remains false and key procurement
+    /// fails closed.
+    /// </summary>
+    public bool IsTreasureKey { get; init; }
 }
 
 internal enum NetherShopDecisionKind
@@ -371,8 +423,29 @@ internal sealed record NetherShopDecision
     public int Amount { get; init; }
     /// <summary>Exact server-visible NetherGold debit for a buy transaction.</summary>
     public int GoldCost { get; init; }
+    /// <summary>Exact route-owned procurement commitment carried into the native child action.</summary>
+    public NetherShopProcurementCommitment? ProcurementCommitment { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
+}
+
+/// <summary>Exact branch-local Shop child order for a proven rank-five Treasure objective.</summary>
+internal sealed record NetherShopProcurementCommitment
+{
+    public bool IsKnown { get; init; }
+    public bool RequiresRankFiveKey { get; init; }
+    public NetherRankFiveTreasureIdentity? Objective { get; init; }
+    public long KeyContentId { get; init; }
+    public int KeyCost { get; init; } = 200;
+    public bool RequiresRankFiveBag { get; init; }
+    public long BagContentId { get; init; }
+    public int BagCost { get; init; } = 300;
+    public string UnknownReason { get; init; } = string.Empty;
+
+    public bool IsValid => IsKnown
+        && (!RequiresRankFiveKey || KeyCost == 200)
+        && (!RequiresRankFiveKey || Objective is { IsValid: true })
+        && (!RequiresRankFiveBag || BagCost == 300);
 }
 
 internal sealed class NetherEventPolicy
@@ -448,15 +521,74 @@ internal sealed class NetherEventPolicy
         NetherAutoClimbSettings settings,
         IReadOnlyList<NetherErosionModifier> modifiers,
         NetherCodeTransformHardExclusionEvidence hardExclusions
-    ) => Decide(
+    ) => DecideRecovery(
         snapshot,
         options,
         settings,
         modifiers,
-        isRecovery: true,
         hardExclusions,
-        strategyEvidence: null
+        requireCompleteBranchEvidence: true
     );
+
+    /// <summary>
+    /// Provisional, read-only route discovery before the selected-horizon Recovery proof exists.
+    /// This seam may never dispatch a native payment; popup production uses the fail-closed
+    /// overload above and must provide complete visible branch evidence.
+    /// </summary>
+    internal NetherEventDecision DecideRecoveryForRouteAnalysis(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
+        NetherCodeTransformHardExclusionEvidence hardExclusions
+    ) => DecideRecovery(
+        snapshot,
+        options,
+        settings,
+        modifiers,
+        hardExclusions,
+        requireCompleteBranchEvidence: false
+    );
+
+    public NetherEventDecision DecideRecovery(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
+        NetherCodeTransformHardExclusionEvidence hardExclusions,
+        bool requireCompleteBranchEvidence
+    )
+    {
+        if (TryDecideRecoveryFromCompleteBranchEvidence(
+                snapshot,
+                options,
+                settings,
+                modifiers,
+                hardExclusions,
+                out NetherEventDecision? branchDecision
+            ))
+        {
+            return branchDecision!;
+        }
+
+        if (requireCompleteBranchEvidence)
+        {
+            return Pause(
+                NetherPauseReason.UnknownMasterData,
+                "recovery-complete-visible-branch-unavailable"
+            );
+        }
+
+        return Decide(
+            snapshot,
+            options,
+            settings,
+            modifiers,
+            isRecovery: true,
+            hardExclusions,
+            strategyEvidence: null
+        );
+    }
 
     public NetherEventDecision DecideTreasure(
         NetherSnapshot snapshot,
@@ -532,6 +664,13 @@ internal sealed class NetherEventPolicy
         NetherSnapshot snapshot,
         IReadOnlyList<NetherShopContent> contents,
         NetherAutoClimbSettings settings
+    ) => DecideShop(snapshot, contents, settings, commitment: null);
+
+    public NetherShopDecision DecideShop(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherShopContent> contents,
+        NetherAutoClimbSettings settings,
+        NetherShopProcurementCommitment? commitment
     )
     {
         if (snapshot == null)
@@ -547,6 +686,73 @@ internal sealed class NetherEventPolicy
         // actual equipment candidate, never as a blanket validity condition for the popup.
         if (contents.Any(content => !content.Known || content.ContentId <= 0 || content.Amount <= 0 || content.Price < 0))
             return new NetherShopDecision { Kind = NetherShopDecisionKind.Pause, PauseReason = NetherPauseReason.UnknownMasterData, Detail = "invalid-shop-content" };
+
+        if (commitment is { IsKnown: true })
+        {
+            if (!commitment.IsValid)
+            {
+                return new NetherShopDecision
+                {
+                    Kind = NetherShopDecisionKind.Pause,
+                    PauseReason = NetherPauseReason.UnknownMasterData,
+                    Detail = string.IsNullOrWhiteSpace(commitment.UnknownReason)
+                        ? "invalid-shop-procurement-commitment"
+                        : commitment.UnknownReason,
+                };
+            }
+
+            // A committed key is always the first child. Once the authoritative snapshot shows
+            // that it was acquired, the same commitment may advance to the exact bag child.
+            if (commitment.RequiresRankFiveKey && snapshot.TreasureKeyCount == 0)
+            {
+                NetherShopContent[] exactKeys = contents
+                    .Where(content => content.IsTreasureKey
+                        && content.UsesNetherGold
+                        && content.Price == commitment.KeyCost
+                        && (commitment.KeyContentId <= 0 || content.ContentId == commitment.KeyContentId))
+                    .ToArray();
+                if (exactKeys.Length == 1 && exactKeys[0].Price <= snapshot.NetherGold)
+                {
+                    NetherShopContent key = exactKeys[0];
+                    return new NetherShopDecision
+                    {
+                        Kind = NetherShopDecisionKind.Buy,
+                        ContentId = key.ContentId,
+                        Amount = key.Amount,
+                        GoldCost = key.Price,
+                        ProcurementCommitment = commitment,
+                    };
+                }
+                // Missing/ambiguous/unaffordable key evidence is not permission to buy a bag or
+                // reinterpret another raw content type as a key.
+                return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+            }
+
+            if (commitment.RequiresRankFiveBag)
+            {
+                NetherShopContent[] exactBags = contents
+                    .Where(content => content.ItemId > 0
+                        && content.ItemType == 91
+                        && content.Rarity >= NetherRewardRarity.Gold
+                        && content.UsesNetherGold
+                        && content.Price == commitment.BagCost
+                        && (commitment.BagContentId <= 0 || content.ContentId == commitment.BagContentId))
+                    .ToArray();
+                if (exactBags.Length == 1 && exactBags[0].Price <= snapshot.NetherGold)
+                {
+                    NetherShopContent bag = exactBags[0];
+                    return new NetherShopDecision
+                    {
+                        Kind = NetherShopDecisionKind.Buy,
+                        ContentId = bag.ContentId,
+                        Amount = bag.Amount,
+                        GoldCost = bag.Price,
+                        ProcurementCommitment = commitment,
+                    };
+                }
+                return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+            }
+        }
 
         NetherShopContent? selected = contents
             .Where(content => content.ItemId > 0)
@@ -569,6 +775,109 @@ internal sealed class NetherEventPolicy
             Amount = selected.Value.Amount,
             GoldCost = selected.Value.Price,
         };
+    }
+
+    private bool TryDecideRecoveryFromCompleteBranchEvidence(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        IReadOnlyList<NetherErosionModifier> modifiers,
+        NetherCodeTransformHardExclusionEvidence hardExclusions,
+        out NetherEventDecision? decision
+    )
+    {
+        decision = null;
+        if (options == null || options.Count != 3)
+            return false;
+
+        NetherEventOption[] rests = options.Where(option =>
+            option.Effects?.Count == 1
+            && option.Effects[0].Kind == NetherEffectKind.Heal).ToArray();
+        NetherEventOption[] purifications = options.Where(option =>
+            option.Effects?.Count == 1
+            && option.Effects[0].Kind == NetherEffectKind.ErosionHeal).ToArray();
+        NetherEventOption[] transforms = options.Where(option =>
+            option.Effects?.Count == 1
+            && option.Effects[0].Kind == NetherEffectKind.AbyssCodeTransform).ToArray();
+        if (rests.Length != 1 || purifications.Length != 1 || transforms.Length != 1)
+            return false;
+
+        NetherEventOption rest = rests[0];
+        NetherEventOption purification = purifications[0];
+        NetherEventOption transform = transforms[0];
+        NetherRecoveryBranchSafetyEvidence?[] proofs =
+        [
+            rest.RecoveryBranchSafety,
+            purification.RecoveryBranchSafety,
+            transform.RecoveryBranchSafety,
+        ];
+        bool anyProof = proofs.Any(proof => proof != null);
+        if (!anyProof)
+            return false;
+        if (proofs.Any(proof => proof == null || !proof.IsAuthoritative))
+        {
+            decision = Pause(
+                NetherPauseReason.UnknownMasterData,
+                proofs.FirstOrDefault(proof => proof != null && !proof.IsAuthoritative)?.UnknownReason
+                    ?? "recovery-complete-visible-branch-unavailable"
+            );
+            return true;
+        }
+        if (rest.RecoveryBranchSafety!.BranchKind != NetherRecoveryBranchKind.Rest
+            || purification.RecoveryBranchSafety!.BranchKind != NetherRecoveryBranchKind.Purification
+            || transform.RecoveryBranchSafety!.BranchKind != NetherRecoveryBranchKind.Transform)
+        {
+            decision = Pause(NetherPauseReason.UnknownMasterData, "recovery-branch-kind-mismatch");
+            return true;
+        }
+
+        bool restSafe = rest.RecoveryBranchSafety.IsNextVisibleBranchSafe;
+        bool purificationSafe = purification.RecoveryBranchSafety.IsNextVisibleBranchSafe;
+        NetherEventOption? selected = restSafe == purificationSafe
+            ? restSafe
+                ? SelectRecoveryTieBreak(snapshot, settings, rest, purification)
+                : null
+            : restSafe ? rest : purification;
+        if (selected == null)
+        {
+            decision = Pause(NetherPauseReason.NoSafeRoute, "no-complete-safe-recovery-branch");
+            return true;
+        }
+
+        // Re-run the ordinary public-effect validator on the selected option only. This keeps the
+        // branch proof separate from exact HP/erosion/resource/commitment validation and means a
+        // stale local option can never be selected merely because its continuation was safe.
+        decision = Decide(
+            snapshot,
+            [selected],
+            settings,
+            modifiers,
+            isRecovery: true,
+            hardExclusions,
+            strategyEvidence: null
+        );
+        return true;
+    }
+
+    private static NetherEventOption SelectRecoveryTieBreak(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        NetherEventOption rest,
+        NetherEventOption purification
+    )
+    {
+        bool belowHpSoftLimit = snapshot.Characters.Any(character =>
+            character.IsActive
+            && character.HpPermille < settings.MinimumCharacterHpPermille);
+        if (belowHpSoftLimit)
+            return rest;
+        if (snapshot.ErosionPoint > 0)
+            return purification;
+        return new[] { rest, purification }
+            .OrderBy(option => option.OptionNumber)
+            .ThenBy(option => option.EventId)
+            .ThenBy(option => option.EventPartId)
+            .First();
     }
 
     private NetherEventDecision Decide(
@@ -596,10 +905,28 @@ internal sealed class NetherEventPolicy
         string firstDetail = "no-safe-event-option";
         foreach (NetherEventOption option in options)
         {
-            bool allowPartialActiveDeaths = !isRecovery
-                && IsExactHpPaidKeyEvent(option)
+            bool isHpPaidKeyEvent = !isRecovery && IsExactHpPaidKeyEvent(option);
+            if (!isRecovery
+                && option.Effects.Any(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount > 0)
+                && option.Effects.Any(effect => effect.Kind == NetherEffectKind.TreasureKeyGain)
+                && !isHpPaidKeyEvent)
+            {
+                firstRejection = NetherPauseReason.NoSafeRoute;
+                firstDetail = "hp-paid-key-damage-must-equal-eighty";
+                continue;
+            }
+            bool hasAuthorizedHpPaidKeyProof = option.PartialDeathEligibility?.AllowsHpPaidEventKey == true;
+            bool allowPartialActiveDeaths = isHpPaidKeyEvent
                 && snapshot.TreasureKeyCount == 0
-                && option.PartialDeathEligibility?.AllowsHpPaidEventKey == true;
+                && hasAuthorizedHpPaidKeyProof;
+            if (isHpPaidKeyEvent
+                && snapshot.TreasureKeyCount == 0
+                && !hasAuthorizedHpPaidKeyProof)
+            {
+                firstRejection = NetherPauseReason.NoSafeRoute;
+                firstDetail = "hp-paid-key-objective-proof-unavailable";
+                continue;
+            }
             if (!TryValidateOption(
                     option,
                     snapshot,
@@ -1017,12 +1344,12 @@ internal sealed class NetherEventPolicy
         option?.Effects != null
         && option.Effects.Count == 1
         && option.Effects[0].Kind == NetherEffectKind.Damage
-        && option.Effects[0].Amount > 0;
+        && option.Effects[0].Amount is 40 or 80;
 
     private static bool IsExactHpPaidKeyEvent(NetherEventOption option) =>
         option?.Effects != null
         && option.Effects.Count == 2
-        && option.Effects.Count(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount > 0) == 1
+        && option.Effects.Count(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount == 80) == 1
         && option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyGain && effect.Amount == 1) == 1;
 
     private static int ComputeSemanticPriority(
@@ -1136,6 +1463,8 @@ internal sealed class NetherEventPolicy
         FloorId = candidate.Option.FloorId,
         NodeId = candidate.Option.NodeId,
         PartialDeathEligibility = candidate.Option.PartialDeathEligibility,
+        RankFiveKeyProcurementCommitment = candidate.Option.RankFiveKeyProcurementCommitment,
+        RankFiveTreasureObjective = candidate.Option.RankFiveTreasureObjective,
         Commitment = candidate.Option.RequiresExactBinding
             ? new NetherEventCommitment(
                 candidate.Option.EventId,
@@ -1156,6 +1485,8 @@ internal sealed class NetherEventPolicy
                 CommittedKeyMinimum = candidate.Option.CommittedKeyMinimum,
                 PartialDeathEligibility = candidate.Option.PartialDeathEligibility,
                 AllowsPartialActiveDeaths = candidate.AllowsPartialActiveDeaths,
+                RankFiveKeyProcurementCommitment = candidate.Option.RankFiveKeyProcurementCommitment,
+                RankFiveTreasureObjective = candidate.Option.RankFiveTreasureObjective,
             }
             : null,
         Battle = candidate.Battle,

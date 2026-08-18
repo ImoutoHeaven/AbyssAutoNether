@@ -395,7 +395,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             parts:
             [
                 Part(1001, targetType1: (int)NetherEffectKind.TreasureKeyUsed, parameter1: 1),
-                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 200),
+                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 80),
             ],
             keys: 1
         ));
@@ -430,7 +430,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             parts:
             [
                 Part(1001, targetType1: (int)NetherEffectKind.TreasureKeyUsed, parameter1: 1),
-                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 200),
+                Part(1002, targetType1: (int)NetherEffectKind.Damage, parameter1: 80),
             ],
             keys: 0,
             eligibility:

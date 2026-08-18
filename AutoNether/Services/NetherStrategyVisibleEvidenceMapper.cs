@@ -643,6 +643,7 @@ internal static class NetherStrategyVisibleEvidenceMapper
                 Rank = Math.Max(0, (int)content.Rarity),
                 ItemType = content.ItemType,
                 UsesNetherGold = content.UsesNetherGold,
+                IsTreasureKey = content.IsTreasureKey,
                 IsKnown = known,
                 UnknownReason = known ? string.Empty : "invalid-shop-inventory-row:" + content.ContentId,
             });

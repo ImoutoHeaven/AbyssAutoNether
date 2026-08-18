@@ -1746,6 +1746,8 @@ public class NetherAutoClimbControllerEndToEndTests
                 bridge.BoundEventProcurementCommitments,
                 pair => pair.Key == goldKey && pair.Value.GoldMinimum == 200
             );
+            Assert.True(bridge.RankFiveKeyProcurementBindCount >= 2);
+            Assert.NotNull(bridge.BoundRankFiveKeyProcurement);
 
             NetherInteractiveFloorPreEntrySafetyResult unsafeSpend =
                 new NetherInteractiveFloorPreEntrySafety().Evaluate(
@@ -1757,6 +1759,78 @@ public class NetherAutoClimbControllerEndToEndTests
                 );
             Assert.False(unsafeSpend.IsSafe);
             Assert.Contains("event-committed-budget-would-break", unsafeSpend.Detail);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_controller_recaptures_and_keeps_the_selected_recovery_branch_proof()
+    {
+        NetherSnapshot routeStart = ScriptedRuntimeBridge.RecoveryProofRouteSnapshot(NetherSessionStatus.Play);
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = routeStart,
+            BindRouteSafetyHpToCurrentSnapshot = true,
+            InteractivePreEntryFactory = ScriptedRuntimeBridge.RecoveryProofInteractivePreEntry,
+        };
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            new NetherBattleSettingsLeaseControllerLifecycle(new RecordingLeaseDriver(), retryIntervalUpdates: 1)
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.ExecutingNativeAction, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.True(bridge.InteractivePreEntryCaptureCount >= 3);
+            Assert.True(bridge.RecoveryBranchSafetyBindCount >= 2);
+            Assert.NotEmpty(bridge.BoundRecoveryBranchSafetyByPartId);
+            Assert.Contains(
+                bridge.BoundRecoveryBranchSafetyByPartId.Values,
+                proof => proof.IsKnown && proof.IsCompleteVisibleBranch && proof.IsNextVisibleBranchSafe
+            );
+            Assert.Single(bridge.Invocations, action => action == NetherActionKind.SelectFloor);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
+    public void Production_controller_pauses_when_final_recovery_proof_is_missing_from_the_recapture()
+    {
+        NetherSnapshot routeStart = ScriptedRuntimeBridge.RecoveryProofRouteSnapshot(NetherSessionStatus.Play);
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = routeStart,
+            BindRouteSafetyHpToCurrentSnapshot = true,
+            InteractivePreEntryFactory = ScriptedRuntimeBridge.RecoveryProofInteractivePreEntry,
+            DropBoundRecoveryProofOnCaptureNumber = 3,
+        };
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            new NetherBattleSettingsLeaseControllerLifecycle(new RecordingLeaseDriver(), retryIntervalUpdates: 1)
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.BindingUnavailable, NetherAutoClimbController.PauseReason);
+            Assert.Contains("route-final-proof-handoff-mismatch", NetherAutoClimbController.PauseDetail);
+            Assert.Contains("selected-recovery-proof-absent-or-mismatched", NetherAutoClimbController.PauseDetail);
+            Assert.Empty(bridge.Invocations);
         }
         finally
         {
@@ -3575,14 +3649,14 @@ public class NetherAutoClimbControllerEndToEndTests
             ObjectiveReachable = true,
             ExactTreasureRank = 5,
         };
-        NetherEffect[] effects = [new NetherEffect(NetherEffectKind.Damage, 100)];
+        NetherEffect[] effects = [new NetherEffect(NetherEffectKind.Damage, 80)];
         NetherEventCommitment commitment = new(
             EventId: 42,
             EventPartId: 20044,
             OptionNumber: 1,
             Effects: effects,
             ProjectedErosion: 20,
-            HpDelta: -100
+            HpDelta: -80
         )
         {
             FloorId = 2,
@@ -3644,7 +3718,7 @@ public class NetherAutoClimbControllerEndToEndTests
                         NodeId = 2,
                         RequiresExactBinding = true,
                         ProjectedErosion = 20,
-                        ProjectedHpDelta = -100,
+            ProjectedHpDelta = -80,
                         ProjectedNetherGold = 10,
                         ProjectedTreasureKeys = 0,
                         PartialDeathEligibility = proof,
@@ -3655,7 +3729,7 @@ public class NetherAutoClimbControllerEndToEndTests
             new NetherFloorEventPartMasterRow(
                 20044,
                 (int)NetherEffectKind.Damage,
-                100,
+                80,
                 0,
                 0,
                 0,
@@ -3666,11 +3740,11 @@ public class NetherAutoClimbControllerEndToEndTests
             ),
             after,
             NetherActionKind.SelectEventOption,
-            startHp: 100,
+            startHp: 80,
             startCharacters:
             [
-                new NetherCharacterState(1, 100),
-                new NetherCharacterState(2, 400),
+                new NetherCharacterState(1, 80),
+                new NetherCharacterState(2, 380),
             ],
             partialDeathEligibility: proof,
             startKeys: 0
@@ -4689,6 +4763,14 @@ public class NetherAutoClimbControllerEndToEndTests
         private readonly NetherRouteOwnedEventProcurementProducer _routeOwnedEventProcurementProducer = new();
         public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> BoundEventProcurementCommitments { get; private set; } =
             new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> BoundRecoveryBranchSafetyByPartId { get; private set; } =
+            new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+        public NetherRankFiveKeyProcurementDecision? BoundRankFiveKeyProcurement { get; private set; }
+        public int RecoveryBranchSafetyBindCount { get; private set; }
+        public int RankFiveKeyProcurementBindCount { get; private set; }
+        public int InteractivePreEntryCaptureCount { get; private set; }
+        public bool DropBoundRecoveryProofOnNextCapture { get; set; }
+        public int DropBoundRecoveryProofOnCaptureNumber { get; set; }
         public bool BindRouteSafetyHpToCurrentSnapshot { get; set; }
         public NetherActiveCodeErosionProjection ActiveCodeErosion { get; set; } =
             KnownEmptyCodeProjection();
@@ -4921,11 +5003,67 @@ public class NetherAutoClimbControllerEndToEndTests
             ? new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>()
             : new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(commitments);
 
+        public void BindRecoveryBranchSafetyProofs(
+            IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>? proofs
+        )
+        {
+            RecoveryBranchSafetyBindCount++;
+            BoundRecoveryBranchSafetyByPartId = proofs == null
+                ? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
+                : new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(proofs);
+        }
+
+        public void BindRankFiveKeyProcurement(NetherRankFiveKeyProcurementDecision? decision)
+        {
+            RankFiveKeyProcurementBindCount++;
+            BoundRankFiveKeyProcurement = decision;
+        }
+
         public NetherRuntimeInteractivePreEntryInputsResult TryCaptureInteractivePreEntryInputs(
             NetherSnapshot snapshot,
             NetherAutoClimbSettings settings
-        ) => InteractivePreEntryFactory?.Invoke(snapshot, settings)
-            ?? NetherRuntimeInteractivePreEntryInputsResult.Failure("e2e-no-route-interactive-master-needed");
+        )
+        {
+            InteractivePreEntryCaptureCount++;
+            NetherRuntimeInteractivePreEntryInputsResult captured = InteractivePreEntryFactory?.Invoke(snapshot, settings)
+                ?? NetherRuntimeInteractivePreEntryInputsResult.Failure("e2e-no-route-interactive-master-needed");
+            if (!captured.IsSuccess)
+                return captured;
+
+            bool dropRecoveryProof = DropBoundRecoveryProofOnNextCapture
+                || DropBoundRecoveryProofOnCaptureNumber == InteractivePreEntryCaptureCount;
+            DropBoundRecoveryProofOnNextCapture = false;
+            if (DropBoundRecoveryProofOnCaptureNumber == InteractivePreEntryCaptureCount)
+                DropBoundRecoveryProofOnCaptureNumber = 0;
+            var entries = new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
+            foreach ((long nodeId, NetherRuntimeInteractivePreEntryCaptureResult entry) in captured.ByFloorNodeId)
+            {
+                NetherInteractiveFloorPreEntrySafetyInput? input = entry.Input;
+                if (input == null)
+                {
+                    entries[nodeId] = entry;
+                    continue;
+                }
+                entries[nodeId] = entry with
+                {
+                    Input = input with
+                    {
+                        RecoveryBranchSafetyByPartId = dropRecoveryProof
+                            ? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
+                            : new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(
+                                BoundRecoveryBranchSafetyByPartId
+                            ),
+                        RequireCompleteRecoveryBranchSafety = RecoveryBranchSafetyBindCount > 0,
+                        RankFiveKeyProcurement = BoundRankFiveKeyProcurement,
+                    },
+                };
+            }
+            return captured with
+            {
+                SnapshotFingerprint = captured.SnapshotFingerprint ?? snapshot.Fingerprint,
+                ByFloorNodeId = entries,
+            };
+        }
 
         public NetherRuntimeCodeCandidatesResult TryGetCodeCandidates() => CodeCandidates;
 
@@ -5725,6 +5863,118 @@ public class NetherAutoClimbControllerEndToEndTests
             CodeHash = "nether-codes:none",
             MapHash = "interactive:" + status + ":" + floorId + ":" + gold,
         };
+
+        internal static NetherSnapshot RecoveryProofRouteSnapshot(NetherSessionStatus status) =>
+            InteractiveRouteSnapshot(status, floorId: 1, gold: 0) with
+            {
+                CurrentNodeId = 1,
+                TreasureKeyCount = 1,
+                Floors = new[]
+                {
+                    Floor(1, 1, NetherFloorNodeType.Event),
+                    Floor(2, 2, NetherFloorNodeType.Recovery, new[] { 1L }),
+                    Floor(3, 3, NetherFloorNodeType.Boss, new[] { 2L }),
+                },
+            };
+
+        internal static NetherRuntimeInteractivePreEntryInputsResult RecoveryProofInteractivePreEntry(
+            NetherSnapshot snapshot,
+            NetherAutoClimbSettings settings
+        )
+        {
+            NetherInteractiveOptionProjection eventProjection = new(
+                1,
+                ErosionDelta: 0,
+                HpDelta: 0,
+                ExpectedEffects: new[] { new NetherEffect(NetherEffectKind.Heal, 1) }
+            )
+            {
+                EventId = 100,
+                EventPartId = 1001,
+                FloorId = 1,
+                NodeId = 1,
+                IsKnown = true,
+                HasRouteSafetyEvidence = true,
+                RouteSafetyAllowed = true,
+            };
+            NetherInteractiveOptionProjection restProjection = new(
+                1,
+                ErosionDelta: 0,
+                HpDelta: 0,
+                ExpectedEffects: new[] { new NetherEffect(NetherEffectKind.Heal, 200) }
+            )
+            {
+                EventId = 200,
+                EventPartId = 2001,
+                FloorId = 2,
+                NodeId = 2,
+                IsKnown = true,
+                HasRouteSafetyEvidence = true,
+                RouteSafetyAllowed = true,
+            };
+            NetherInteractiveOptionProjection purificationProjection = new(
+                2,
+                ErosionDelta: -20,
+                HpDelta: 0,
+                ExpectedEffects: new[] { new NetherEffect(NetherEffectKind.ErosionHeal, 20) }
+            )
+            {
+                EventId = 200,
+                EventPartId = 2002,
+                FloorId = 2,
+                NodeId = 2,
+                IsKnown = true,
+                HasRouteSafetyEvidence = true,
+                RouteSafetyAllowed = true,
+            };
+            var entries = new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
+            foreach (NetherFloorNode floor in snapshot.Floors.Where(node =>
+                node.NodeType is NetherFloorNodeType.Event or NetherFloorNodeType.Recovery))
+            {
+                NetherInteractiveFloorPreEntrySafetyResult safety = floor.NodeType == NetherFloorNodeType.Event
+                    ? NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [100] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [100] = eventProjection },
+                        new NetherInteractiveWorstCaseProjection(0, 0),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(100, 1001, 1)] = eventProjection,
+                        }
+                    )
+                    : NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [200] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [200] = restProjection },
+                        new NetherInteractiveWorstCaseProjection(0, 0),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(200, 2001, 1)] = restProjection,
+                            [new NetherInteractiveEventOptionKey(200, 2002, 2)] = purificationProjection,
+                        }
+                    );
+                NetherInteractiveFloorPreEntrySafetyInput input = new(
+                    floor.NodeType,
+                    floor.FloorId,
+                    new[] { new NetherFloorMasterBoundsRow(floor.FloorId, 0, 0) },
+                    Array.Empty<NetherFloorEventMasterRow>(),
+                    Array.Empty<NetherFloorEventPartMasterRow>(),
+                    snapshot.ErosionPoint,
+                    snapshot.Characters.Where(character => character.IsActive).Select(character => character.HpPermille).ToArray(),
+                    snapshot.NetherGold,
+                    snapshot.TreasureKeyCount,
+                    settings
+                )
+                {
+                    FloorNodeId = floor.NodeId,
+                };
+                entries[floor.NodeId] = new NetherRuntimeInteractivePreEntryCaptureResult
+                {
+                    IsCaptured = true,
+                    Input = input,
+                    Safety = safety,
+                };
+            }
+            return NetherRuntimeInteractivePreEntryInputsResult.Success(entries, snapshot.Fingerprint);
+        }
 
         internal static NetherSnapshot ProcurementRouteSnapshot(NetherSessionStatus status) =>
             InteractiveRouteSnapshot(status, floorId: 1, gold: 0) with

@@ -223,6 +223,7 @@ internal static class NetherActionReconcilePolicy
             EventFloorId = stage.EventCommitment?.FloorId ?? 0,
             EventNodeId = stage.EventCommitment?.NodeId ?? 0,
             EventCommitment = stage.EventCommitment,
+            ShopProcurementCommitment = stage.ShopProcurementCommitment,
         };
         return stage.PopupKind switch
         {
@@ -311,6 +312,8 @@ internal static class NetherActionReconcilePolicy
                     RewardEvidence = commitment.Reward,
                     PartialDeathEligibility = commitment.PartialDeathEligibility,
                     AllowsPartialActiveDeaths = commitment.AllowsPartialActiveDeaths,
+                    RankFiveKeyProcurementCommitment = commitment.RankFiveKeyProcurementCommitment,
+                    RankFiveTreasureObjective = commitment.RankFiveTreasureObjective,
                 })))
         {
             return NetherActionOutcome.Ambiguous;
@@ -424,6 +427,19 @@ internal static class NetherActionReconcilePolicy
     {
         if (action.ContentId <= 0 || action.ContentAmount <= 0 || action.GoldCost < 0)
             return NetherActionOutcome.Ambiguous;
+        if (action.ShopProcurementCommitment is NetherShopProcurementCommitment procurement)
+        {
+            if (!procurement.IsValid
+                || procurement.RequiresRankFiveKey
+                    && (procurement.KeyContentId != action.ContentId
+                        || procurement.KeyCost != action.GoldCost)
+                || procurement.RequiresRankFiveBag
+                    && (procurement.BagContentId != action.ContentId
+                        || procurement.BagCost != action.GoldCost))
+            {
+                return NetherActionOutcome.Ambiguous;
+            }
+        }
 
         int itemDelta = GetAcquiredItemAmount(after, action.ContentId) - GetAcquiredItemAmount(before, action.ContentId);
         return itemDelta == action.ContentAmount

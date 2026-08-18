@@ -68,6 +68,12 @@ internal sealed record NetherRuntimePopupContext
     public int RawFloorType { get; init; }
     public IReadOnlyList<NetherEventOption> Options { get; init; } = Array.Empty<NetherEventOption>();
     public IReadOnlyList<NetherShopContent> ShopContents { get; init; } = Array.Empty<NetherShopContent>();
+    /// <summary>Optional exact sequential key-then-bag commitment for the current Shop popup.</summary>
+    public NetherShopProcurementCommitment? ShopProcurementCommitment { get; init; }
+    /// <summary>Exact selected-branch rank-five procurement decision carried into popup policy.</summary>
+    public NetherRankFiveKeyProcurementDecision? RankFiveKeyProcurement { get; init; }
+    /// <summary>Production captures must not score a Recovery popup without complete branch proof.</summary>
+    public bool RequireCompleteRecoveryBranchSafety { get; init; }
     /// <summary>
     /// Optional route commitment captured before the native popup was opened. A live popup must
     /// match this identity before any option payment is dispatched.
@@ -301,21 +307,27 @@ internal static class NetherPopupDispatchPolicy
                     popup.Options,
                     settings,
                     modifiers,
-                    transformHardExclusions
+                    transformHardExclusions,
+                    popup.RequireCompleteRecoveryBranchSafety
                 ),
                 0,
                 popup.ExpectedEventCommitment,
                 popup.ExpectedEventCommitments,
-                requireExpectedCommitment: false
+                requireExpectedCommitment: popup.Options.Any(option => option.RequiresExactBinding)
             ),
             NetherRuntimePopupKind.Treasure => FromEventDecision(
                 EventPolicy.DecideTreasure(snapshot, popup.Options, settings, modifiers),
                 0,
                 popup.ExpectedEventCommitment,
                 popup.ExpectedEventCommitments,
-                requireExpectedCommitment: false
+                requireExpectedCommitment: popup.Options.Any(option => option.RequiresExactBinding)
             ),
-            NetherRuntimePopupKind.Shop => FromShopDecision(EventPolicy.DecideShop(snapshot, popup.ShopContents, settings)),
+            NetherRuntimePopupKind.Shop => FromShopDecision(EventPolicy.DecideShop(
+                snapshot,
+                popup.ShopContents,
+                settings,
+                popup.ShopProcurementCommitment
+            )),
             NetherRuntimePopupKind.Continue or NetherRuntimePopupKind.ReturnItems =>
                 new NetherPopupDispatchDecision { Kind = NetherPopupDispatchKind.AwaitNativeFlow },
             _ => Pause(NetherPauseReason.UnsupportedPopup, "unsupported-or-missing-native-popup:" + popup.Kind),
@@ -380,7 +392,10 @@ internal static class NetherPopupDispatchPolicy
             && (requireExpectedCommitment && selectedExpectedCommitment == null
                 || selectedExpectedCommitment is NetherEventCommitment expected
                 && (decision.Commitment == null
+                    || decision.Commitment is not NetherEventCommitment actual
+                    || !actual.IsValid
                     || !expected.IsValid
+                    || !expected.Matches(actual)
                     || !expected.Matches(new NetherEventOption(
                     decision.OptionNumber,
                     decision.ExpectedEffects
@@ -396,6 +411,8 @@ internal static class NetherPopupDispatchPolicy
                         AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
                         CommittedGoldMinimum = decision.CommittedGoldMinimum,
                         CommittedKeyMinimum = decision.CommittedKeyMinimum,
+                        RankFiveKeyProcurementCommitment = decision.RankFiveKeyProcurementCommitment,
+                        RankFiveTreasureObjective = decision.RankFiveTreasureObjective,
                 }, decision.ProjectedErosion, decision.HpDelta, decision.Battle, decision.Reward,
                     decision.ProjectedNetherGold, decision.ProjectedTreasureKeys))))
         {
@@ -456,6 +473,7 @@ internal static class NetherPopupDispatchPolicy
                 ContentId = decision.ContentId,
                 ContentAmount = decision.Amount,
                 GoldCost = decision.GoldCost,
+                ShopProcurementCommitment = decision.ProcurementCommitment,
             },
             Detail = "popup-shop-buy:" + decision.ContentId + ":" + decision.Amount + ":" + decision.GoldCost,
         },

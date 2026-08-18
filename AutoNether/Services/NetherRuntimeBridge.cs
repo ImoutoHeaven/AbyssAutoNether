@@ -96,6 +96,16 @@ internal interface INetherRuntimeBridge : INetherRuntimeParentDriver, INetherRea
         IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? commitments
     );
 
+    /// <summary>Binds selected-horizon Recovery branch proofs for the next production capture.</summary>
+    void BindRecoveryBranchSafetyProofs(
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>? proofs
+    );
+
+    /// <summary>Binds the exact selected-branch rank-five procurement decision.</summary>
+    void BindRankFiveKeyProcurement(
+        NetherRankFiveKeyProcurementDecision? decision
+    );
+
     /// <summary>
     /// Copies one immutable strategy package from the same current FloorSelection owner and
     /// authoritative snapshot. Missing optional mechanics stay component-local unknowns.
@@ -263,6 +273,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
     private IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> _pendingEventProcurementByOption =
         new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+    private IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> _pendingRecoveryBranchSafetyByPartId =
+        new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+    private bool _requireCompleteRecoveryBranchSafety;
+    private NetherRankFiveKeyProcurementDecision? _pendingRankFiveKeyProcurement;
     private readonly NetherRouteOwnedEventProcurementProducer _routeOwnedEventProcurementProducer = new();
     private NetherSnapshotFingerprint? _authoritativeRouteSnapshotFingerprint;
     private long _runtimeGeneration;
@@ -329,6 +343,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
             _pendingEventProcurementByOption =
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+            _pendingRecoveryBranchSafetyByPartId =
+                new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+            _requireCompleteRecoveryBranchSafety = false;
+            _pendingRankFiveKeyProcurement = null;
             _authoritativeRouteSnapshotFingerprint = snapshotFingerprint;
         }
     }
@@ -351,6 +369,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
                 _pendingEventProcurementByOption =
                     new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+                _pendingRecoveryBranchSafetyByPartId =
+                    new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+                _requireCompleteRecoveryBranchSafety = false;
+                _pendingRankFiveKeyProcurement = null;
             }
             _routeOwnedEventProcurementProducer.InvalidateForSnapshot(snapshotFingerprint);
             _authoritativeRouteSnapshotFingerprint = snapshotFingerprint;
@@ -375,6 +397,27 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             // the already-proven route branch no longer exists.
             _routeOwnedEventProcurementProducer.Commit(_pendingEventProcurementByOption);
         }
+    }
+
+    public void BindRecoveryBranchSafetyProofs(
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>? proofs
+    )
+    {
+        lock (_gate)
+        {
+            _pendingRecoveryBranchSafetyByPartId = proofs == null
+                ? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
+                : new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(proofs);
+            // Once production asks for a second capture, no Recovery popup may use the legacy
+            // local scorer. An empty map is intentionally meaningful: it pauses on absent proof.
+            _requireCompleteRecoveryBranchSafety = true;
+        }
+    }
+
+    public void BindRankFiveKeyProcurement(NetherRankFiveKeyProcurementDecision? decision)
+    {
+        lock (_gate)
+            _pendingRankFiveKeyProcurement = decision;
     }
 
     public void CommitRouteOwnedEventProcurementCommitments(
@@ -1127,6 +1170,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         ObserveAuthoritativeRouteSnapshot(snapshot.Fingerprint);
         IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> committedProcurement;
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryBranchSafetyByPartId;
+        bool requireCompleteRecoveryBranchSafety;
+        NetherRankFiveKeyProcurementDecision? rankFiveKeyProcurement;
         lock (_gate)
         {
             _latestInteractivePreEntryInputs = null;
@@ -1140,6 +1186,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(committedProcurement);
             _pendingEventProcurementByOption =
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+            recoveryBranchSafetyByPartId = new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(
+                _pendingRecoveryBranchSafetyByPartId
+            );
+            requireCompleteRecoveryBranchSafety = _requireCompleteRecoveryBranchSafety;
+            rankFiveKeyProcurement = _pendingRankFiveKeyProcurement;
         }
 
         object? floorSelection;
@@ -1226,6 +1277,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         ItemRows = itemRows,
                         BattleRows = battleRows,
                         CommittedProcurementByOption = committedProcurement,
+                        RecoveryBranchSafetyByPartId = recoveryBranchSafetyByPartId,
+                        RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,
+                        RankFiveKeyProcurement = rankFiveKeyProcurement,
                     }
                 );
                 if (!result.IsCaptured || result.Input == null)
@@ -1918,14 +1972,28 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             NetherStrategyEvidencePackage? strategyPackage;
             NetherRuntimeInteractivePreEntryInputsResult? interactiveInputs;
             NetherAutoClimbSettings? strategySettings;
+            NetherRankFiveKeyProcurementDecision? rankFiveKeyProcurement;
+            bool requireCompleteRecoveryBranchSafety;
             lock (_gate)
             {
                 strategyPackage = _latestStrategyEvidencePackage;
                 interactiveInputs = _latestInteractivePreEntryInputs;
                 strategySettings = _latestStrategySettings;
+                rankFiveKeyProcurement = _pendingRankFiveKeyProcurement;
+                requireCompleteRecoveryBranchSafety = _requireCompleteRecoveryBranchSafety;
             }
+            NetherShopProcurementCommitment? shopProcurementCommitment =
+                NetherEventProductionEvidenceBinding.BindRankFiveShopCommitment(
+                    mapped.Popup,
+                    rankFiveKeyProcurement
+                ).ShopProcurementCommitment;
             context = NetherEventProductionEvidenceBinding.Bind(
-                context,
+                context with
+                {
+                    RankFiveKeyProcurement = rankFiveKeyProcurement,
+                    RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,
+                    ShopProcurementCommitment = shopProcurementCommitment,
+                },
                 strategyPackage,
                 interactiveInputs,
                 strategySettings ?? new NetherAutoClimbSettings()
@@ -4015,6 +4083,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
             _pendingEventProcurementByOption =
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+            _pendingRecoveryBranchSafetyByPartId =
+                new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+            _requireCompleteRecoveryBranchSafety = false;
+            _pendingRankFiveKeyProcurement = null;
             _routeOwnedEventProcurementProducer.Clear();
             _authoritativeRouteSnapshotFingerprint = null;
             _runtimeGeneration = 0;
@@ -4180,6 +4252,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
         _pendingEventProcurementByOption =
             new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+        _pendingRecoveryBranchSafetyByPartId =
+            new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+        _requireCompleteRecoveryBranchSafety = false;
+        _pendingRankFiveKeyProcurement = null;
         _routeOwnedEventProcurementProducer.Clear();
         _authoritativeRouteSnapshotFingerprint = null;
         ClearTreasureConfirmationFlow();
@@ -9269,7 +9345,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         MNetherFloorEvents? eventRow = null;
         long[] declaredPartIds = Array.Empty<long>();
-        if (kind == NetherRuntimePopupKind.Event)
+        if (kind is NetherRuntimePopupKind.Event
+            or NetherRuntimePopupKind.Recovery
+            or NetherRuntimePopupKind.Treasure)
         {
             if (!TryReadMember(registration.Controller, "_mNetherEvents", out object? rawEvent)
                 || rawEvent is not MNetherFloorEvents nativeEvent
@@ -9314,7 +9392,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
 
         var options = new List<NetherEventOption>();
-        if (kind == NetherRuntimePopupKind.Event)
+        if (kind is NetherRuntimePopupKind.Event
+            or NetherRuntimePopupKind.Recovery
+            or NetherRuntimePopupKind.Treasure)
         {
             bool foundEmptyPart = false;
             var seenDeclared = new HashSet<long>();
@@ -9360,32 +9440,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     eventRow!.id,
                     part!.id,
                     index + 1,
-                    effects,
-                    mapped,
-                    detail
-                ));
-            }
-        }
-        else
-        {
-            int optionNumber = 1;
-            foreach (MNetherFloorEventParts part in rawById.Values.OrderBy(row => row.id))
-            {
-                IReadOnlyList<NetherEffect>? effects;
-                string detail;
-                bool mapped = TryMapEventPart(
-                    part,
-                    itemById,
-                    ambiguousItemIds,
-                    battleById,
-                    ambiguousBattleIds,
-                    out effects,
-                    out detail
-                );
-                options.Add(RuntimeEventOption(
-                    eventRow?.id ?? 0,
-                    0,
-                    optionNumber++,
                     effects,
                     mapped,
                     detail

@@ -82,6 +82,12 @@ internal sealed record NetherRouteHorizonSafetyEvaluation
         Array.Empty<NetherRouteHorizonRejection>();
     public IReadOnlyList<NetherRouteHorizonStepAudit> Steps { get; init; } =
         Array.Empty<NetherRouteHorizonStepAudit>();
+    /// <summary>
+    /// The exact visible steps used for this evaluation. Production branch proofs replace only
+    /// the option-bearing first step and re-run this same horizon policy through the suffix.
+    /// </summary>
+    public IReadOnlyList<NetherRouteHorizonStep> HorizonSteps { get; init; } =
+        Array.Empty<NetherRouteHorizonStep>();
 }
 
 /// <summary>
@@ -305,6 +311,7 @@ internal sealed class NetherRouteHorizonSafetyPolicy
                 && erosion is >= RiskPreferredMinimum and <= RiskOperatingMaximum,
             RequiresAuthoritativePostBattleReplan = requiresPostBattleReplan,
             Steps = Array.AsReadOnly(audits.ToArray()),
+            HorizonSteps = Array.AsReadOnly(input.Steps.ToArray()),
         };
     }
 

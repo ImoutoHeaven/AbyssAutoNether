@@ -315,17 +315,11 @@ internal sealed class NetherRouteOwnedEventProcurementProducer
             && IsLaterOnSelectedPath(route, eventNodeId, row.NodeId)
             && HasSelectedTerminalPath(row.NodeId, route, floors, context)))
         {
-            NetherStrategyVisibleContentRow[] rewards = rows
-                .Where(row => row != null
-                    && row.Kind == NetherStrategyVisibleContentKind.Item
-                    && row.NodeId == treasure.NodeId
-                    && row.EventId == treasure.EventId
-                    && row.IsKnown)
-                .ToArray();
-            if (rewards.Length == 1
-                && rewards[0].ItemType == 91
-                && rewards[0].ItemRarity == (int)NetherRewardRarity.UniqueWeapon
-                && NetherEventNativeMapping.IsKnownRewardRarity((NetherRewardRarity)rewards[0].ItemRarity))
+            if (NetherRankFiveKeyProcurementPolicy.TryFindRankFiveTreasureIdentity(
+                    rows,
+                    treasure,
+                    out NetherRankFiveTreasureIdentity _
+                ))
             {
                 return true;
             }
@@ -340,8 +334,8 @@ internal sealed class NetherRouteOwnedEventProcurementProducer
     {
         if (route.SelectedPathNodeIds == null)
             return false;
-        int startIndex = PathIndexOf(route.SelectedPathNodeIds, startNodeId);
-        int targetIndex = PathIndexOf(route.SelectedPathNodeIds, targetNodeId);
+        int startIndex = NetherPathIndexUtility.PathIndexOf(route.SelectedPathNodeIds, startNodeId);
+        int targetIndex = NetherPathIndexUtility.PathIndexOf(route.SelectedPathNodeIds, targetNodeId);
         return startIndex >= 0 && targetIndex > startIndex;
     }
 
@@ -354,7 +348,7 @@ internal sealed class NetherRouteOwnedEventProcurementProducer
     {
         if (route.SelectedPathNodeIds == null)
             return false;
-        int startIndex = PathIndexOf(route.SelectedPathNodeIds, startNodeId);
+        int startIndex = NetherPathIndexUtility.PathIndexOf(route.SelectedPathNodeIds, startNodeId);
         if (startIndex < 0)
             return false;
         Dictionary<long, NetherFloorNode> nodes = floors
@@ -371,16 +365,6 @@ internal sealed class NetherRouteOwnedEventProcurementProducer
                 return node.NodeType == NetherFloorNodeType.Boss;
         }
         return false;
-    }
-
-    private static int PathIndexOf(IReadOnlyList<long> path, long nodeId)
-    {
-        for (int index = 0; index < path.Count; index++)
-        {
-            if (path[index] == nodeId)
-                return index;
-        }
-        return -1;
     }
 
     private static bool IsSafeNode(NetherRouteSafetyContext context, long nodeId) =>
@@ -487,6 +471,11 @@ internal sealed record NetherRuntimeRouteSafetyData
     /// non-materialized inventory remains an unknown source.
     /// </summary>
     public NetherStrategyVisibleMapEvidence? VisibleMap { get; init; }
+    /// <summary>
+    /// Complete Recovery transform eligibility captured by Controller from the held-code policy
+    /// seam. It is copied into each branch proof before that proof is rebound to native capture.
+    /// </summary>
+    public NetherCodeTransformEligibilityEvidence? RecoveryTransformEligibility { get; init; }
     public string Detail { get; init; } = string.Empty;
 }
 
@@ -505,6 +494,16 @@ internal sealed record NetherProductionRouteSafetyPlan
         EventProcurementCommitments { get; init; } =
         new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
     public NetherRouteBranchIdentity? RouteIdentity { get; init; }
+    public NetherRankFiveKeyProcurementDecision RankFiveKeyProcurement { get; init; } =
+        NetherRankFiveKeyProcurementDecision.Unknown("rank-five-procurement-not-evaluated");
+    /// <summary>
+    /// Exact Recovery option proofs produced from the same selected route horizon. The bridge
+    /// binds this map before the next native capture; an empty map is meaningful when production
+    /// requires proof and therefore causes the Recovery policy to pause.
+    /// </summary>
+    public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> RecoveryBranchSafetyByPartId { get; init; } =
+        new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+    public NetherCodeTransformEligibilityEvidence? RecoveryTransformEligibility { get; init; }
 }
 
 /// <summary>
@@ -525,6 +524,20 @@ internal sealed class NetherRouteSafetyProductionCoordinator
     private readonly NetherFloorMasterBoundsMapper _floorBoundsMapper = new();
     private readonly NetherRouteSafetyContextBuilder _contextBuilder = new();
     private readonly NetherRoutePlanner _routePlanner = new();
+    private readonly NetherRankFiveKeyProcurementPolicy _rankFiveKeyProcurementPolicy = new();
+    private readonly NetherErosionPolicy _erosionPolicy = new();
+    private readonly NetherRouteHorizonSafetyPolicy _horizonSafetyPolicy = new();
+
+    private readonly record struct RankFiveBattleEntryProjection(
+        int? MaximumBattleEntryErosionPoint,
+        bool RecoveryToSeventyOrBelowCertainBeforeNextBattle
+    );
+
+    private readonly record struct RecoveryBranchSimulation(
+        bool IsKnown,
+        bool IsSafe,
+        string Detail
+    );
 
     public NetherProductionRouteSafetyPlan Plan(
         NetherSnapshot snapshot,
@@ -647,7 +660,31 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             StrategyMode = settings.StrategyMode,
             PrimaryResearchFamily = settings.ResearchPrimaryFamily,
         });
+        NetherRankFiveKeyProcurementDecision[] horizonProcurementDecisions =
+            EvaluateRankFiveHorizonDecisions(snapshot, context, serverFloors, runtime.VisibleMap);
+        context = context with
+        {
+            MandatoryRankFiveKeyObjectiveNodeIds = horizonProcurementDecisions
+                .Where(decision => decision.IsKnown && decision.HasMandatoryObjective)
+                .Select(decision => decision.Objective.ObjectiveNodeId)
+                .Where(nodeId => nodeId > 0)
+                .ToHashSet(),
+        };
         NetherRoutePlan route = _routePlanner.Plan(snapshot, context);
+        NetherRankFiveKeyProcurementDecision rankFiveProcurement = EvaluateRankFiveSelectedRoute(
+            snapshot,
+            context,
+            serverFloors,
+            runtime.VisibleMap,
+            route.SelectedPathNodeIds
+        );
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryBranchSafety =
+            BuildRecoveryBranchSafetyEvidence(
+                context,
+                route,
+                interactivePreEntry,
+                runtime.RecoveryTransformEligibility
+            );
         IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> runtimeCommitments =
             runtime.RouteIdentity is { } runtimeIdentity
                 && route.BranchIdentity is { } routeIdentity
@@ -682,8 +719,510 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             BattleProjectionByFloorId = payloads,
             EventProcurementCommitments = routeCommitments,
             RouteIdentity = route.BranchIdentity,
+            RankFiveKeyProcurement = rankFiveProcurement,
+            RecoveryBranchSafetyByPartId = recoveryBranchSafety,
+            RecoveryTransformEligibility = runtime.RecoveryTransformEligibility,
         };
     }
+
+    private NetherRankFiveKeyProcurementDecision[] EvaluateRankFiveHorizonDecisions(
+        NetherSnapshot snapshot,
+        NetherRouteSafetyContext context,
+        IReadOnlyList<NetherFloorNode> floors,
+        NetherStrategyVisibleMapEvidence? visibleMap
+    )
+    {
+        if (visibleMap == null || visibleMap.ContentRows == null)
+            return Array.Empty<NetherRankFiveKeyProcurementDecision>();
+        return context.HorizonEvaluationByFloorId
+            .Where(pair => pair.Value != null && pair.Value.IsEligible && pair.Value.Steps.Count > 0)
+            .Select(pair => EvaluateRankFivePath(
+                snapshot,
+                context,
+                floors,
+                visibleMap,
+                pair.Value.Steps.Select(step => step.NodeId).ToArray()
+            ))
+            .ToArray();
+    }
+
+    private NetherRankFiveKeyProcurementDecision EvaluateRankFiveSelectedRoute(
+        NetherSnapshot snapshot,
+        NetherRouteSafetyContext context,
+        IReadOnlyList<NetherFloorNode> floors,
+        NetherStrategyVisibleMapEvidence? visibleMap,
+        IReadOnlyList<long> selectedPathNodeIds
+    ) => selectedPathNodeIds == null || selectedPathNodeIds.Count < 2
+        ? NetherRankFiveKeyProcurementDecision.Unknown("rank-five-selected-safe-branch-unavailable")
+        : EvaluateRankFivePath(snapshot, context, floors, visibleMap, selectedPathNodeIds);
+
+    private NetherRankFiveKeyProcurementDecision EvaluateRankFivePath(
+        NetherSnapshot snapshot,
+        NetherRouteSafetyContext context,
+        IReadOnlyList<NetherFloorNode> floors,
+        NetherStrategyVisibleMapEvidence? visibleMap,
+        IReadOnlyList<long> path
+    )
+    {
+        if (visibleMap == null || path == null || path.Count < 2)
+            return NetherRankFiveKeyProcurementDecision.Unknown("rank-five-selected-safe-branch-unavailable");
+        RankFiveBattleEntryProjection battleEntry = ProjectRankFiveBattleEntry(
+            context,
+            floors,
+            visibleMap,
+            path
+        );
+        return _rankFiveKeyProcurementPolicy.Evaluate(new NetherRankFiveKeyProcurementInput(
+            snapshot.NetherGold,
+            snapshot.TreasureKeyCount,
+            snapshot.Characters
+                .Where(character => character.IsActive)
+                .Select(character => character.HpPermille)
+                .ToArray(),
+            path,
+            context.HardSafeByFloorId
+                .Where(pair => pair.Value)
+                .Select(pair => pair.Key)
+                .ToHashSet(),
+            floors,
+            visibleMap.ContentRows
+        )
+        {
+            AlreadyEnteredNodeId = snapshot.CurrentNodeId > 0
+                ? snapshot.CurrentNodeId
+                : snapshot.CurrentFloorId,
+            MaximumBattleEntryErosionPoint = battleEntry.MaximumBattleEntryErosionPoint,
+            RecoveryToSeventyOrBelowCertainBeforeNextBattle =
+                battleEntry.RecoveryToSeventyOrBelowCertainBeforeNextBattle,
+        });
+    }
+
+    private static RankFiveBattleEntryProjection ProjectRankFiveBattleEntry(
+        NetherRouteSafetyContext context,
+        IReadOnlyList<NetherFloorNode> floors,
+        NetherStrategyVisibleMapEvidence visibleMap,
+        IReadOnlyList<long> path
+    )
+    {
+        if (context == null || floors == null || visibleMap?.ContentRows == null || path == null)
+            return new RankFiveBattleEntryProjection(null, false);
+
+        NetherRouteHorizonSafetyEvaluation? horizon = context.HorizonEvaluationByFloorId.Values
+            .Where(candidate => candidate != null
+                && candidate.IsEligible
+                && candidate.HorizonSteps != null
+                && candidate.HorizonSteps.Count == path.Count
+                && candidate.HorizonSteps.Select(step => step.NodeId).SequenceEqual(path))
+            .FirstOrDefault();
+        if (horizon == null
+            || horizon.HorizonSteps.Count != horizon.Steps.Count
+            || horizon.HorizonSteps.Count != path.Count)
+        {
+            return new RankFiveBattleEntryProjection(null, false);
+        }
+
+        Dictionary<long, NetherFloorNode> floorByNodeId = floors
+            .Where(floor => floor != null && floor.NodeId > 0)
+            .GroupBy(floor => floor.NodeId)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single());
+        if (floorByNodeId.Count != path.Distinct().Count())
+            return new RankFiveBattleEntryProjection(null, false);
+
+        int objectiveIndex = -1;
+        foreach (NetherStrategyVisibleContentRow treasure in visibleMap.ContentRows.Where(row =>
+            row != null
+            && row.Kind == NetherStrategyVisibleContentKind.Treasure
+            && row.IsKnown
+            && row.NodeId > 0))
+        {
+            if (!NetherRankFiveKeyProcurementPolicy.TryFindRankFiveTreasureIdentity(
+                    visibleMap.ContentRows,
+                    treasure,
+                    out _
+                ))
+                continue;
+            int index = NetherPathIndexUtility.PathIndexOf(path, treasure.NodeId);
+            if (index <= 0)
+                continue;
+            if (objectiveIndex >= 0)
+                return new RankFiveBattleEntryProjection(null, false);
+            objectiveIndex = index;
+        }
+        if (objectiveIndex <= 0)
+            return new RankFiveBattleEntryProjection(null, false);
+
+        var sourceMatches = new List<(int Index, NetherStrategyVisibleEventOptionEvidence Option)>();
+        foreach (NetherStrategyVisibleContentRow row in visibleMap.ContentRows.Where(row =>
+            row != null
+            && row.Kind == NetherStrategyVisibleContentKind.Event
+            && row.IsKnown))
+        {
+            int index = NetherPathIndexUtility.PathIndexOf(path, row.NodeId);
+            if (index <= 0 || index >= objectiveIndex)
+                continue;
+            foreach (NetherStrategyVisibleEventOptionEvidence option in
+                row.EventOptions ?? Array.Empty<NetherStrategyVisibleEventOptionEvidence>())
+            {
+                if (NetherRankFiveKeyProcurementPredicates.IsExactErosionPaidEventKeyOption(option))
+                    sourceMatches.Add((index, option));
+            }
+        }
+        if (sourceMatches.Count != 1)
+            return new RankFiveBattleEntryProjection(null, false);
+
+        int sourceIndex = sourceMatches[0].Index;
+        int nextBattleIndex = -1;
+        for (int index = sourceIndex + 1; index < path.Count; index++)
+        {
+            if (floorByNodeId[path[index]].NodeType is NetherFloorNodeType.Battle
+                or NetherFloorNodeType.MiniBoss
+                or NetherFloorNodeType.Boss)
+            {
+                nextBattleIndex = index;
+                break;
+            }
+        }
+        if (nextBattleIndex < 0)
+            return new RankFiveBattleEntryProjection(null, false);
+
+        int maximumBattleEntryErosion = int.MinValue;
+        for (int index = nextBattleIndex; index < horizon.Steps.Count; index++)
+        {
+            NetherFloorNodeType nodeType = floorByNodeId[horizon.Steps[index].NodeId].NodeType;
+            if (nodeType is NetherFloorNodeType.Battle
+                or NetherFloorNodeType.MiniBoss
+                or NetherFloorNodeType.Boss)
+            {
+                maximumBattleEntryErosion = Math.Max(
+                    maximumBattleEntryErosion,
+                    horizon.Steps[index].StartErosion
+                );
+            }
+        }
+        if (maximumBattleEntryErosion == int.MinValue)
+            return new RankFiveBattleEntryProjection(null, false);
+
+        bool recoveredBeforeNextBattle = false;
+        for (int index = sourceIndex + 1; index < nextBattleIndex; index++)
+        {
+            NetherRouteHorizonStep step = horizon.HorizonSteps[index];
+            NetherRouteHorizonStepAudit audit = horizon.Steps[index];
+            if (step.NodeType == NetherFloorNodeType.Recovery
+                && step.IsConfirmedRecovery
+                && audit.ProjectedErosion < audit.StartErosion
+                && audit.ProjectedErosion <= 70)
+            {
+                recoveredBeforeNextBattle = true;
+                break;
+            }
+        }
+        return new RankFiveBattleEntryProjection(
+            maximumBattleEntryErosion,
+            maximumBattleEntryErosion <= 70 && recoveredBeforeNextBattle
+        );
+    }
+
+    private IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>
+        BuildRecoveryBranchSafetyEvidence(
+            NetherRouteSafetyContext context,
+            NetherRoutePlan route,
+            NetherRuntimeInteractivePreEntryInputsResult? interactivePreEntry,
+            NetherCodeTransformEligibilityEvidence? transformEligibility
+        )
+    {
+        var proofs = new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+        if (context == null
+            || route == null
+            || route.SelectedPathNodeIds == null
+            || route.SelectedPathNodeIds.Count < 2
+            || interactivePreEntry == null
+            || !interactivePreEntry.IsSuccess)
+            return proofs;
+
+        foreach ((long nodeId, NetherRuntimeInteractivePreEntryCaptureResult capture) in interactivePreEntry.ByFloorNodeId)
+        {
+            if (capture?.Input == null
+                || !capture.IsCaptured
+                || capture.Input.FloorKind != NetherFloorNodeType.Recovery)
+                continue;
+            // The dictionary key is runtime node identity, while the copied input also carries
+            // that identity. A mismatch means this capture cannot authorize another branch.
+            if (nodeId <= 0
+                || capture.Input.FloorNodeId != nodeId
+                || !route.SelectedPathNodeIds.Contains(nodeId))
+                continue;
+            NetherRouteHorizonSafetyEvaluation? horizon = context.HorizonEvaluation(nodeId);
+            bool complete = IsSelectedCompleteHorizon(route.SelectedPathNodeIds, nodeId, horizon);
+            NetherCodeTransformEligibilityEvidence? branchTransformEligibility =
+                BuildRecoveryTransformEligibility(
+                    transformEligibility,
+                    capture.Input,
+                    capture.Safety.OptionProjectionByKey
+                );
+            foreach ((NetherInteractiveEventOptionKey key, NetherInteractiveOptionProjection projection)
+                in capture.Safety.OptionProjectionByKey)
+            {
+                if (projection == null
+                    || projection.NodeId != nodeId
+                    || projection.FloorId <= 0
+                    || key.EventId <= 0
+                    || key.EventPartId <= 0
+                    || key.OptionNumber <= 0)
+                    continue;
+                NetherRecoveryBranchKind branchKind = MapRecoveryBranchKind(projection.ExpectedEffects);
+                bool authoritative = complete && branchKind != NetherRecoveryBranchKind.Unknown;
+                bool carriedProofMatches = capture.Input.RecoveryBranchSafetyByPartId.TryGetValue(
+                    key.EventPartId,
+                    out NetherRecoveryBranchSafetyEvidence? carriedProof
+                )
+                    && carriedProof.IsAuthoritative
+                    && carriedProof.BranchKind == branchKind;
+                RecoveryBranchSimulation simulation = authoritative
+                    ? SimulateRecoveryBranch(capture.Input, horizon, projection)
+                    : new RecoveryBranchSimulation(false, false, context.HorizonRejection(nodeId));
+                bool optionEvidenceKnown = projection.IsKnown && projection.HasRouteSafetyEvidence
+                    || carriedProofMatches
+                        && projection.ExpectedEffects != null
+                        && projection.ExpectedEffects.Count > 0
+                        && projection.ExpectedEffects.All(effect => effect != null
+                            && effect.Known
+                            && effect.ContentKnown);
+                bool routeSafetyAllowed = projection.RouteSafetyAllowed
+                    || carriedProofMatches && carriedProof!.IsNextVisibleBranchSafe;
+                bool isKnown = authoritative && optionEvidenceKnown && simulation.IsKnown;
+                var evidence = new NetherRecoveryBranchSafetyEvidence
+                {
+                    BranchKind = branchKind,
+                    IsKnown = isKnown,
+                    IsCompleteVisibleBranch = complete,
+                    IsNextVisibleBranchSafe = isKnown
+                        && routeSafetyAllowed
+                        && simulation.IsSafe,
+                    UnknownReason = !isKnown
+                        ? !authoritative
+                            ? complete
+                                ? "recovery-branch-kind-or-option-proof-unavailable"
+                                : context.HorizonRejection(nodeId)
+                            : !optionEvidenceKnown
+                                ? projection.UnknownReason.Length == 0
+                                    ? "recovery-option-proof-unavailable"
+                                    : projection.UnknownReason
+                                : simulation.Detail
+                        : simulation.IsSafe && routeSafetyAllowed
+                            ? string.Empty
+                            : string.IsNullOrWhiteSpace(simulation.Detail)
+                                ? projection.RouteSafetyUnknownReason
+                                : simulation.Detail,
+                    TransformEligibility = branchTransformEligibility,
+                };
+                if (key.EventPartId <= 0)
+                    continue;
+                if (proofs.TryGetValue(key.EventPartId, out NetherRecoveryBranchSafetyEvidence? existing)
+                    && existing != evidence)
+                {
+                    proofs[key.EventPartId] = new NetherRecoveryBranchSafetyEvidence
+                    {
+                        UnknownReason = "ambiguous-recovery-branch-proof-identity",
+                    };
+                }
+                else
+                {
+                    proofs[key.EventPartId] = evidence;
+                }
+            }
+        }
+        return proofs;
+    }
+
+    private static NetherCodeTransformEligibilityEvidence? BuildRecoveryTransformEligibility(
+        NetherCodeTransformEligibilityEvidence? heldCodeEligibility,
+        NetherInteractiveFloorPreEntrySafetyInput input,
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? projections
+    )
+    {
+        if (heldCodeEligibility == null)
+            return null;
+        NetherInteractiveOptionProjection[] options = (projections?.Values
+                ?? Array.Empty<NetherInteractiveOptionProjection>())
+            .Where(option => option != null)
+            .GroupBy(option => new NetherInteractiveEventOptionKey(
+                option.EventId,
+                option.EventPartId,
+                option.OptionNumber
+            ))
+            .Where(group => group.Count() == 1)
+            .Select(group => group.Single())
+            .ToArray();
+        NetherInteractiveOptionProjection? rest = options.FirstOrDefault(option =>
+            MapRecoveryBranchKind(option.ExpectedEffects) == NetherRecoveryBranchKind.Rest);
+        NetherInteractiveOptionProjection? purification = options.FirstOrDefault(option =>
+            MapRecoveryBranchKind(option.ExpectedEffects) == NetherRecoveryBranchKind.Purification);
+        if (options.Length != 3
+            || rest == null
+            || purification == null
+            || input.CurrentErosion is not int currentErosion
+            || input.ActiveHpPermille == null
+            || input.Settings == null
+            || rest.ExpectedEffects == null
+            || purification.ExpectedEffects == null
+            || rest.ExpectedEffects.Any(effect => effect == null || !effect.Known || !effect.ContentKnown)
+            || purification.ExpectedEffects.Any(effect => effect == null || !effect.Known || !effect.ContentKnown))
+        {
+            return heldCodeEligibility with
+            {
+                IsKnown = false,
+                UnknownReason = "recovery-transform-choice-value-unavailable",
+                DeterministicRecoveryChoicesHaveZeroValue = false,
+            };
+        }
+
+        bool restHasValue = rest.ExpectedEffects.Count == 1
+            && rest.ExpectedEffects[0].Kind == NetherEffectKind.Heal
+            && input.ActiveHpPermille.Any(hp => hp < 1000)
+            && rest.ExpectedEffects[0].Amount > 0;
+        NetherErosionProjection purificationProjection = new NetherErosionPolicy().ProjectEffects(
+            currentErosion,
+            purification.ExpectedEffects,
+            input.Settings.SoftErosionLimit,
+            isMandatoryBoss: false
+        );
+        bool purificationHasValue = !purificationProjection.IsAllowed
+            || purificationProjection.ProjectedErosion != currentErosion;
+        return heldCodeEligibility with
+        {
+            DeterministicRecoveryChoicesHaveZeroValue = !restHasValue && !purificationHasValue,
+        };
+    }
+
+    private RecoveryBranchSimulation SimulateRecoveryBranch(
+        NetherInteractiveFloorPreEntrySafetyInput input,
+        NetherRouteHorizonSafetyEvaluation? horizon,
+        NetherInteractiveOptionProjection projection
+    )
+    {
+        if (input == null
+            || horizon == null
+            || !horizon.IsEligible
+            || horizon.HorizonSteps == null
+            || horizon.HorizonSteps.Count < 2
+            || horizon.HorizonSteps.Count != horizon.Steps.Count
+            || input.FloorNodeId <= 0
+            || horizon.HorizonSteps[0].NodeId != input.FloorNodeId
+            || !input.CurrentErosion.HasValue
+            || input.ActiveHpPermille == null
+            || projection.ExpectedEffects == null
+            || projection.ExpectedEffects.Count == 0
+            || projection.ExpectedEffects.Any(effect => effect == null
+                || !effect.Known
+                || !effect.ContentKnown))
+        {
+            return new RecoveryBranchSimulation(
+                false,
+                false,
+                "recovery-branch-suffix-projection-unavailable"
+            );
+        }
+
+        NetherRouteHorizonStep[] steps = horizon.HorizonSteps.ToArray();
+        NetherRouteHorizonStep first = steps[0];
+        NetherErosionProjection projected = _erosionPolicy.ProjectEffects(
+            input.CurrentErosion.Value,
+            projection.ExpectedEffects,
+            first.ErosionModifiers,
+            70,
+            isMandatoryBoss: true
+        );
+        if (!projected.IsAllowed)
+        {
+            return new RecoveryBranchSimulation(
+                true,
+                false,
+                "recovery-branch-erosion-projection:" + projected.Detail
+            );
+        }
+
+        steps[0] = first with
+        {
+            // The branch effect has already consumed the active code modifiers above. Collapse
+            // that exact result into the option step so the suffix is not double-applied.
+            BaseErosionDelta = projected.ProjectedErosion - input.CurrentErosion.Value,
+            HpDeltaPermille = projection.HpDelta,
+            ErosionModifiers = Array.Empty<NetherErosionModifier>(),
+        };
+        NetherRouteHorizonSafetyEvaluation result = _horizonSafetyPolicy.Evaluate(
+            new NetherRouteHorizonSafetyInput(
+                input.CurrentErosion.Value,
+                input.ActiveHpPermille,
+                steps,
+                70,
+                HardErosionLimit
+            )
+            {
+                IsVisibleHorizonComplete = true,
+                StrategyMode = input.Settings?.StrategyMode ?? NetherStrategyMode.Equipment,
+                PrimaryResearchFamily = input.Settings?.ResearchPrimaryFamily ?? NetherCodeFamily.Unknown,
+            }
+        );
+        return new RecoveryBranchSimulation(
+            true,
+            result.IsEligible,
+            result.IsEligible
+                ? string.Empty
+                : string.IsNullOrWhiteSpace(result.RejectionDetail)
+                    ? "recovery-branch-suffix-unsafe"
+                    : result.RejectionDetail
+        );
+    }
+
+    private static bool IsSelectedCompleteHorizon(
+        IReadOnlyList<long> selectedPathNodeIds,
+        long startNodeId,
+        NetherRouteHorizonSafetyEvaluation? horizon
+    )
+    {
+        if (horizon == null
+            || !horizon.IsEligible
+            || horizon.Steps == null
+            || horizon.Steps.Count < 2
+            || horizon.HorizonSteps == null
+            || horizon.HorizonSteps.Count != horizon.Steps.Count
+            || horizon.Steps[^1].NodeId <= 0
+            || !selectedPathNodeIds.Contains(startNodeId))
+            return false;
+
+        int startIndex = -1;
+        for (int index = 0; index < selectedPathNodeIds.Count; index++)
+        {
+            if (selectedPathNodeIds[index] == startNodeId)
+            {
+                startIndex = index;
+                break;
+            }
+        }
+        if (startIndex < 0
+            || horizon.Steps.Count != selectedPathNodeIds.Count - startIndex
+            || horizon.Steps[^1].NodeId != selectedPathNodeIds[^1])
+            return false;
+        for (int index = 0; index < horizon.Steps.Count; index++)
+        {
+            if (horizon.Steps[index].NodeId != selectedPathNodeIds[startIndex + index]
+                || horizon.HorizonSteps[index].NodeId != selectedPathNodeIds[startIndex + index])
+                return false;
+        }
+        return true;
+    }
+
+    private static NetherRecoveryBranchKind MapRecoveryBranchKind(IReadOnlyList<NetherEffect>? effects) =>
+        effects is { Count: 1 }
+            ? effects[0].Kind switch
+            {
+                NetherEffectKind.Heal => NetherRecoveryBranchKind.Rest,
+                NetherEffectKind.ErosionHeal => NetherRecoveryBranchKind.Purification,
+                NetherEffectKind.AbyssCodeTransform => NetherRecoveryBranchKind.Transform,
+                _ => NetherRecoveryBranchKind.Unknown,
+            }
+            : NetherRecoveryBranchKind.Unknown;
 
     private static string DescribeCombatInputs(
         NetherFloorNode floor,

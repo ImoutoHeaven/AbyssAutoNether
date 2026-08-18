@@ -76,14 +76,14 @@ internal static class NetherRouteHpRuleMapper
         && option.HpDelta < 0
         && option.ExpectedEffects.Count == 1
         && option.ExpectedEffects[0].Kind == NetherEffectKind.Damage
-        && option.ExpectedEffects[0].Amount > 0;
+        && option.ExpectedEffects[0].Amount is 40 or 80;
 
     private static bool IsExactHpPaidKeyEvent(NetherInteractiveOptionProjection option) =>
         option.AllowsPartialActiveDeaths
         && option.HpDelta < 0
         && option.ExpectedEffects.Count == 2
         && option.ExpectedEffects.Count(effect => effect.Kind == NetherEffectKind.Damage
-            && effect.Amount > 0) == 1
+            && effect.Amount == 80) == 1
         && option.ExpectedEffects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyGain
             && effect.Amount == 1) == 1;
 }

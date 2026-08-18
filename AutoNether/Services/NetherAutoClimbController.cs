@@ -2392,6 +2392,13 @@ internal static class NetherAutoClimbController
     {
         _bridge.BeginRouteReplan(snapshot.Fingerprint);
         NetherRuntimeRouteSafetyData runtimeSafety = _bridge.TryCaptureRouteSafety(snapshot);
+        runtimeSafety = runtimeSafety with
+        {
+            // Recovery transform eligibility is captured in the same route epoch as the held
+            // portfolio. The coordinator copies it into every selected-horizon branch proof,
+            // and the bridge carries that proof through the final native pre-entry recapture.
+            RecoveryTransformEligibility = CaptureRecoveryTransformEligibility(snapshot, settings),
+        };
         _bridge.BindEventProcurementCommitments(runtimeSafety.EventProcurementCommitments);
         NetherRuntimeInteractivePreEntryInputsResult interactivePreEntry =
             _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
@@ -2420,6 +2427,12 @@ internal static class NetherAutoClimbController
             );
             interactivePreEntry = _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
         }
+        // The provisional route is only the source of the selected-horizon proof. Publish both
+        // exact decisions before the mandatory fresh capture; the second capture must either
+        // carry every Recovery part proof and the selected rank-five commitment or fail closed.
+        _bridge.BindRecoveryBranchSafetyProofs(preliminaryRoute.RecoveryBranchSafetyByPartId);
+        _bridge.BindRankFiveKeyProcurement(preliminaryRoute.RankFiveKeyProcurement);
+        interactivePreEntry = _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
         AuditRouteRuntimeInputs(snapshot, runtimeSafety);
         Audit(
             NetherDetailedAuditKind.Interactive,
@@ -2436,9 +2449,68 @@ internal static class NetherAutoClimbController
             runtimeSafety,
             interactivePreEntry
         );
-        // The route plan is the production owner of the exact pre-entry proof. Publish its
-        // branch-local procurement state after the current capture so a repeated native capture
-        // cannot replace a proven budget with an empty observation.
+        // Carry the provisional selected branch into one final native capture. The capture must
+        // carry the exact Recovery proof and rank-five decision that produced this route; a
+        // changed/missing proof is a stale branch, not permission to reuse the old action.
+        _bridge.BindRecoveryBranchSafetyProofs(routeDecision.RecoveryBranchSafetyByPartId);
+        _bridge.BindRankFiveKeyProcurement(routeDecision.RankFiveKeyProcurement);
+        if (routeDecision.Route.HasSelection
+            && HasSelectedFutureInteractiveFloor(snapshot, routeDecision.Route))
+        {
+            NetherRuntimeInteractivePreEntryInputsResult finalInteractivePreEntry =
+                _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
+            Audit(
+                NetherDetailedAuditKind.Interactive,
+                "preentry-final:" + finalInteractivePreEntry.IsSuccess + ":"
+                    + finalInteractivePreEntry.ByFloorNodeId.Count,
+                new NetherDetailedAuditField("captured", finalInteractivePreEntry.IsSuccess.ToString()),
+                new NetherDetailedAuditField("floorInputs", finalInteractivePreEntry.ByFloorNodeId.Count.ToString()),
+                new NetherDetailedAuditField("detail", finalInteractivePreEntry.Detail)
+            );
+            AuditInteractivePreEntryInputs(snapshot, finalInteractivePreEntry);
+            if (!finalInteractivePreEntry.IsSuccess)
+            {
+                FailClosed(
+                    NetherPauseReason.BindingUnavailable,
+                    "route-final-preentry-recapture:" + finalInteractivePreEntry.Detail
+                );
+                return;
+            }
+            if (!InteractiveHandoffCarriesSelectedProof(
+                    snapshot,
+                    routeDecision,
+                    finalInteractivePreEntry,
+                    out string proofHandoffError
+                ))
+            {
+                FailClosed(
+                    NetherPauseReason.BindingUnavailable,
+                    "route-final-proof-handoff-mismatch:" + proofHandoffError
+                );
+                return;
+            }
+
+            NetherAutoClimbRouteSafetyDecision finalRouteDecision = RouteSafetyWiring.Plan(
+                snapshot,
+                settings,
+                effectiveMaxDepth,
+                runtimeSafety,
+                finalInteractivePreEntry
+            );
+            if (!RouteHandoffMatches(routeDecision, finalRouteDecision, out string handoffError))
+            {
+                FailClosed(
+                    NetherPauseReason.BindingUnavailable,
+                    "route-final-handoff-mismatch:" + handoffError
+                );
+                return;
+            }
+            routeDecision = finalRouteDecision;
+        }
+
+        // The final route plan is the production owner of the exact pre-entry proof. Publish its
+        // branch-local procurement state only after the consistency gate, so a repeated native
+        // capture cannot replace a proven budget with an empty or alternate-branch observation.
         if (routeDecision.RouteIdentity is NetherRouteBranchIdentity routeIdentity)
         {
             _bridge.CommitRouteOwnedEventProcurementCommitments(
@@ -2478,6 +2550,166 @@ internal static class NetherAutoClimbController
             string.Join(",", route.Audit.Take(16).Select(FormatRouteCandidateAudit))
         );
         ExecuteNativeAction(snapshot, action, "route");
+    }
+
+    private static bool RouteHandoffMatches(
+        NetherAutoClimbRouteSafetyDecision expected,
+        NetherAutoClimbRouteSafetyDecision actual,
+        out string detail
+    )
+    {
+        detail = string.Empty;
+        if (expected.Route.HasSelection != actual.Route.HasSelection)
+        {
+            detail = "selection-presence-changed";
+            return false;
+        }
+        if (!expected.Route.SelectedPathNodeIds.SequenceEqual(actual.Route.SelectedPathNodeIds))
+        {
+            detail = "selected-path-changed";
+            return false;
+        }
+        if (expected.Route.SelectedNode?.NodeId != actual.Route.SelectedNode?.NodeId)
+        {
+            detail = "selected-node-changed";
+            return false;
+        }
+        if (expected.RouteIdentity != actual.RouteIdentity)
+        {
+            detail = "route-identity-changed";
+            return false;
+        }
+        if (!Equals(expected.RecoveryTransformEligibility, actual.RecoveryTransformEligibility))
+        {
+            detail = "recovery-transform-eligibility-changed";
+            return false;
+        }
+        if (expected.IsCombatSelectionMissingProjection != actual.IsCombatSelectionMissingProjection)
+        {
+            detail = "combat-projection-binding-changed";
+            return false;
+        }
+        if (!Equals(expected.SelectedBattleProjection, actual.SelectedBattleProjection))
+        {
+            detail = "battle-projection-changed";
+            return false;
+        }
+        if (!DictionaryValuesMatch(expected.EventProcurementCommitments, actual.EventProcurementCommitments)
+            || !DictionaryValuesMatch(
+                expected.RecoveryBranchSafetyByPartId,
+                actual.RecoveryBranchSafetyByPartId
+            )
+            || !Equals(expected.RankFiveKeyProcurement, actual.RankFiveKeyProcurement))
+        {
+            detail = "selected-branch-proof-changed";
+            return false;
+        }
+        return true;
+    }
+
+    private static bool HasSelectedFutureInteractiveFloor(
+        NetherSnapshot snapshot,
+        NetherRoutePlan route
+    )
+    {
+        if (snapshot?.Floors == null || route?.SelectedPathNodeIds == null)
+            return false;
+        HashSet<long> selectedFutureIds = route.SelectedPathNodeIds.Skip(1).ToHashSet();
+        return snapshot.Floors.Any(floor =>
+            floor != null
+            && selectedFutureIds.Contains(floor.NodeId)
+            && floor.NodeType is NetherFloorNodeType.Event
+                or NetherFloorNodeType.Recovery
+                or NetherFloorNodeType.Shop
+                or NetherFloorNodeType.Treasure);
+    }
+
+    private static bool InteractiveHandoffCarriesSelectedProof(
+        NetherSnapshot snapshot,
+        NetherAutoClimbRouteSafetyDecision expected,
+        NetherRuntimeInteractivePreEntryInputsResult actual,
+        out string detail
+    )
+    {
+        detail = string.Empty;
+        if (actual.SnapshotFingerprint != snapshot.Fingerprint)
+        {
+            detail = "snapshot-changed";
+            return false;
+        }
+
+        Dictionary<long, NetherFloorNode> floors = (snapshot.Floors ?? Array.Empty<NetherFloorNode>())
+            .Where(floor => floor != null && floor.NodeId > 0)
+            .GroupBy(floor => floor.NodeId)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single());
+        long currentNodeId = snapshot.CurrentNodeId > 0 ? snapshot.CurrentNodeId : snapshot.CurrentFloorId;
+        foreach (long nodeId in expected.Route.SelectedPathNodeIds.Skip(1))
+        {
+            if (!floors.TryGetValue(nodeId, out NetherFloorNode? floor)
+                || floor.NodeType != NetherFloorNodeType.Recovery)
+                continue;
+            if (!actual.ByFloorNodeId.TryGetValue(nodeId, out NetherRuntimeInteractivePreEntryCaptureResult? capture)
+                || capture.Input == null
+                || capture.Input.FloorNodeId != nodeId
+                || !capture.Input.RequireCompleteRecoveryBranchSafety
+                || !capture.Safety.IsSafe
+                || !DictionaryValuesMatch(
+                    expected.RecoveryBranchSafetyByPartId,
+                    capture.Input.RecoveryBranchSafetyByPartId
+                )
+                || expected.RecoveryBranchSafetyByPartId.Count == 0)
+            {
+                detail = "selected-recovery-proof-absent-or-mismatched:" + nodeId;
+                return false;
+            }
+            if (capture.Input.RecoveryBranchSafetyByPartId.Values.Any(proof =>
+                    proof == null || !proof.IsAuthoritative))
+            {
+                detail = "selected-recovery-proof-not-authoritative:" + nodeId;
+                return false;
+            }
+        }
+
+        bool carriesRankFiveDecision = expected.RankFiveKeyProcurement.HasMandatoryObjective
+            || expected.RankFiveKeyProcurement.Commitment != null;
+        if (carriesRankFiveDecision
+            && !actual.ByFloorNodeId.Values.Any(capture =>
+                capture.Input != null
+                && Equals(capture.Input.RankFiveKeyProcurement, expected.RankFiveKeyProcurement)))
+        {
+            detail = "rank-five-decision-absent-or-mismatched";
+            return false;
+        }
+
+        // The route path must retain its native current-node prefix. The prefix is already entered
+        // context for rank-five evaluation, but it remains part of the branch identity and stale
+        // handoff guard.
+        if (expected.Route.SelectedPathNodeIds.Count < 2
+            || expected.Route.SelectedPathNodeIds[0] != currentNodeId)
+        {
+            detail = "current-node-prefix-changed";
+            return false;
+        }
+        return true;
+    }
+
+    private static bool DictionaryValuesMatch<TKey, TValue>(
+        IReadOnlyDictionary<TKey, TValue> expected,
+        IReadOnlyDictionary<TKey, TValue> actual
+    ) where TKey : notnull
+    {
+        if (expected == null || actual == null || expected.Count != actual.Count)
+            return false;
+        foreach ((TKey key, TValue value) in expected)
+        {
+            if (!actual.TryGetValue(key, out TValue? actualValue)
+                || !EqualityComparer<TValue>.Default.Equals(value, actualValue))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void BeginBattleWait(NetherSnapshot snapshot)
@@ -2965,6 +3197,28 @@ internal static class NetherAutoClimbController
             : NetherCodeTransformHardExclusionEvidence.Unknown(
                 "code-transform-held-policy-evidence:" + policyEvidence.Detail
             );
+    }
+
+    private static NetherCodeTransformEligibilityEvidence CaptureRecoveryTransformEligibility(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings
+    )
+    {
+        NetherCodeTransformHardExclusionEvidence hardExclusions =
+            CaptureCodeTransformHardExclusions(snapshot, settings, NetherRuntimePopupKind.Recovery);
+        return new NetherCodeTransformEligibilityEvidence
+        {
+            IsKnown = hardExclusions.IsKnown,
+            UnknownReason = hardExclusions.UnknownReason,
+            StrategyMode = settings.StrategyMode,
+            EquipmentOptInEnabled = settings.EquipmentRecoveryCodeTransformEnabled,
+            IsRecovery = true,
+            // Complete Recovery popup policy recomputes this value from all three native option
+            // effects. This route-owned record carries the authoritative held-Code half of that
+            // proof instead of pretending an option-independent value is known here.
+            DeterministicRecoveryChoicesHaveZeroValue = false,
+            HardExcludedCodes = hardExclusions.HardExcludedCodes,
+        };
     }
 
     private static NetherRuntimePopupContext BindCommittedCodeTransform(

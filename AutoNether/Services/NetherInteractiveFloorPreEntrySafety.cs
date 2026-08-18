@@ -55,17 +55,30 @@ internal enum NetherInteractivePartialDeathObjectiveKind
 }
 
 /// <summary>
-/// Prevalidated route/objective proof supplied by the later route-strategy tickets.  The current
-/// production capture supplies none, so an option shape alone can never authorize a character
-/// death.  Exact Event/part IDs prevent proof from being reused for another popup option.
+/// Prevalidated route/objective proof supplied by the route-strategy production capture. An option
+/// shape alone can never authorize a character death. Exact Event/part IDs prevent proof from being
+/// reused for another popup option.
 /// </summary>
 internal sealed record NetherInteractivePartialDeathEligibility(
     NetherInteractivePartialDeathObjectiveKind Kind,
-    long EventId,
-    long EventPartId,
-    long ObjectiveNodeId
+    NetherRankFiveTreasureIdentity Identity
 )
 {
+    public NetherInteractivePartialDeathEligibility(
+        NetherInteractivePartialDeathObjectiveKind kind,
+        long EventId,
+        long EventPartId,
+        long ObjectiveNodeId
+    ) : this(
+        kind,
+        new NetherRankFiveTreasureIdentity(ObjectiveNodeId, EventId, EventPartId)
+    )
+    {
+    }
+
+    public long EventId => Identity.ObjectiveEventId;
+    public long EventPartId => Identity.ObjectiveEventPartId;
+    public long ObjectiveNodeId => Identity.ObjectiveNodeId;
     public bool IsKnown { get; init; }
     public bool ObjectiveReachable { get; init; }
     public int ExactTreasureRank { get; init; }
@@ -118,6 +131,21 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyInput(
     public IReadOnlyList<NetherInteractivePartialDeathEligibility> PartialDeathEligibility { get; init; } =
         Array.Empty<NetherInteractivePartialDeathEligibility>();
     /// <summary>
+    /// Exact selected-horizon Recovery continuation proofs keyed by EventPartId. Production sets
+    /// <see cref="RequireCompleteRecoveryBranchSafety"/> after binding the selected route; missing
+    /// proofs then pause the complete Recovery popup instead of using local scoring.
+    /// </summary>
+    public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> RecoveryBranchSafetyByPartId { get; init; } =
+        new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+    /// <summary>
+    /// Production capture sets this after the selected route horizon has been bound. When true,
+    /// the complete three-option Recovery policy is authoritative and missing proofs pause rather
+    /// than falling back to local option scoring.
+    /// </summary>
+    public bool RequireCompleteRecoveryBranchSafety { get; init; }
+    /// <summary>Exact selected-branch rank-five procurement decision bound before capture.</summary>
+    public NetherRankFiveKeyProcurementDecision? RankFiveKeyProcurement { get; init; }
+    /// <summary>
     /// Optional exact MItems/MNetherFloorBattles copies. Production supplies these rows; pure
     /// legacy callers may omit them only for non-exact options.
     /// </summary>
@@ -156,6 +184,8 @@ internal sealed record NetherInteractiveOptionProjection(
     public bool AllowsPartialActiveDeaths { get; init; }
     public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
     public bool IsMandatoryRankFiveKeyObjective { get; init; }
+    public NetherRankFiveKeyProcurementCommitment? RankFiveKeyProcurementCommitment { get; init; }
+    public NetherRankFiveTreasureIdentity? RankFiveTreasureObjective { get; init; }
     public bool HasCommittedProcurementEvidence { get; init; }
     public int CommittedGoldMinimum { get; init; }
     public int CommittedKeyMinimum { get; init; }
@@ -365,6 +395,9 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     input.ItemRows,
                     input.BattleRows,
                     input.PartialDeathEligibility,
+                    input.RecoveryBranchSafetyByPartId,
+                    input.FloorNodeId,
+                    input.RankFiveKeyProcurement,
                     out IReadOnlyList<NetherEventOption>? options,
                     out string optionError
                 ))
@@ -380,6 +413,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     input.FloorKind,
                     input.FloorMasterId,
                     input.FloorNodeId > 0 ? input.FloorNodeId : input.FloorMasterId,
+                    input.RequireCompleteRecoveryBranchSafety,
                     out int optionNumber,
                     out NetherInteractiveOptionProjection projection,
                     out IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? rowProjections,
@@ -522,6 +556,9 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         IReadOnlyList<NetherStrategyItemMasterRow>? itemRows,
         IReadOnlyList<NetherStrategyBattleMasterRow>? battleRows,
         IReadOnlyList<NetherInteractivePartialDeathEligibility> partialDeathEligibility,
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryBranchSafetyByPartId,
+        long floorNodeId,
+        NetherRankFiveKeyProcurementDecision? rankFiveKeyProcurement,
         out IReadOnlyList<NetherEventOption>? options,
         out string error
     )
@@ -616,13 +653,46 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 return false;
             }
             NetherInteractivePartialDeathEligibility? eligibility = matchingEligibility.FirstOrDefault();
+            NetherRankFiveKeyProcurementCommitment? rankFiveCommitment =
+                ResolveEventRankFiveCommitment(
+                    rankFiveKeyProcurement,
+                    floorNodeId,
+                    row.EventId,
+                    part.PartId,
+                    index + 1
+                );
+            NetherRankFiveTreasureIdentity? rankFiveObjective =
+                ResolveRankFiveObjective(
+                    rankFiveKeyProcurement,
+                    floorNodeId,
+                    row.EventId,
+                    part.PartId
+                );
+            NetherInteractivePartialDeathEligibility? rankFivePartialProof =
+                ResolveRankFivePartialDeathProof(
+                    rankFiveKeyProcurement,
+                    rankFiveCommitment,
+                    floorNodeId,
+                    row.EventId,
+                    part.PartId,
+                    effects!
+                );
+            eligibility ??= rankFivePartialProof;
             mapped.Add(new NetherEventOption(index + 1, effects!)
             {
                 EventId = row.EventId,
                 EventPartId = part.PartId,
                 PartialDeathEligibility = eligibility,
-                IsMandatoryRankFiveKeyObjective = eligibility?.AllowsHpPaidEventKey == true
-                    && eligibility.ExactTreasureRank == 5,
+                RecoveryBranchSafety = recoveryBranchSafetyByPartId.TryGetValue(
+                    part.PartId,
+                    out NetherRecoveryBranchSafetyEvidence? branchSafety
+                ) ? branchSafety : null,
+                IsMandatoryRankFiveKeyObjective = rankFiveCommitment != null
+                    || rankFiveObjective.HasValue
+                    || eligibility?.AllowsHpPaidEventKey == true
+                        && eligibility.ExactTreasureRank == 5,
+                RankFiveKeyProcurementCommitment = rankFiveCommitment,
+                RankFiveTreasureObjective = rankFiveObjective,
             });
         }
         if (mapped.Count == 0)
@@ -635,6 +705,107 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         error = string.Empty;
         return true;
     }
+
+    private static NetherRankFiveKeyProcurementCommitment? ResolveEventRankFiveCommitment(
+        NetherRankFiveKeyProcurementDecision? decision,
+        long floorNodeId,
+        long eventId,
+        long eventPartId,
+        int optionNumber
+    )
+    {
+        NetherRankFiveKeyProcurementCommitment? commitment = decision?.Commitment;
+        if (commitment == null
+            || commitment.SourceKind == NetherKeyProcurementSourceKind.ShopGold200
+            || commitment.SourceNodeId != floorNodeId
+            || commitment.SourceEventId != eventId
+            || commitment.SourceEventPartId != eventPartId
+            || commitment.SourceOptionNumber != optionNumber)
+            return null;
+        return commitment;
+    }
+
+    private static NetherRankFiveTreasureIdentity? ResolveRankFiveObjective(
+        NetherRankFiveKeyProcurementDecision? decision,
+        long floorNodeId,
+        long eventId,
+        long eventPartId
+    )
+    {
+        if (decision?.HasMandatoryObjective != true
+            || !decision.Objective.IsValid
+            || decision.Objective.ObjectiveNodeId != floorNodeId
+            || decision.Objective.ObjectiveEventId != eventId
+            || decision.Objective.ObjectiveEventPartId != eventPartId)
+            return null;
+        return decision.Objective;
+    }
+
+    private static NetherInteractivePartialDeathEligibility? ResolveRankFivePartialDeathProof(
+        NetherRankFiveKeyProcurementDecision? decision,
+        NetherRankFiveKeyProcurementCommitment? commitment,
+        long floorNodeId,
+        long eventId,
+        long eventPartId,
+        IReadOnlyList<NetherEffect> effects
+    )
+    {
+        if (decision?.HasMandatoryObjective != true || !decision.Objective.IsValid)
+            return null;
+
+        if (commitment?.SourceKind == NetherKeyProcurementSourceKind.HpPaidEventKey
+            && commitment.SourceNodeId == floorNodeId
+            && commitment.SourceEventId == eventId
+            && commitment.SourceEventPartId == eventPartId
+            && IsExactHpPaidEventKey(effects))
+        {
+            return new NetherInteractivePartialDeathEligibility(
+                NetherInteractivePartialDeathObjectiveKind.HpPaidEventKeyForRank5Treasure,
+                eventId,
+                eventPartId,
+                floorNodeId
+            )
+            {
+                IsKnown = true,
+                ObjectiveReachable = true,
+                ExactTreasureRank = 5,
+                NoBetterAffordableCurrencyKeySource = true,
+            };
+        }
+
+        if (decision.SourceKind == NetherKeyProcurementSourceKind.None
+            && decision.AllowsHpFallback
+            && decision.Objective.ObjectiveNodeId == floorNodeId
+            && decision.Objective.ObjectiveEventId == eventId
+            && decision.Objective.ObjectiveEventPartId == eventPartId
+            && IsExactTreasureHpPayment(effects))
+        {
+            return new NetherInteractivePartialDeathEligibility(
+                NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,
+                eventId,
+                eventPartId,
+                floorNodeId
+            )
+            {
+                IsKnown = true,
+                ObjectiveReachable = true,
+                ExactTreasureRank = 5,
+            };
+        }
+        return null;
+    }
+
+    private static bool IsExactHpPaidEventKey(IReadOnlyList<NetherEffect> effects) =>
+        effects != null
+        && effects.Count == 2
+        && effects.Count(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount == 80) == 1
+        && effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyGain && effect.Amount == 1) == 1;
+
+    private static bool IsExactTreasureHpPayment(IReadOnlyList<NetherEffect> effects) =>
+        effects != null
+        && effects.Count == 1
+        && effects[0].Kind == NetherEffectKind.Damage
+        && effects[0].Amount is 40 or 80;
 
     private static NetherEventOption UnknownOption(
         long eventId,
@@ -868,6 +1039,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         NetherFloorNodeType floorKind,
         long floorId,
         long nodeId,
+        bool requireCompleteRecoveryBranchSafety,
         out int selectedOptionNumber,
         out NetherInteractiveOptionProjection selectedProjection,
         out IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? allProjections,
@@ -882,13 +1054,103 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         rejection = NetherPauseReason.NoSafeRoute;
         detail = "no-safe-event-option";
         var safeOptions = new List<NetherEventOption>();
+
+        if (floorKind == NetherFloorNodeType.Recovery && requireCompleteRecoveryBranchSafety)
+        {
+            NetherCodeTransformHardExclusionEvidence transformHardExclusions =
+                ResolveRecoveryTransformHardExclusions(options);
+            NetherEventDecision completeBranchDecision = _eventPolicy.DecideRecovery(
+                snapshot,
+                options,
+                settings,
+                Array.Empty<NetherErosionModifier>(),
+                transformHardExclusions,
+                requireCompleteBranchEvidence: true
+            );
+            if (completeBranchDecision.Kind != NetherEventDecisionKind.Select
+                || completeBranchDecision.StartsBattleAfterSelection)
+            {
+                rejection = completeBranchDecision.Kind == NetherEventDecisionKind.Pause
+                    ? completeBranchDecision.PauseReason
+                    : NetherPauseReason.NoSafeRoute;
+                detail = string.IsNullOrWhiteSpace(completeBranchDecision.Detail)
+                    ? "recovery-complete-visible-branch-unavailable"
+                    : completeBranchDecision.Detail;
+                foreach (NetherEventOption option in options)
+                {
+                    optionProjections[OptionKey(option)] = UnknownProjection(
+                        option,
+                        floorId,
+                        nodeId,
+                        detail
+                    );
+                }
+                return false;
+            }
+
+            NetherEventOption? selectedOption = options.FirstOrDefault(option =>
+                option.EventId == completeBranchDecision.EventId
+                && option.EventPartId == completeBranchDecision.EventPartId
+                && option.OptionNumber == completeBranchDecision.OptionNumber);
+            if (selectedOption == null)
+            {
+                rejection = NetherPauseReason.UnknownMasterData;
+                detail = "recovery-selected-branch-option-identity-unavailable";
+                return false;
+            }
+
+            NetherRecoveryBranchSafetyEvidence? selectedProof = selectedOption.RecoveryBranchSafety;
+            if (selectedProof == null || !selectedProof.IsAuthoritative)
+            {
+                rejection = NetherPauseReason.UnknownMasterData;
+                detail = selectedProof?.UnknownReason.Length > 0
+                    ? selectedProof.UnknownReason
+                    : "recovery-selected-branch-proof-unavailable";
+                return false;
+            }
+            if (!selectedProof.IsNextVisibleBranchSafe)
+            {
+                rejection = NetherPauseReason.NoSafeRoute;
+                detail = string.IsNullOrWhiteSpace(selectedProof.UnknownReason)
+                    ? "recovery-selected-branch-unsafe-through-visible-suffix"
+                    : selectedProof.UnknownReason;
+                return false;
+            }
+
+            NetherInteractiveOptionProjection projection = CreateProjection(
+                completeBranchDecision,
+                floorId,
+                nodeId,
+                isKnown: true,
+                hasRouteSafetyEvidence: true,
+                routeSafetyAllowed: selectedProof.IsNextVisibleBranchSafe,
+                routeSafetyUnknownReason: selectedProof.UnknownReason
+            );
+            optionProjections[OptionKey(selectedOption)] = projection;
+            foreach (NetherEventOption option in options)
+            {
+                if (ReferenceEquals(option, selectedOption))
+                    continue;
+                optionProjections[OptionKey(option)] = UnknownProjection(
+                    option,
+                    floorId,
+                    nodeId,
+                    "recovery-option-not-selected-by-complete-branch-proof"
+                );
+            }
+            selectedOptionNumber = completeBranchDecision.OptionNumber;
+            selectedProjection = projection;
+            return true;
+        }
+
         foreach (NetherEventOption option in options)
         {
             NetherEventDecision decision = DecideInteractiveOption(
                 snapshot,
                 [option],
                 settings,
-                floorKind
+                floorKind,
+                requireCompleteRecoveryBranchSafety: false
             );
             if (decision.Kind != NetherEventDecisionKind.Select)
             {
@@ -956,7 +1218,8 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             snapshot,
             safeOptions,
             settings,
-            floorKind
+            floorKind,
+            requireCompleteRecoveryBranchSafety: false
         );
         if (selected.Kind != NetherEventDecisionKind.Select || selected.StartsBattleAfterSelection)
         {
@@ -977,6 +1240,31 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             return false;
         }
         return true;
+    }
+
+    private static NetherCodeTransformHardExclusionEvidence ResolveRecoveryTransformHardExclusions(
+        IReadOnlyList<NetherEventOption> options
+    )
+    {
+        NetherCodeTransformEligibilityEvidence?[] eligibility = (options ?? Array.Empty<NetherEventOption>())
+            .Select(option => option?.RecoveryBranchSafety?.TransformEligibility)
+            .ToArray();
+        if (eligibility.Length != 3
+            || eligibility.Any(item => item == null || !item.IsKnown || !item.IsRecovery)
+            || eligibility.Select(item => item!.HardExcludedCodes ?? Array.Empty<NetherCodeTransformHardExclusion>())
+                .Distinct()
+                .Count() != 1)
+        {
+            return NetherCodeTransformHardExclusionEvidence.Unknown(
+                "code-transform-hard-exclusions-not-captured"
+            );
+        }
+        return new NetherCodeTransformHardExclusionEvidence
+        {
+            IsKnown = true,
+            HardExcludedCodes = eligibility[0]!.HardExcludedCodes
+                ?? Array.Empty<NetherCodeTransformHardExclusion>(),
+        };
     }
 
     private static NetherInteractiveEventOptionKey OptionKey(NetherEventOption option) => new(
@@ -1018,7 +1306,11 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         CommittedGoldMinimum = decision.CommittedGoldMinimum,
         CommittedKeyMinimum = decision.CommittedKeyMinimum,
         IsMandatoryRankFiveKeyObjective = decision.PartialDeathEligibility?.AllowsHpPaidEventKey == true
-            && decision.PartialDeathEligibility.ExactTreasureRank == 5,
+            && decision.PartialDeathEligibility.ExactTreasureRank == 5
+            || decision.RankFiveKeyProcurementCommitment != null
+            || decision.RankFiveTreasureObjective.HasValue,
+        RankFiveKeyProcurementCommitment = decision.RankFiveKeyProcurementCommitment,
+        RankFiveTreasureObjective = decision.RankFiveTreasureObjective,
     };
 
     private static NetherInteractiveOptionProjection UnknownProjection(
@@ -1050,11 +1342,17 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
         NetherAutoClimbSettings settings,
-        NetherFloorNodeType floorKind
+        NetherFloorNodeType floorKind,
+        bool requireCompleteRecoveryBranchSafety
     ) => floorKind switch
     {
         NetherFloorNodeType.Event => _eventPolicy.DecideEvent(snapshot, options, settings),
-        NetherFloorNodeType.Recovery => _eventPolicy.DecideRecovery(snapshot, options, settings),
+        NetherFloorNodeType.Recovery => DecideRecoveryOption(
+            snapshot,
+            options,
+            settings,
+            requireCompleteRecoveryBranchSafety
+        ),
         NetherFloorNodeType.Treasure => _eventPolicy.DecideTreasure(snapshot, options, settings),
         _ => new NetherEventDecision
         {
@@ -1063,6 +1361,35 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             Detail = "unsupported-interactive-option-floor-kind",
         },
     };
+
+    private NetherEventDecision DecideRecoveryOption(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherEventOption> options,
+        NetherAutoClimbSettings settings,
+        bool requireCompleteRecoveryBranchSafety
+    )
+    {
+        NetherCodeTransformHardExclusionEvidence hardExclusions =
+            NetherCodeTransformHardExclusionEvidence.Unknown(
+                "code-transform-hard-exclusions-not-captured"
+            );
+        return requireCompleteRecoveryBranchSafety
+            ? _eventPolicy.DecideRecovery(
+                snapshot,
+                options,
+                settings,
+                Array.Empty<NetherErosionModifier>(),
+                hardExclusions,
+                requireCompleteBranchEvidence: true
+            )
+            : _eventPolicy.DecideRecoveryForRouteAnalysis(
+                snapshot,
+                options,
+                settings,
+                Array.Empty<NetherErosionModifier>(),
+                hardExclusions
+            );
+    }
 
     private static NetherRouteHpRule MapOptionHpRule(
         NetherFloorNodeType floorKind,

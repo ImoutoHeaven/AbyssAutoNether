@@ -8,8 +8,8 @@ namespace AutoNether.Services;
 
 /// <summary>
 /// Joins the exact pre-entry proof and the immutable strategy package to a newly mapped native
-/// Event popup. The native callback remains the only mutation seam; this class only carries the
-/// route commitment and mode facts across that seam.
+/// Event/Recovery/Treasure popup. The native callback remains the only mutation seam; this class
+/// only carries the route commitment and mode facts across that seam.
 /// </summary>
 internal static class NetherEventProductionEvidenceBinding
 {
@@ -26,7 +26,9 @@ internal static class NetherEventProductionEvidenceBinding
             throw new ArgumentNullException(nameof(popup));
         if (settings == null)
             throw new ArgumentNullException(nameof(settings));
-        if (popup.Kind != NetherRuntimePopupKind.Event)
+        if (popup.Kind is not (NetherRuntimePopupKind.Event
+            or NetherRuntimePopupKind.Recovery
+            or NetherRuntimePopupKind.Treasure))
             return popup;
 
         bool researchFactsKnown = settings.StrategyMode != NetherStrategyMode.Research;
@@ -84,6 +86,37 @@ internal static class NetherEventProductionEvidenceBinding
         };
     }
 
+    /// <summary>
+    /// Binds the selected-branch rank-five Shop commitment to the mapped native Shop popup.
+    /// A Shop key is native content with one authoritative 200-gold payment; an absent or
+    /// non-Shop decision leaves the popup uncommitted so dispatch can fail closed.
+    /// </summary>
+    public static NetherRuntimePopupContext BindRankFiveShopCommitment(
+        NetherRuntimePopupContext popup,
+        NetherRankFiveKeyProcurementDecision? decision
+    )
+    {
+        if (popup == null)
+            throw new ArgumentNullException(nameof(popup));
+        if (decision?.Commitment is not NetherRankFiveKeyProcurementCommitment commitment
+            || commitment.SourceKind != NetherKeyProcurementSourceKind.ShopGold200
+            || !commitment.IsValid)
+        {
+            return popup;
+        }
+        return popup with
+        {
+            ShopProcurementCommitment = new NetherShopProcurementCommitment
+            {
+                IsKnown = true,
+                RequiresRankFiveKey = true,
+                KeyContentId = commitment.SourceContentId,
+                KeyCost = 200,
+                Objective = commitment.Objective,
+            },
+        };
+    }
+
     private static NetherEventOption BindOption(
         NetherRuntimePopupContext popup,
         NetherEventOption option,
@@ -108,6 +141,12 @@ internal static class NetherEventProductionEvidenceBinding
         bool dependentRows = hasVisible && HasExactDependentRows(visible, option);
         NetherInteractivePartialDeathEligibility? partialProof = option.PartialDeathEligibility
             ?? projection?.PartialDeathEligibility;
+        NetherRankFiveKeyProcurementCommitment? rankFiveCommitment =
+            projection?.RankFiveKeyProcurementCommitment
+            ?? option.RankFiveKeyProcurementCommitment;
+        NetherRankFiveTreasureIdentity? rankFiveObjective =
+            projection?.RankFiveTreasureObjective
+            ?? option.RankFiveTreasureObjective;
         bool partialEvidence = !exact || HasExactPartialDeathEvidence(
             option,
             projection,
@@ -198,6 +237,8 @@ internal static class NetherEventProductionEvidenceBinding
             ResearchIncomplete = !researchFactsKnown ||
                 partialProof?.ExactTreasureRank is > 0 and < 5,
             HasRankFiveTreasureObjective = (option.IsMandatoryRankFiveKeyObjective
+                || rankFiveCommitment != null
+                || rankFiveObjective.HasValue
                 || partialProof?.AllowsHpPaidEventKey == true)
                 && partialEvidence
                 && partialProof?.ExactTreasureRank == 5,
@@ -223,9 +264,13 @@ internal static class NetherEventProductionEvidenceBinding
             CommittedGoldMinimum = committedGoldMinimum,
             CommittedKeyMinimum = committedKeyMinimum,
             IsMandatoryRankFiveKeyObjective = (option.IsMandatoryRankFiveKeyObjective
+                || rankFiveCommitment != null
+                || rankFiveObjective.HasValue
                 || partialProof?.AllowsHpPaidEventKey == true)
                 && partialProof?.ExactTreasureRank == 5,
             StrategyEvidence = optionEvidence,
+            RankFiveKeyProcurementCommitment = rankFiveCommitment,
+            RankFiveTreasureObjective = rankFiveObjective,
             UnknownReason = known && floorId > 0 && nodeId > 0
                 ? option.UnknownReason
                 : reason,
@@ -607,6 +652,10 @@ internal static class NetherEventProductionEvidenceBinding
                 CommittedKeyMinimum = option.CommittedKeyMinimum,
                 PartialDeathEligibility = option.PartialDeathEligibility,
                 AllowsPartialActiveDeaths = projection.AllowsPartialActiveDeaths,
+                RankFiveKeyProcurementCommitment = projection.RankFiveKeyProcurementCommitment
+                    ?? option.RankFiveKeyProcurementCommitment,
+                RankFiveTreasureObjective = projection.RankFiveTreasureObjective
+                    ?? option.RankFiveTreasureObjective,
             };
             commitments[new NetherEventCommitmentKey(
                 commitment.EventId,

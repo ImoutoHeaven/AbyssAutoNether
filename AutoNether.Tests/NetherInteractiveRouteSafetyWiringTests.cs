@@ -178,7 +178,7 @@ public class NetherInteractiveRouteSafetyWiringTests
         );
 
         Assert.False(capture.Safety.IsSafe);
-        Assert.Equal(NetherPauseReason.UnsafeHp, capture.Safety.PauseReason);
+        Assert.Equal(NetherPauseReason.NoSafeRoute, capture.Safety.PauseReason);
         Assert.False(decision.Route.HasSelection);
     }
 
@@ -204,24 +204,30 @@ public class NetherInteractiveRouteSafetyWiringTests
                 Part(
                     1001,
                     (int)NetherEffectKind.Damage,
-                    200,
+                    80,
                     contentType: grantsTreasureKey ? 166 : 0,
                     amount: grantsTreasureKey ? 1 : 0
                 ),
             ],
             keys: 0,
-            activeHp: [100, 500],
+            activeHp: [80, 500],
             partialDeathEligibility: [Eligibility(floorKind, 42, 1001)]
         );
 
         NetherAutoClimbRouteSafetyDecision decision = DecideExactHpCost(
             floorKind,
             capture,
-            [100, 500]
+            [80, 500]
         );
 
         Assert.True(capture.Safety.IsSafe, capture.Safety.PauseReason + ":" + capture.Safety.Detail);
-        Assert.True(decision.Route.HasSelection, decision.Route.PauseReason + ":" + decision.Route.PauseDetail);
+        Assert.True(
+            decision.Route.HasSelection,
+            decision.Route.PauseReason + ":" + decision.Route.PauseDetail + ":"
+                + string.Join("|", decision.Route.Audit.Select(audit =>
+                    audit.FloorId + ":" + audit.Reason + ":" + audit.Detail
+                        + ":" + decision.Context.HorizonRejection(audit.FloorId)))
+        );
         Assert.Equal(2, Assert.IsType<NetherFloorNode>(decision.Route.SelectedNode).NodeId);
         Assert.Equal(0, decision.Context.MinimumActiveCharacterHpPermille(2));
     }
@@ -243,13 +249,13 @@ public class NetherInteractiveRouteSafetyWiringTests
                 Part(
                     1001,
                     (int)NetherEffectKind.Damage,
-                    200,
+                    80,
                     contentType: grantsTreasureKey ? 166 : 0,
                     amount: grantsTreasureKey ? 1 : 0
                 ),
             ],
             keys: 0,
-            activeHp: [100, 150],
+            activeHp: [60, 70],
             partialDeathEligibility: [Eligibility(floorKind, 42, 1001)]
         );
 

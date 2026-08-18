@@ -100,6 +100,84 @@ public class NetherPopupDispatchPolicyTests
     }
 
     [Fact]
+    public void Rank_five_event_commitment_is_carried_through_dispatch_and_rejects_a_stale_objective()
+    {
+        NetherRankFiveTreasureIdentity objective = new(9401, 9402, 9403);
+        NetherRankFiveKeyProcurementCommitment procurement = new()
+        {
+            Objective = objective,
+            SourceKind = NetherKeyProcurementSourceKind.EventGold150,
+            SourceNodeId = 1,
+            SourceEventId = 9101,
+            SourceEventPartId = 9102,
+            SourceOptionNumber = 1,
+            GoldCost = 150,
+        };
+        NetherEffect effect = new(NetherEffectKind.Item, 1)
+        {
+            ContentId = 9001,
+            RewardEvidence = new NetherEventRewardEvidence(9001, 9001, 91, NetherRewardRarity.Gold, 1),
+        };
+        NetherEventOption option = new(1, [effect])
+        {
+            EventId = 9101,
+            EventPartId = 9102,
+            FloorId = 10,
+            NodeId = 1,
+            RequiresExactBinding = true,
+            RankFiveKeyProcurementCommitment = procurement,
+            RankFiveTreasureObjective = objective,
+        };
+        NetherEventCommitment expected = new(9101, 9102, 1, [effect], 20, 0)
+        {
+            FloorId = 10,
+            NodeId = 1,
+            Reward = effect.RewardEvidence,
+            ProjectedNetherGold = 100,
+            ProjectedTreasureKeys = 0,
+            RankFiveKeyProcurementCommitment = procurement,
+            RankFiveTreasureObjective = objective,
+        };
+
+        NetherPopupDispatchDecision dispatched = NetherPopupDispatchPolicy.Decide(
+            Snapshot(),
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Event,
+                RawFloorType = 4,
+                TargetCharacterId = 101,
+                ExpectedEventCommitment = expected,
+                Options = [option],
+            },
+            Settings()
+        );
+
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, dispatched.Kind);
+        Assert.Equal(procurement, dispatched.Action.EventCommitment!.RankFiveKeyProcurementCommitment);
+        Assert.Equal(objective, dispatched.Action.EventCommitment.RankFiveTreasureObjective);
+
+        NetherEventCommitment stale = expected with
+        {
+            RankFiveTreasureObjective = new NetherRankFiveTreasureIdentity(9501, 9502, 9503),
+        };
+        NetherPopupDispatchDecision rejected = NetherPopupDispatchPolicy.Decide(
+            Snapshot(),
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Event,
+                RawFloorType = 4,
+                TargetCharacterId = 101,
+                ExpectedEventCommitment = stale,
+                Options = [option],
+            },
+            Settings()
+        );
+
+        Assert.Equal(NetherPopupDispatchKind.Pause, rejected.Kind);
+        Assert.Equal(NetherPauseReason.StaleEventCommitment, rejected.PauseReason);
+    }
+
+    [Fact]
     public void Positive_committed_procurement_minimum_mismatch_pauses_before_native_payment()
     {
         NetherEffect effect = new(NetherEffectKind.NetherGoldGain, 10);
@@ -870,6 +948,46 @@ public class NetherPopupDispatchPolicyTests
 
         Assert.Equal(NetherPopupDispatchKind.NativeAction, decision.Kind);
         Assert.Equal(NetherActionKind.LeaveShop, decision.Action.Kind);
+    }
+
+    [Fact]
+    public void Rank_five_shop_key_commitment_is_carried_into_the_buy_action()
+    {
+        NetherShopProcurementCommitment commitment = new()
+        {
+            IsKnown = true,
+            RequiresRankFiveKey = true,
+            Objective = new NetherRankFiveTreasureIdentity(4, 401, 4011),
+            KeyContentId = 3001,
+            KeyCost = 200,
+        };
+        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
+            Snapshot() with { NetherGold = 250 },
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Shop,
+                ShopProcurementCommitment = commitment,
+                ShopContents =
+                [
+                    new NetherShopContent(
+                        3001,
+                        0,
+                        0,
+                        NetherRewardRarity.NoEffect,
+                        200,
+                        usesNetherGold: true
+                    )
+                    {
+                        IsTreasureKey = true,
+                    },
+                ],
+            },
+            Settings(shop: NetherShopMode.EquipmentBags)
+        );
+
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, decision.Kind);
+        Assert.Equal(NetherActionKind.BuyShopItem, decision.Action.Kind);
+        Assert.Equal(commitment, decision.Action.ShopProcurementCommitment);
     }
 
     private static NetherSnapshot Snapshot(int keys = 0) => new()

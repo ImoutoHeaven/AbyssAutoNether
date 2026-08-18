@@ -108,6 +108,27 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
     }
 
     [Fact]
+    public void Production_recovery_capture_fails_closed_when_selected_horizon_proofs_are_absent()
+    {
+        NetherRuntimeInteractivePreEntryCaptureResult result = Capture(
+            floor: new FloorFixture { MNetherMapFloorId = 900, ExtendId = 42, FloorType = (int)NetherFloorNodeType.Recovery },
+            events: new object[] { Event(42, 900, 1, 4, 1001, 1002, 1003) },
+            parts: new object[]
+            {
+                Part(1001, (int)NetherEffectKind.Heal, 100),
+                Part(1002, (int)NetherEffectKind.ErosionHeal, 10),
+                Part(1003, 7, 0),
+            },
+            requireCompleteRecoveryBranchSafety: true
+        );
+
+        Assert.True(result.IsCaptured);
+        Assert.False(result.Safety.IsSafe);
+        Assert.Equal(NetherPauseReason.UnknownMasterData, result.Safety.PauseReason);
+        Assert.Contains("recovery-complete-visible-branch-unavailable", result.Safety.Detail);
+    }
+
+    [Fact]
     public void Malformed_empty_target_parameter_is_option_local_and_does_not_become_known_gold_gain()
     {
         NetherRuntimeInteractivePreEntryCaptureResult result = Capture(
@@ -354,7 +375,8 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
         IReadOnlyList<NetherCodeState>? codes = null,
         IEnumerable? itemRows = null,
         IEnumerable? battleRows = null,
-        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? committedProcurement = null
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? committedProcurement = null,
+        bool requireCompleteRecoveryBranchSafety = false
     ) => new NetherRuntimeInteractivePreEntryInputCapture().Capture(new NetherRuntimeInteractivePreEntryCaptureRequest(
         FloorModel: floor ?? new FloorFixture
         {
@@ -385,6 +407,7 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
         BattleRows = battleRows,
         CommittedProcurementByOption = committedProcurement
             ?? new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(),
+        RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,
     });
 
     private static EventFixture Event(

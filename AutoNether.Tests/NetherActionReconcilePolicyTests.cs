@@ -257,6 +257,87 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
+    public void Rank_five_shop_commitment_must_match_the_reconciled_content_and_cost()
+    {
+        NetherShopProcurementCommitment commitment = new()
+        {
+            IsKnown = true,
+            RequiresRankFiveKey = true,
+            Objective = new NetherRankFiveTreasureIdentity(4, 401, 4011),
+            KeyContentId = 3001,
+            KeyCost = 200,
+        };
+        NetherSnapshot before = Snapshot(items: Array.Empty<NetherRewardItem>(), gold: 250);
+        NetherSnapshot exact = Snapshot(items: new[] { new NetherRewardItem(3001, 1) }, gold: 50);
+        NetherSnapshot wrongCost = Snapshot(items: new[] { new NetherRewardItem(3001, 1) }, gold: 49);
+        NetherPlannedAction action = new(NetherActionKind.BuyShopItem)
+        {
+            ContentId = 3001,
+            GoldCost = 200,
+            ContentAmount = 1,
+            ShopProcurementCommitment = commitment,
+        };
+
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongCost));
+
+        NetherPlannedAction wrongContent = action with { ContentId = 3002 };
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(wrongContent, before, exact));
+    }
+
+    [Fact]
+    public void Rank_five_event_commitment_survives_dispatch_action_reconciliation()
+    {
+        NetherRankFiveTreasureIdentity objective = new(4, 401, 4011);
+        NetherRankFiveKeyProcurementCommitment procurement = new()
+        {
+            Objective = objective,
+            SourceKind = NetherKeyProcurementSourceKind.EventGold150,
+            SourceNodeId = 1,
+            SourceEventId = 9901,
+            SourceEventPartId = 9902,
+            SourceOptionNumber = 1,
+            GoldCost = 150,
+        };
+        NetherEffect effect = new(NetherEffectKind.Item, 1)
+        {
+            ContentId = 42,
+            RewardEvidence = new NetherEventRewardEvidence(42, 42, 91, NetherRewardRarity.Gold, 1),
+        };
+        NetherEventCommitment commitment = new(9901, 9902, 1, [effect], 20, 0)
+        {
+            FloorId = 10,
+            NodeId = 1,
+            Reward = effect.RewardEvidence,
+            ProjectedNetherGold = 100,
+            ProjectedTreasureKeys = 1,
+            RankFiveKeyProcurementCommitment = procurement,
+            RankFiveTreasureObjective = objective,
+        };
+        NetherPlannedAction action = new(NetherActionKind.SelectEventOption)
+        {
+            OptionNumber = 1,
+            ExpectedEffects = [effect],
+            EventId = 9901,
+            EventPartId = 9902,
+            EventFloorId = 10,
+            EventNodeId = 1,
+            ProjectedErosion = 20,
+            ProjectedHpDelta = 0,
+            ProjectedNetherGold = 100,
+            ProjectedTreasureKeys = 1,
+            EventCommitment = commitment,
+        };
+        NetherActionOutcome outcome = NetherActionReconcilePolicy.Evaluate(
+            action,
+            Snapshot(items: Array.Empty<NetherRewardItem>(), gold: 100),
+            Snapshot(items: new[] { new NetherRewardItem(42, 1) }, gold: 100)
+        );
+
+        Assert.Equal(NetherActionOutcome.Applied, outcome);
+    }
+
+    [Fact]
     public void Exact_continue_ticket_map_floor_and_segment_is_applied_but_wrong_target_is_not()
     {
         NetherSnapshot before = Snapshot(ticketCount: 3, mapId: 2, floorLevel: 10);

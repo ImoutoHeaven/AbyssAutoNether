@@ -128,6 +128,11 @@ public class NetherRouteSafetyProductionCoordinatorTests
         Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
         Assert.Equal(new NetherEventProcurementBudget(200, 0), plan.EventProcurementCommitments[goldKey]);
         Assert.Equal(new NetherEventProcurementBudget(0, 1), plan.EventProcurementCommitments[keyKey]);
+        Assert.True(
+            plan.RankFiveKeyProcurement.HasMandatoryObjective,
+            $"{plan.RankFiveKeyProcurement.Detail}|source={plan.RankFiveKeyProcurement.SourceKind}|path={string.Join(",", plan.Route.SelectedPathNodeIds ?? Array.Empty<long>())}|hardSafe={string.Join(",", plan.Context.HardSafeByFloorId.Where(pair => pair.Value).Select(pair => pair.Key))}"
+        );
+        Assert.Equal(4, plan.RankFiveKeyProcurement.Objective.ObjectiveNodeId);
     }
 
     [Fact]
@@ -793,6 +798,565 @@ public class NetherRouteSafetyProductionCoordinatorTests
         Assert.True(plan.BattleProjectionByFloorId.ContainsKey(200));
         Assert.False(plan.BattleProjectionByFloorId.ContainsKey(3));
     }
+
+    [Fact]
+    public void Production_route_plan_projects_each_recovery_option_through_the_selected_visible_suffix()
+    {
+        // Fresh native decomp d: MNetherFloorEventParts exposes the exact numeric option effects,
+        // while the native Recovery popup only submits the selected option callback. The route
+        // owner must therefore simulate each option through the same visible suffix before binding
+        // a proof; a local RouteSafetyAllowed bit is not a branch proof.
+        NetherFloorNode[] floors =
+        [
+            Floor(1, 1, NetherFloorNodeType.Event, previous: Array.Empty<long>()),
+            Floor(2, 2, NetherFloorNodeType.Recovery, previous: new[] { 1L }),
+            Floor(3, 3, NetherFloorNodeType.Boss, previous: new[] { 2L }),
+        ];
+        NetherSnapshot snapshot = SnapshotWithHp(68, 500, floors) with
+        {
+            CurrentNodeId = 1,
+            TreasureKeyCount = 1,
+        };
+        NetherAutoClimbSettings settings = Settings();
+        NetherInteractiveOptionProjection eventProjection = Projection(
+            eventId: 100,
+            partId: 1001,
+            optionNumber: 1,
+            floorId: 1,
+            nodeId: 1,
+            erosionDelta: 0,
+            effects: [new NetherEffect(NetherEffectKind.Heal, 1)]
+        );
+        NetherInteractiveOptionProjection rest = Projection(
+            eventId: 200,
+            partId: 2001,
+            optionNumber: 1,
+            floorId: 2,
+            nodeId: 2,
+            erosionDelta: 0,
+            effects: [new NetherEffect(NetherEffectKind.Heal, 200)]
+        );
+        NetherInteractiveOptionProjection purification = Projection(
+            eventId: 200,
+            partId: 2002,
+            optionNumber: 2,
+            floorId: 2,
+            nodeId: 2,
+            erosionDelta: -20,
+            effects: [new NetherEffect(NetherEffectKind.ErosionHeal, 20)]
+        );
+        NetherInteractiveOptionProjection transform = Projection(
+            eventId: 200,
+            partId: 2003,
+            optionNumber: 3,
+            floorId: 2,
+            nodeId: 2,
+            erosionDelta: 0,
+            effects: [new NetherEffect(NetherEffectKind.AbyssCodeTransform, 0)]
+        );
+        NetherRuntimeInteractivePreEntryInputsResult capture =
+            InteractiveCapture(
+                snapshot,
+                settings,
+                new Dictionary<long, NetherInteractiveFloorPreEntryCaptureSpec>
+                {
+                    [1] = new(
+                        NetherFloorNodeType.Event,
+                        NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                            new Dictionary<long, int> { [100] = 1 },
+                            new Dictionary<long, NetherInteractiveOptionProjection> { [100] = eventProjection },
+                            new NetherInteractiveWorstCaseProjection(0, 0),
+                            new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                            {
+                                [new NetherInteractiveEventOptionKey(100, 1001, 1)] = eventProjection,
+                            }
+                        )
+                    ),
+                    [2] = new(
+                        NetherFloorNodeType.Recovery,
+                        NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                            new Dictionary<long, int> { [200] = 2 },
+                            new Dictionary<long, NetherInteractiveOptionProjection> { [200] = purification },
+                            new NetherInteractiveWorstCaseProjection(-20, 0),
+                            new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                            {
+                                [new NetherInteractiveEventOptionKey(200, 2001, 1)] = rest,
+                                [new NetherInteractiveEventOptionKey(200, 2002, 2)] = purification,
+                                [new NetherInteractiveEventOptionKey(200, 2003, 3)] = transform,
+                            }
+                        )
+                    ),
+                }
+            );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            settings,
+            Runtime(
+                hpPermille: 500,
+                bounds: new Dictionary<long, NetherFloorMasterBounds> { [3] = Bounds(3, 0, 0) }
+            ),
+            capture
+        );
+
+        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
+        NetherRecoveryBranchSafetyEvidence restProof = plan.RecoveryBranchSafetyByPartId[2001];
+        NetherRecoveryBranchSafetyEvidence purificationProof = plan.RecoveryBranchSafetyByPartId[2002];
+        Assert.True(restProof.IsKnown);
+        Assert.True(restProof.IsCompleteVisibleBranch);
+        Assert.False(restProof.IsNextVisibleBranchSafe);
+        Assert.Contains("70", restProof.UnknownReason);
+        Assert.True(purificationProof.IsKnown);
+        Assert.True(purificationProof.IsCompleteVisibleBranch);
+        Assert.True(purificationProof.IsNextVisibleBranchSafe);
+    }
+
+    [Fact]
+    public void Production_final_recapture_preserves_carried_sibling_recovery_proofs()
+    {
+        // Fresh native decomp e: the Recovery controller binds one selected callback, so its
+        // final capture may expose the selected projection while sibling rows are locally unknown.
+        // The route-owned branch proof must remain authoritative across that recapture; otherwise
+        // the controller would reject its own unchanged selected-horizon evidence.
+        NetherFloorNode[] floors =
+        [
+            Floor(1, 1, NetherFloorNodeType.Event, previous: Array.Empty<long>()),
+            Floor(2, 2, NetherFloorNodeType.Recovery, previous: new[] { 1L }),
+            Floor(3, 3, NetherFloorNodeType.Boss, previous: new[] { 2L }),
+        ];
+        NetherSnapshot snapshot = SnapshotWithHp(68, 500, floors) with
+        {
+            CurrentNodeId = 1,
+            TreasureKeyCount = 1,
+        };
+        NetherAutoClimbSettings settings = Settings();
+        NetherInteractiveOptionProjection eventProjection = Projection(
+            100, 1001, 1, 1, 1, 0, [new NetherEffect(NetherEffectKind.Heal, 1)]
+        );
+        NetherInteractiveOptionProjection rest = Projection(
+            200, 2001, 1, 2, 2, 0, [new NetherEffect(NetherEffectKind.Heal, 200)]
+        );
+        NetherInteractiveOptionProjection purification = Projection(
+            200, 2002, 2, 2, 2, -20, [new NetherEffect(NetherEffectKind.ErosionHeal, 20)]
+        );
+        NetherInteractiveOptionProjection transform = Projection(
+            200, 2003, 3, 2, 2, 0, [new NetherEffect(NetherEffectKind.AbyssCodeTransform, 0)]
+        );
+        NetherRuntimeInteractivePreEntryInputsResult initialCapture = InteractiveCapture(
+            snapshot,
+            settings,
+            new Dictionary<long, NetherInteractiveFloorPreEntryCaptureSpec>
+            {
+                [1] = new(
+                    NetherFloorNodeType.Event,
+                    NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [100] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [100] = eventProjection },
+                        new NetherInteractiveWorstCaseProjection(0, 0),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(100, 1001, 1)] = eventProjection,
+                        }
+                    )
+                ),
+                [2] = new(
+                    NetherFloorNodeType.Recovery,
+                    NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [200] = 2 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [200] = purification },
+                        new NetherInteractiveWorstCaseProjection(-20, 0),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(200, 2001, 1)] = rest,
+                            [new NetherInteractiveEventOptionKey(200, 2002, 2)] = purification,
+                            [new NetherInteractiveEventOptionKey(200, 2003, 3)] = transform,
+                        }
+                    )
+                ),
+            }
+        );
+        NetherRuntimeRouteSafetyData runtime = Runtime(
+            hpPermille: 500,
+            bounds: new Dictionary<long, NetherFloorMasterBounds> { [3] = Bounds(3, 0, 0) }
+        );
+        NetherRouteSafetyProductionCoordinator coordinator = new();
+        NetherProductionRouteSafetyPlan initialPlan = coordinator.Plan(
+            snapshot,
+            130,
+            settings,
+            runtime,
+            initialCapture
+        );
+
+        NetherInteractiveOptionProjection UnknownSibling(NetherInteractiveOptionProjection option) => option with
+        {
+            IsKnown = false,
+            HasRouteSafetyEvidence = false,
+            RouteSafetyAllowed = false,
+            UnknownReason = "recovery-option-not-selected-by-complete-branch-proof",
+            RouteSafetyUnknownReason = "recovery-option-not-selected-by-complete-branch-proof",
+        };
+        NetherInteractiveFloorPreEntrySafetyResult finalRecoverySafety =
+            NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                new Dictionary<long, int> { [200] = 2 },
+                new Dictionary<long, NetherInteractiveOptionProjection> { [200] = purification },
+                new NetherInteractiveWorstCaseProjection(-20, 0),
+                new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                {
+                    [new NetherInteractiveEventOptionKey(200, 2001, 1)] = UnknownSibling(rest),
+                    [new NetherInteractiveEventOptionKey(200, 2002, 2)] = purification,
+                    [new NetherInteractiveEventOptionKey(200, 2003, 3)] = UnknownSibling(transform),
+                }
+            );
+        var finalEntries = initialCapture.ByFloorNodeId.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value with
+            {
+                Input = pair.Value.Input! with
+                {
+                    RecoveryBranchSafetyByPartId = new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(
+                        initialPlan.RecoveryBranchSafetyByPartId
+                    ),
+                    RequireCompleteRecoveryBranchSafety = true,
+                },
+                Safety = pair.Key == 2 ? finalRecoverySafety : pair.Value.Safety,
+            }
+        );
+        NetherProductionRouteSafetyPlan finalPlan = coordinator.Plan(
+            snapshot,
+            130,
+            settings,
+            runtime,
+            initialCapture with
+            {
+                ByFloorNodeId = finalEntries,
+            }
+        );
+
+        Assert.True(finalPlan.Route.HasSelection, finalPlan.Route.PauseReason + ":" + finalPlan.Route.PauseDetail);
+        Assert.True(finalPlan.RecoveryBranchSafetyByPartId[2001].IsKnown);
+        Assert.False(finalPlan.RecoveryBranchSafetyByPartId[2001].IsNextVisibleBranchSafe);
+        Assert.True(finalPlan.RecoveryBranchSafetyByPartId[2002].IsKnown);
+        Assert.True(finalPlan.RecoveryBranchSafetyByPartId[2002].IsNextVisibleBranchSafe);
+    }
+
+    [Fact]
+    public void Production_rank_five_procurement_uses_the_event_located_battle_entry_after_plus_eighty_recovery()
+    {
+        // Fresh native decomp d: Event execution is bound to the exact visible option, while the
+        // route gate must evaluate the first later battle entry, not a terminal-node snapshot.
+        // This route reaches 80 at the erosion-paid Event, recovers to 60, then enters the Boss.
+        NetherFloorNode[] floors =
+        [
+            Floor(1, 1, NetherFloorNodeType.Recovery, previous: Array.Empty<long>()),
+            Floor(2, 2, NetherFloorNodeType.Event, previous: new[] { 1L }),
+            Floor(3, 3, NetherFloorNodeType.Recovery, previous: new[] { 2L }),
+            Floor(4, 4, NetherFloorNodeType.Shop, previous: new[] { 3L }),
+            Floor(5, 5, NetherFloorNodeType.Treasure, previous: new[] { 4L }),
+            Floor(6, 6, NetherFloorNodeType.Boss, previous: new[] { 5L }),
+        ];
+        NetherSnapshot snapshot = SnapshotWithHp(0, 500, floors) with
+        {
+            CurrentNodeId = 1,
+            NetherGold = 0,
+            TreasureKeyCount = 0,
+        };
+        NetherAutoClimbSettings settings = Settings();
+        NetherInteractiveOptionProjection rootRecovery = Projection(
+            101, 1011, 1, 1, 1, 0, [new NetherEffect(NetherEffectKind.Heal, 1)]
+        );
+        NetherInteractiveOptionProjection erosionKey = Projection(
+            102, 1021, 1, 2, 2, 80,
+            [
+                new NetherEffect(NetherEffectKind.Erosion, 80),
+                new NetherEffect(NetherEffectKind.TreasureKeyGain, 1),
+            ]
+        );
+        NetherInteractiveOptionProjection recovery = Projection(
+            103, 1031, 1, 3, 3, -20,
+            [new NetherEffect(NetherEffectKind.ErosionHeal, 20)]
+        );
+        NetherInteractiveOptionProjection treasure = Projection(
+            105, 1051, 1, 5, 5, 0,
+            [new NetherEffect(NetherEffectKind.TreasureKeyGain, 1)]
+        );
+        NetherRuntimeInteractivePreEntryInputsResult capture = InteractiveCapture(
+            snapshot,
+            settings,
+            new Dictionary<long, NetherInteractiveFloorPreEntryCaptureSpec>
+            {
+                [1] = RecoveryCapture(rootRecovery),
+                [2] = EventCapture(erosionKey),
+                [3] = RecoveryCapture(recovery),
+                [4] = new(
+                    NetherFloorNodeType.Shop,
+                    NetherInteractiveFloorPreEntrySafetyResult.SafeNeutral()
+                ),
+                [5] = new(
+                    NetherFloorNodeType.Treasure,
+                    NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [105] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [105] = treasure },
+                        new NetherInteractiveWorstCaseProjection(0, 0),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(105, 1051, 1)] = treasure,
+                        }
+                    )
+                ),
+            }
+        );
+        NetherStrategyVisibleMapEvidence visibleMap = new(
+            floors,
+            [
+                VisibleErosionKeyEvent(2, 102, 1021, 1),
+                new NetherStrategyVisibleContentRow(
+                    NetherStrategyVisibleContentKind.Treasure,
+                    5,
+                    5001,
+                    500
+                )
+                {
+                    IsKnown = true,
+                    EventId = 501,
+                    EventPartId = 5011,
+                },
+                new NetherStrategyVisibleContentRow(
+                    NetherStrategyVisibleContentKind.Item,
+                    5,
+                    5011,
+                    5011
+                )
+                {
+                    IsKnown = true,
+                    EventId = 501,
+                    EventPartId = 5011,
+                    ItemType = 91,
+                    ItemRarity = 5,
+                    Amount = 1,
+                },
+            ]
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            settings,
+            Runtime(
+                hpPermille: 500,
+                bounds: new Dictionary<long, NetherFloorMasterBounds> { [6] = Bounds(6, 0, 0) }
+            ) with
+            {
+                VisibleMap = visibleMap,
+            },
+            capture
+        );
+
+        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
+        Assert.Equal(NetherKeyProcurementSourceKind.ErosionPaidEventKey, plan.RankFiveKeyProcurement.SourceKind);
+        Assert.True(plan.RankFiveKeyProcurement.ErosionAmountIsExactEighty);
+        Assert.Equal(5, plan.RankFiveKeyProcurement.Objective.ObjectiveNodeId);
+    }
+
+    [Fact]
+    public void Production_route_rejects_treasure_damage_twenty_even_when_partial_death_is_locally_proved()
+    {
+        // Fresh native decomp d: Treasure/Event popup controllers resolve exact EventPart IDs and
+        // execute the selected callback; the mapper may grant group survival only for native 40/80
+        // damage payments. Damage 20 must remain ordinary all-living survival.
+        NetherFloorNode[] floors =
+        [
+            Floor(1, 1, NetherFloorNodeType.Shop, previous: Array.Empty<long>()),
+            Floor(2, 2, NetherFloorNodeType.Treasure, previous: new[] { 1L }),
+            Floor(3, 3, NetherFloorNodeType.Boss, previous: new[] { 2L }),
+        ];
+        NetherSnapshot snapshot = SnapshotWithHp(20, 10, floors) with
+        {
+            CurrentNodeId = 1,
+            Characters =
+            [
+                new NetherCharacterState(1, 10, IsActive: true),
+                new NetherCharacterState(2, 500, IsActive: true),
+            ],
+        };
+        NetherAutoClimbSettings settings = Settings(minimumCharacterHpPermille: 1);
+        NetherInteractiveOptionProjection damageTwenty = Projection(
+            202, 2021, 1, 2, 2, 0,
+            [new NetherEffect(NetherEffectKind.Damage, 20)]
+        ) with
+        {
+            AllowsPartialActiveDeaths = true,
+        };
+        NetherRuntimeInteractivePreEntryInputsResult capture = InteractiveCapture(
+            snapshot,
+            settings,
+            new Dictionary<long, NetherInteractiveFloorPreEntryCaptureSpec>
+            {
+                [1] = new(
+                    NetherFloorNodeType.Shop,
+                    NetherInteractiveFloorPreEntrySafetyResult.SafeNeutral()
+                ),
+                [2] = new(
+                    NetherFloorNodeType.Treasure,
+                    NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [202] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [202] = damageTwenty },
+                        new NetherInteractiveWorstCaseProjection(0, -20),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(202, 2021, 1)] = damageTwenty,
+                        }
+                    )
+                ),
+            }
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            settings,
+            Runtime(
+                bounds: new Dictionary<long, NetherFloorMasterBounds> { [3] = Bounds(3, 0, 0) },
+                hp: NetherRouteSafetyHpTestEvidence.FromStates(snapshot.Characters)
+            ),
+            capture
+        );
+
+        Assert.False(plan.Route.HasSelection);
+        Assert.Contains("ordinary-hp-cost-lethal", plan.Context.HorizonRejection(2));
+    }
+
+    private sealed record NetherInteractiveFloorPreEntryCaptureSpec(
+        NetherFloorNodeType FloorKind,
+        NetherInteractiveFloorPreEntrySafetyResult Safety
+    );
+
+    private static NetherInteractiveOptionProjection Projection(
+        long eventId,
+        long partId,
+        int optionNumber,
+        long floorId,
+        long nodeId,
+        int erosionDelta,
+        IReadOnlyList<NetherEffect> effects
+    ) => new(optionNumber, erosionDelta, effects.Sum(effect => effect.Kind switch
+    {
+        NetherEffectKind.Heal => effect.Amount,
+        NetherEffectKind.Damage => -effect.Amount,
+        _ => 0,
+    }), effects)
+    {
+        EventId = eventId,
+        EventPartId = partId,
+        FloorId = floorId,
+        NodeId = nodeId,
+        IsKnown = true,
+        HasRouteSafetyEvidence = true,
+        RouteSafetyAllowed = true,
+    };
+
+    private static NetherInteractiveFloorPreEntryCaptureSpec RecoveryCapture(
+        NetherInteractiveOptionProjection projection
+    ) => new(
+        NetherFloorNodeType.Recovery,
+        NetherInteractiveFloorPreEntrySafetyResult.Safe(
+            new Dictionary<long, int> { [projection.EventId] = projection.OptionNumber },
+            new Dictionary<long, NetherInteractiveOptionProjection> { [projection.EventId] = projection },
+            new NetherInteractiveWorstCaseProjection(projection.ErosionDelta, projection.HpDelta),
+            new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+            {
+                [new NetherInteractiveEventOptionKey(
+                    projection.EventId,
+                    projection.EventPartId,
+                    projection.OptionNumber
+                )] = projection,
+            }
+        )
+    );
+
+    private static NetherInteractiveFloorPreEntryCaptureSpec EventCapture(
+        NetherInteractiveOptionProjection projection
+    ) => RecoveryCapture(projection) with { FloorKind = NetherFloorNodeType.Event };
+
+    private static NetherRuntimeInteractivePreEntryInputsResult InteractiveCapture(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        IReadOnlyDictionary<long, NetherInteractiveFloorPreEntryCaptureSpec> specs
+    )
+    {
+        var entries = new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
+        foreach ((long nodeId, NetherInteractiveFloorPreEntryCaptureSpec spec) in specs)
+        {
+            NetherFloorNode floor = snapshot.Floors.Single(node => node.NodeId == nodeId);
+            entries[nodeId] = new NetherRuntimeInteractivePreEntryCaptureResult
+            {
+                IsCaptured = true,
+                Input = new NetherInteractiveFloorPreEntrySafetyInput(
+                    spec.FloorKind,
+                    floor.FloorId,
+                    [new NetherFloorMasterBoundsRow(floor.FloorId, 0, 0)],
+                    Array.Empty<NetherFloorEventMasterRow>(),
+                    Array.Empty<NetherFloorEventPartMasterRow>(),
+                    snapshot.ErosionPoint,
+                    snapshot.Characters.Where(character => character.IsActive).Select(character => character.HpPermille).ToArray(),
+                    snapshot.NetherGold,
+                    snapshot.TreasureKeyCount,
+                    settings
+                )
+                {
+                    FloorNodeId = nodeId,
+                },
+                Safety = spec.Safety,
+            };
+        }
+        return NetherRuntimeInteractivePreEntryInputsResult.Success(entries, snapshot.Fingerprint);
+    }
+
+    private static NetherStrategyVisibleContentRow VisibleErosionKeyEvent(
+        long nodeId,
+        long eventId,
+        long partId,
+        int optionNumber
+    ) => new(NetherStrategyVisibleContentKind.Event, nodeId, eventId, partId)
+    {
+        IsKnown = true,
+        EventId = eventId,
+        EventPartId = partId,
+        EventOptions =
+        [
+            new NetherStrategyVisibleEventOptionEvidence(
+                optionNumber,
+                partId,
+                [
+                    new NetherStrategyVisibleEventEffectEvidence(
+                        NetherStrategyVisibleEventEffectSource.Target1,
+                        2,
+                        80
+                    )
+                    {
+                        IsPresent = true,
+                        IsKnown = true,
+                        EffectKind = NetherEffectKind.Erosion,
+                        Amount = 80,
+                    },
+                    new NetherStrategyVisibleEventEffectEvidence(
+                        NetherStrategyVisibleEventEffectSource.Content,
+                        166,
+                        1
+                    )
+                    {
+                        IsPresent = true,
+                        IsKnown = true,
+                        EffectKind = NetherEffectKind.TreasureKeyGain,
+                        Amount = 1,
+                    },
+                ]
+            ),
+        ],
+    };
 
     private static NetherStrategyVisibleContentRow VisibleEvent(
         long nodeId,
