@@ -257,6 +257,36 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
+    public void Shop_reconcile_rejects_wrong_amount_and_an_unauthorised_balance_debit()
+    {
+        NetherPlannedAction action = new(NetherActionKind.BuyShopItem)
+        {
+            ContentId = 42,
+            GoldCost = 300,
+            ContentAmount = 1,
+        };
+        NetherSnapshot before = Snapshot(items: Array.Empty<NetherRewardItem>(), gold: 300);
+
+        NetherSnapshot wrongAmount = Snapshot(
+            items: new[] { new NetherRewardItem(42, 2) },
+            gold: 0
+        );
+        NetherSnapshot overspent = Snapshot(
+            items: new[] { new NetherRewardItem(42, 1) },
+            gold: -1
+        );
+
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(action, before, wrongAmount)
+        );
+        Assert.Equal(
+            NetherActionOutcome.Ambiguous,
+            NetherActionReconcilePolicy.Evaluate(action, before with { NetherGold = 299 }, overspent)
+        );
+    }
+
+    [Fact]
     public void Rank_five_shop_commitment_must_match_the_reconciled_content_and_cost()
     {
         NetherShopProcurementCommitment commitment = new()

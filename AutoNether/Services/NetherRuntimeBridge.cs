@@ -173,12 +173,24 @@ internal interface INetherRuntimeBridge : INetherRuntimeParentDriver, INetherRea
 }
 
 /// <summary>
+/// Optional production initialization seam for an authoritative semantic provider. Runtime
+/// doubles need not implement it; the shipped RuntimeBridge singleton does, and the controller
+/// binds the factory before the first live pre-entry capture.
+/// </summary>
+internal interface INetherTypedSemanticProviderRegistration
+{
+    void RegisterTypedSemanticProviderFactory(
+        NetherRuntimeTypedSemanticProviderFactory? factory
+    );
+}
+
+/// <summary>
 /// Reflection-only bindings for the versioned IL2CPP game surface.  The bridge has no
 /// fallback to NetherApiDataStore: exact name, arity, parameter type and return type are
 /// selected before an action is invoked.  This keeps a patched client from turning an
 /// unknown build into a raw-request automation client.
 /// </summary>
-internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, INetherRuntimeBridge, INetherCheckpointPopupWaitDriver, INetherOwnedPopupNativeStagePort
+internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, INetherRuntimeBridge, INetherTypedSemanticProviderRegistration, INetherCheckpointPopupWaitDriver, INetherOwnedPopupNativeStagePort
 {
     private const string UniTaskTypeName = "Cysharp.Threading.Tasks.UniTask";
     private const string UnitTypeName = "UniRx.Unit";
@@ -241,6 +253,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private const string MonoBehaviourWithUniTaskTypeName = "Absf.MonoBehaviourWithUniTask";
 
     private readonly object _gate = new();
+    private NetherRuntimeTypedSemanticProviderFactory? _typedSemanticProviderFactory;
+    private NetherRuntimeNativeEventPopupCaptureFactory? _nativeEventPopupCaptureFactory;
+    private NetherRuntimeManagedShopPopupCaptureFactory? _managedShopPopupCaptureFactory;
     private readonly NetherPopupOwnershipRegistry _popupOwnership = new();
     private readonly NetherFloorEventSequenceTaskFlow _floorEventSequenceTaskFlow =
         new(maximumMissingPolls: 600);
@@ -364,6 +379,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 // Compare the previous authoritative key before accepting the incoming one.  The
                 // pending handoff is part of that old route epoch and must not be merged into the
                 // first pre-entry capture for a new snapshot.
+                _latestStrategyEvidencePackage = null;
+                _latestInteractivePreEntryInputs = null;
+                _latestStrategySettings = null;
                 _routeOwnedEventProcurementProducer.Clear();
                 _committedEventProcurementByOption =
                     new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
@@ -510,9 +528,186 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
     }
 
-    private NetherRuntimeBridge()
+    internal NetherRuntimeBridge(NetherRuntimeTypedSemanticProviderFactory? typedSemanticProviderFactory = null)
     {
+        _typedSemanticProviderFactory = typedSemanticProviderFactory;
         _checkpointPopupWait = new NetherCheckpointPopupWaitCoordinator(this);
+    }
+
+    /// <summary>
+    /// Binds an optional authoritative semantic provider factory. The factory is invoked with the
+    /// current immutable snapshot and its returned scope must carry the same fingerprint before
+    /// any typed reward or battle tier can reach the visible mapper. Null remains the native
+    /// default because raw type/rarity fields do not prove those semantics.
+    /// </summary>
+    public void RegisterTypedSemanticProviderFactory(NetherRuntimeTypedSemanticProviderFactory? factory)
+    {
+        lock (_gate)
+            _typedSemanticProviderFactory = factory;
+    }
+
+    /// <summary>
+    /// Optional raw Event popup capture adapter for a host that already owns the native field
+    /// copy. The adapter carries raw IDs/types/rarities only; semantic Battle/Reward tiers still
+    /// require the separate snapshot-scoped typed provider. Null preserves the default
+    /// Engine/MasterDataStore capture path.
+    /// </summary>
+    public void RegisterNativeEventPopupCaptureFactory(
+        NetherRuntimeNativeEventPopupCaptureFactory? factory
+    )
+    {
+        lock (_gate)
+            _nativeEventPopupCaptureFactory = factory;
+    }
+
+    /// <summary>
+    /// Optional managed Shop DTO adapter. The DTO must carry the current snapshot fingerprint;
+    /// this path is equivalent to the native Shop mapper but never loads an IL2CPP/GameAssembly
+    /// type. Raw content type/ID/amount remain correlation data and cannot prove a key.
+    /// </summary>
+    public void RegisterManagedShopPopupCaptureFactory(
+        NetherRuntimeManagedShopPopupCaptureFactory? factory
+    )
+    {
+        lock (_gate)
+            _managedShopPopupCaptureFactory = factory;
+    }
+
+    internal NetherRuntimeInteractivePreEntryCaptureResult CaptureInteractivePreEntryFloor(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        object floorModel,
+        IEnumerable? mapFloorRows,
+        IEnumerable? eventRows,
+        IEnumerable? eventPartRows,
+        IEnumerable? itemRows,
+        IEnumerable? battleRows,
+        long floorNodeId,
+        bool canCloseShop
+    )
+    {
+        if (snapshot == null || settings == null || floorModel == null)
+            return new NetherRuntimeInteractivePreEntryCaptureResult
+            {
+                IsCaptured = false,
+                Detail = "invalid-runtime-bridge-interactive-capture-input",
+            };
+
+        return InteractivePreEntryInputCapture.Capture(
+            new NetherRuntimeInteractivePreEntryCaptureRequest(
+                FloorModel: floorModel,
+                MapFloorRows: mapFloorRows,
+                EventRows: eventRows,
+                EventPartRows: eventPartRows,
+                CurrentErosion: snapshot.ErosionPoint,
+                ActiveHpPermille: snapshot.Characters
+                    .Where(character => character.IsActive)
+                    .Select(character => character.HpPermille)
+                    .ToArray(),
+                CurrentNetherGold: snapshot.NetherGold,
+                CurrentTreasureKeys: snapshot.TreasureKeyCount,
+                Settings: settings,
+                CanCloseShop: canCloseShop
+            )
+            {
+                CurrentCodes = snapshot.Codes ?? Array.Empty<NetherCodeState>(),
+                CodeCapacity = snapshot.CodeCapacity,
+                FloorNodeId = floorNodeId,
+                ItemRows = itemRows,
+                BattleRows = battleRows,
+                TypedSemanticProvider = ResolveTypedSemanticProvider(snapshot),
+            }
+        );
+    }
+
+    /// <summary>
+    /// Managed adapter seam for hosts that have already copied the native pre-entry fields into
+    /// reflection-shaped DTOs. It uses the same pure capture/evaluation path as the native bridge,
+    /// then stores the exact snapshot-scoped result consumed by popup binding. No IL2CPP type is
+    /// loaded by this seam; the default production path remains the native cache reader above.
+    /// </summary>
+    internal NetherRuntimeInteractivePreEntryInputsResult CaptureManagedInteractivePreEntryFloor(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        object floorModel,
+        IEnumerable? mapFloorRows,
+        IEnumerable? eventRows,
+        IEnumerable? eventPartRows,
+        IEnumerable? itemRows,
+        IEnumerable? battleRows,
+        long floorNodeId,
+        bool canCloseShop
+    )
+    {
+        if (snapshot == null || settings == null || floorModel == null || floorNodeId <= 0)
+        {
+            return NetherRuntimeInteractivePreEntryInputsResult.Failure(
+                "invalid-managed-interactive-preentry-capture-input"
+            );
+        }
+
+        ObserveAuthoritativeRouteSnapshot(snapshot.Fingerprint);
+        NetherRuntimeInteractivePreEntryCaptureResult captured = CaptureInteractivePreEntryFloor(
+            snapshot,
+            settings,
+            floorModel,
+            mapFloorRows,
+            eventRows,
+            eventPartRows,
+            itemRows,
+            battleRows,
+            floorNodeId,
+            canCloseShop
+        );
+        if (!captured.IsCaptured || captured.Input == null)
+        {
+            return NetherRuntimeInteractivePreEntryInputsResult.Failure(
+                "managed-interactive-preentry-capture:" + captured.Detail
+            );
+        }
+
+        NetherRuntimeInteractivePreEntryInputsResult result =
+            NetherRuntimeInteractivePreEntryInputsResult.Success(
+                new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
+                {
+                    [floorNodeId] = captured,
+                },
+                snapshot.Fingerprint,
+                captured.Input.TypedSemanticProvider
+            );
+        lock (_gate)
+        {
+            _latestInteractivePreEntryInputs = result;
+            _latestStrategySettings = settings;
+        }
+        return result;
+    }
+
+    private NetherStrategyTypedSemanticProviderEvidence? ResolveTypedSemanticProvider(
+        NetherSnapshot snapshot
+    )
+    {
+        NetherRuntimeTypedSemanticProviderFactory? factory;
+        lock (_gate)
+            factory = _typedSemanticProviderFactory;
+        if (factory == null)
+            return null;
+
+        try
+        {
+            NetherRuntimeTypedSemanticProviderScope? scope = factory(snapshot);
+            if (scope == null
+                || scope.Evidence == null
+                || scope.SnapshotFingerprint != snapshot.Fingerprint)
+            {
+                return null;
+            }
+            return scope.Evidence;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // Static registration entry points are deliberately small; Harmony only reports native
@@ -1192,6 +1387,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             requireCompleteRecoveryBranchSafety = _requireCompleteRecoveryBranchSafety;
             rankFiveKeyProcurement = _pendingRankFiveKeyProcurement;
         }
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider =
+            ResolveTypedSemanticProvider(snapshot);
 
         object? floorSelection;
         lock (_gate)
@@ -1220,7 +1417,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             NetherRuntimeInteractivePreEntryInputsResult emptyResult =
                 NetherRuntimeInteractivePreEntryInputsResult.Success(
                     new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>(),
-                    snapshot.Fingerprint
+                    snapshot.Fingerprint,
+                    typedSemanticProvider
                 );
             lock (_gate)
             {
@@ -1280,6 +1478,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         RecoveryBranchSafetyByPartId = recoveryBranchSafetyByPartId,
                         RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,
                         RankFiveKeyProcurement = rankFiveKeyProcurement,
+                        TypedSemanticProvider = typedSemanticProvider,
                     }
                 );
                 if (!result.IsCaptured || result.Input == null)
@@ -1309,7 +1508,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         if (captured.Count != expected.Count)
             return NetherRuntimeInteractivePreEntryInputsResult.Failure("missing-runtime-interactive-floor-capture");
         NetherRuntimeInteractivePreEntryInputsResult capturedResult =
-            NetherRuntimeInteractivePreEntryInputsResult.Success(captured, snapshot.Fingerprint);
+            NetherRuntimeInteractivePreEntryInputsResult.Success(
+                captured,
+                snapshot.Fingerprint,
+                typedSemanticProvider
+            );
         lock (_gate)
         {
             _committedEventProcurementByOption =
@@ -1906,6 +2109,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         long decisionEpoch = 0;
         long runtimeGeneration;
         bool hasRecoveredFloorEventTaskEvidence = false;
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider;
+        NetherRuntimeNativeEventPopupCaptureFactory? nativeEventPopupCaptureFactory;
+        NetherRuntimeManagedShopPopupCaptureFactory? managedShopPopupCaptureFactory;
+        NetherSnapshotFingerprint? authoritativeSnapshotFingerprint;
         lock (_gate)
         {
             if (!registration.IsLive
@@ -1920,6 +2127,15 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 );
             }
             runtimeGeneration = registration.RuntimeGeneration;
+            authoritativeSnapshotFingerprint = _authoritativeRouteSnapshotFingerprint;
+            typedSemanticProvider = _latestInteractivePreEntryInputs?.TypedSemanticProvider;
+            nativeEventPopupCaptureFactory = _nativeEventPopupCaptureFactory;
+            managedShopPopupCaptureFactory = _managedShopPopupCaptureFactory;
+            if (authoritativeSnapshotFingerprint is not NetherSnapshotFingerprint currentFingerprint
+                || _latestInteractivePreEntryInputs?.SnapshotFingerprint != currentFingerprint)
+            {
+                typedSemanticProvider = null;
+            }
             if (controllerType == CodeSelectPopupControllerTypeName)
             {
                 decisionEpoch = GetOwnedPopupDecisionEpoch(new NetherOwnedPopupStageOwner(
@@ -1951,10 +2167,36 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 CodeListPopupControllerTypeName => TryMapCodeListPopup(registration),
                 ContinuePopupControllerTypeName => NetherRuntimePopupResult.Success(new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.Continue }),
                 ReturnPopupControllerTypeName => NetherRuntimePopupResult.Success(new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.ReturnItems }),
-                EventPopupControllerTypeName => TryMapEventPopup(registration, NetherRuntimePopupKind.Event, (int)NetherFloorNodeType.Event),
-                RecoverPopupControllerTypeName => TryMapEventPopup(registration, NetherRuntimePopupKind.Recovery, (int)NetherFloorNodeType.Recovery),
-                TreasurePopupControllerTypeName => TryMapEventPopup(registration, NetherRuntimePopupKind.Treasure, (int)NetherFloorNodeType.Treasure),
-                ShopPopupControllerTypeName => TryMapShopPopup(registration),
+                EventPopupControllerTypeName => TryMapEventPopup(
+                    registration,
+                    NetherRuntimePopupKind.Event,
+                    (int)NetherFloorNodeType.Event,
+                    nativeEventPopupCaptureFactory,
+                    typedSemanticProvider,
+                    authoritativeSnapshotFingerprint
+                ),
+                RecoverPopupControllerTypeName => TryMapEventPopup(
+                    registration,
+                    NetherRuntimePopupKind.Recovery,
+                    (int)NetherFloorNodeType.Recovery,
+                    nativeEventPopupCaptureFactory,
+                    typedSemanticProvider,
+                    authoritativeSnapshotFingerprint
+                ),
+                TreasurePopupControllerTypeName => TryMapEventPopup(
+                    registration,
+                    NetherRuntimePopupKind.Treasure,
+                    (int)NetherFloorNodeType.Treasure,
+                    nativeEventPopupCaptureFactory,
+                    typedSemanticProvider,
+                    authoritativeSnapshotFingerprint
+                ),
+                ShopPopupControllerTypeName => TryMapShopPopup(
+                    registration,
+                    typedSemanticProvider,
+                    managedShopPopupCaptureFactory,
+                    authoritativeSnapshotFingerprint
+                ),
                 _ => NetherRuntimePopupResult.Failure("unsupported-native-popup-controller:" + controllerType),
             };
             if (mapped.Popup == null)
@@ -1981,6 +2223,16 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 strategySettings = _latestStrategySettings;
                 rankFiveKeyProcurement = _pendingRankFiveKeyProcurement;
                 requireCompleteRecoveryBranchSafety = _requireCompleteRecoveryBranchSafety;
+            }
+            if (authoritativeSnapshotFingerprint is not NetherSnapshotFingerprint currentPackageFingerprint
+                || strategyPackage?.Identity.SnapshotFingerprint != currentPackageFingerprint)
+            {
+                strategyPackage = null;
+            }
+            if (authoritativeSnapshotFingerprint is not NetherSnapshotFingerprint currentInteractiveFingerprint
+                || interactiveInputs?.SnapshotFingerprint != currentInteractiveFingerprint)
+            {
+                interactiveInputs = null;
             }
             NetherShopProcurementCommitment? shopProcurementCommitment =
                 NetherEventProductionEvidenceBinding.BindRankFiveShopCommitment(
@@ -4078,6 +4330,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _floorSelectionController = null;
             _latestStrategyEvidencePackage = null;
             _latestInteractivePreEntryInputs = null;
+            _typedSemanticProviderFactory = null;
+            _nativeEventPopupCaptureFactory = null;
+            _managedShopPopupCaptureFactory = null;
             _latestStrategySettings = null;
             _committedEventProcurementByOption =
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
@@ -8990,6 +9245,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     )
                 ).ToArray()
                     )
+                    {
+                        TypedSemanticProvider = interactive.TypedSemanticProvider,
+                    }
                 )
             );
         evidence = mapped.Evidence;
@@ -9330,7 +9588,421 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private static NetherRuntimePopupResult TryMapEventPopup(
         PopupRegistration registration,
         NetherRuntimePopupKind kind,
-        int rawFloorType
+        int rawFloorType,
+        NetherRuntimeNativeEventPopupCaptureFactory? nativeCaptureFactory,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider,
+        NetherSnapshotFingerprint? authoritativeSnapshotFingerprint
+    )
+    {
+        if (nativeCaptureFactory == null)
+            return TryMapEventPopup(
+                registration,
+                kind,
+                rawFloorType,
+                typedSemanticProvider
+            );
+
+        NetherRuntimeNativeEventPopupCapture? capture;
+        try
+        {
+            capture = nativeCaptureFactory(registration.Controller, kind);
+        }
+        catch (Exception ex)
+        {
+            return NetherRuntimePopupResult.Failure(
+                "managed-event-popup-capture-exception:" + ex.GetType().Name
+            );
+        }
+        if (capture == null)
+            return NetherRuntimePopupResult.Failure("managed-event-popup-capture-unavailable");
+        if (authoritativeSnapshotFingerprint is not NetherSnapshotFingerprint currentFingerprint
+            || capture.SnapshotFingerprint is not NetherSnapshotFingerprint captureFingerprint
+            || captureFingerprint != currentFingerprint)
+        {
+            return NetherRuntimePopupResult.Failure("stale-managed-event-popup-capture");
+        }
+        return TryMapEventPopup(capture, kind, rawFloorType, typedSemanticProvider);
+    }
+
+    /// <summary>
+    /// Pure managed popup mapper used by an adapter that copied the native fields before entering
+    /// the bridge. It deliberately keeps raw battle type/rarity as diagnostics only; the semantic
+    /// tier lookup is the same duplicate/conflict-safe provider seam used by visible evidence.
+    /// </summary>
+    private static NetherRuntimePopupResult TryMapEventPopup(
+        NetherRuntimeNativeEventPopupCapture capture,
+        NetherRuntimePopupKind kind,
+        int rawFloorType,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider
+    )
+    {
+        if (kind == NetherRuntimePopupKind.Event
+            && capture.TargetCharacterId <= 0)
+        {
+            return NetherRuntimePopupResult.Failure("missing-managed-event-target-character-id");
+        }
+        if (capture.EventId <= 0
+            || capture.DeclaredPartIds == null
+            || capture.Parts == null
+            || capture.Battles == null
+            || capture.Items == null)
+        {
+            return NetherRuntimePopupResult.Failure("invalid-managed-event-popup-capture");
+        }
+        if (!TryValidateManagedEventPartShape(
+                capture.DeclaredPartIds,
+                out string partShapeError
+            ))
+        {
+            return NetherRuntimePopupResult.Failure(partShapeError);
+        }
+
+        Dictionary<long, NetherRuntimeNativeEventPart> partById = BuildRuntimeRows(
+            capture.Parts,
+            part => part.Id,
+            out HashSet<long> ambiguousPartIds
+        );
+        Dictionary<long, NetherRuntimeNativeBattle> battleById = BuildRuntimeRows(
+            capture.Battles,
+            battle => battle.Id,
+            out HashSet<long> ambiguousBattleIds
+        );
+        Dictionary<long, NetherRuntimeNativeItem> itemById = BuildRuntimeRows(
+            capture.Items,
+            item => item.Id,
+            out HashSet<long> ambiguousItemIds
+        );
+        NetherStrategySemanticTierLookup semanticTiers =
+            NetherStrategySemanticTierLookup.Create(typedSemanticProvider);
+
+        var options = new List<NetherEventOption>();
+        bool foundEmptyPart = false;
+        var seenDeclared = new HashSet<long>();
+        for (int index = 0; index < capture.DeclaredPartIds.Count; index++)
+        {
+            long partId = capture.DeclaredPartIds[index];
+            if (partId == 0)
+            {
+                foundEmptyPart = true;
+                continue;
+            }
+            string? referenceError = partId < 0
+                ? "invalid-managed-event-part-reference"
+                : foundEmptyPart
+                    ? "noncontiguous-managed-event-part-reference"
+                    : !seenDeclared.Add(partId)
+                        ? "duplicate-managed-event-part-reference:" + partId
+                        : ambiguousPartIds.Contains(partId)
+                            ? "duplicate-managed-event-part-row:" + partId
+                            : null;
+            if (referenceError != null || !partById.TryGetValue(partId, out NetherRuntimeNativeEventPart? part))
+            {
+                options.Add(RuntimeUnknownEventOption(
+                    capture.EventId,
+                    Math.Max(0, partId),
+                    index + 1,
+                    referenceError ?? "missing-managed-event-part-row:" + partId
+                ));
+                continue;
+            }
+
+            bool mapped = TryMapManagedEventPart(
+                part,
+                itemById,
+                ambiguousItemIds,
+                battleById,
+                ambiguousBattleIds,
+                semanticTiers,
+                out IReadOnlyList<NetherEffect>? effects,
+                out string detail
+            );
+            options.Add(RuntimeEventOption(
+                capture.EventId,
+                part.Id,
+                index + 1,
+                effects,
+                mapped,
+                detail
+            ));
+        }
+        if (options.Count == 0)
+            return NetherRuntimePopupResult.Failure("empty-managed-event-part-array");
+
+        return NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
+        {
+            Kind = kind,
+            TargetCharacterId = capture.TargetCharacterId,
+            FloorId = capture.FloorId,
+            NodeId = capture.NodeId,
+            RawFloorType = rawFloorType,
+            Options = options,
+        });
+    }
+
+    private static bool TryValidateManagedEventPartShape(
+        IReadOnlyList<long> declaredPartIds,
+        out string detail
+    )
+    {
+        detail = string.Empty;
+        if (declaredPartIds == null || declaredPartIds.Count != 4)
+        {
+            detail = "invalid-managed-event-part-shape:expected-four-slots";
+            return false;
+        }
+
+        bool foundTrailingSentinel = false;
+        var seen = new HashSet<long>();
+        foreach (long partId in declaredPartIds)
+        {
+            if (partId < 0)
+            {
+                detail = "invalid-managed-event-part-shape:negative-part-id";
+                return false;
+            }
+            if (partId == 0)
+            {
+                foundTrailingSentinel = true;
+                continue;
+            }
+            if (foundTrailingSentinel)
+            {
+                detail = "invalid-managed-event-part-shape:noncontiguous-sentinel";
+                return false;
+            }
+            if (!seen.Add(partId))
+            {
+                detail = "invalid-managed-event-part-shape:duplicate-part-id:" + partId;
+                return false;
+            }
+        }
+        if (seen.Count == 0)
+        {
+            detail = "invalid-managed-event-part-shape:missing-part-id";
+            return false;
+        }
+        return true;
+    }
+
+    private static bool TryMapManagedEventPart(
+        NetherRuntimeNativeEventPart part,
+        IReadOnlyDictionary<long, NetherRuntimeNativeItem> itemById,
+        IReadOnlySet<long> ambiguousItemIds,
+        IReadOnlyDictionary<long, NetherRuntimeNativeBattle> battleById,
+        IReadOnlySet<long> ambiguousBattleIds,
+        NetherStrategySemanticTierLookup semanticTiers,
+        out IReadOnlyList<NetherEffect>? effects,
+        out string detail
+    )
+    {
+        effects = null;
+        detail = string.Empty;
+        if (part == null || part.Id <= 0)
+        {
+            effects =
+            [
+                new NetherEffect(NetherEffectKind.Unknown, 0)
+                {
+                    Known = false,
+                    ContentKnown = false,
+                },
+            ];
+            detail = "invalid-managed-event-part";
+            return false;
+        }
+
+        var mapped = new List<NetherEffect>();
+        if (!TryMapManagedTargetEffect(
+                part.TargetType1,
+                part.SelectParameter1,
+                battleById,
+                ambiguousBattleIds,
+                semanticTiers,
+                mapped,
+                out detail
+            )
+            || !TryMapManagedTargetEffect(
+                part.TargetType2,
+                part.SelectParameter2,
+                battleById,
+                ambiguousBattleIds,
+                semanticTiers,
+                mapped,
+                out detail
+            )
+            || !TryMapManagedTargetEffect(
+                part.TargetType3,
+                part.SelectParameter3,
+                battleById,
+                ambiguousBattleIds,
+                semanticTiers,
+                mapped,
+                out detail
+            ))
+        {
+            effects =
+            [
+                new NetherEffect(NetherEffectKind.Unknown, 0)
+                {
+                    Known = false,
+                    ContentKnown = false,
+                },
+            ];
+            return false;
+        }
+
+        if (part.ContentType != 0)
+        {
+            if (part.Amount < 0)
+            {
+                detail = "invalid-managed-event-content";
+                return false;
+            }
+            NetherEffect? contentEffect = part.ContentType switch
+            {
+                30 or 31 when part.ContentId > 0
+                    && !ambiguousItemIds.Contains(part.ContentId)
+                    && itemById.TryGetValue(part.ContentId, out NetherRuntimeNativeItem? item)
+                    && TryMapTypedEventReward(
+                        item.Id,
+                        semanticTiers,
+                        out int typedItemType,
+                        out NetherRewardRarity typedRarity
+                    ) => new NetherEffect(NetherEffectKind.Item, part.Amount)
+                {
+                    ContentId = part.ContentId,
+                    RewardEvidence = new NetherEventRewardEvidence(
+                        part.ContentId,
+                        item.Id,
+                        typedItemType,
+                        typedRarity,
+                        part.Amount
+                    ),
+                },
+                160 when NetherEventNativeMapping.IsCodeOfferContentId(part.ContentId) => new NetherEffect(NetherEffectKind.AbyssCodeOffer, part.Amount)
+                {
+                    ContentId = part.ContentId,
+                },
+                165 when NetherEventNativeMapping.IsValidResourceContentId(part.ContentId) => new NetherEffect(NetherEffectKind.NetherGoldGain, part.Amount)
+                {
+                    ContentId = part.ContentId,
+                },
+                166 when NetherEventNativeMapping.IsValidResourceContentId(part.ContentId) => new NetherEffect(NetherEffectKind.TreasureKeyGain, part.Amount)
+                {
+                    ContentId = part.ContentId,
+                },
+                _ => null,
+            };
+            if (contentEffect == null)
+            {
+                detail = "unsupported-managed-event-content-type:" + part.ContentType;
+                return false;
+            }
+            mapped.Add(contentEffect);
+        }
+
+        if (mapped.Count is < 1 or > 4)
+        {
+            detail = "invalid-managed-event-effect-count:" + mapped.Count;
+            return false;
+        }
+        effects = mapped;
+        return true;
+    }
+
+    private static bool TryMapTypedEventReward(
+        long itemId,
+        NetherStrategySemanticTierLookup semanticTiers,
+        out int itemType,
+        out NetherRewardRarity rarity
+    )
+    {
+        itemType = 0;
+        rarity = NetherRewardRarity.NoEffect;
+        if (!semanticTiers.TryGetCanonicalRewardEvidence(
+                itemId,
+                out NetherCanonicalRewardTier tier,
+                out itemType,
+                out rarity
+            ))
+            return false;
+        return tier is NetherCanonicalRewardTier.GoldRankFive or NetherCanonicalRewardTier.RedRankFive;
+    }
+
+    private static bool TryMapManagedTargetEffect(
+        int rawType,
+        long parameter,
+        IReadOnlyDictionary<long, NetherRuntimeNativeBattle> battleById,
+        IReadOnlySet<long> ambiguousBattleIds,
+        NetherStrategySemanticTierLookup semanticTiers,
+        ICollection<NetherEffect> effects,
+        out string detail
+    )
+    {
+        if (!NetherEventNativeMapping.TryMapTargetType(
+                rawType,
+                parameter,
+                out NetherEffectKind kind,
+                out int mappedAmount,
+                out detail
+            ))
+        {
+            return false;
+        }
+        if (rawType == 0)
+            return true;
+
+        if (kind == NetherEffectKind.Battle)
+        {
+            if (ambiguousBattleIds.Contains(parameter)
+                || !battleById.TryGetValue(parameter, out NetherRuntimeNativeBattle? battle)
+                || battle.Id <= 0
+                || battle.BattleStageId <= 0
+                || battle.CodeDropRatio < 0)
+            {
+                detail = "managed-event-battle-row-unavailable:" + parameter;
+                return false;
+            }
+            NetherEventBattleEvidence battleEvidence;
+            if (semanticTiers.TryGetEventBattleTier(battle.Id, out NetherEventBattleTier tier))
+            {
+                battleEvidence = new NetherEventBattleEvidence(
+                    battle.Id,
+                    battle.BattleStageId,
+                    battle.Type,
+                    battle.CodeDropRatio,
+                    tier
+                );
+            }
+            else
+            {
+                battleEvidence = NetherEventBattleEvidence.Unknown(
+                    battle.Id,
+                    "event-battle-semantic-tier-unavailable-for-raw-type:" + battle.Type
+                ) with
+                {
+                    BattleStageId = battle.BattleStageId,
+                    BattleType = battle.Type,
+                    CodeDropRatio = battle.CodeDropRatio,
+                };
+            }
+            effects.Add(new NetherEffect(kind, mappedAmount)
+            {
+                IsOptionalBattle = true,
+                BattleEvidence = battleEvidence,
+            });
+            return true;
+        }
+
+        effects.Add(new NetherEffect(kind, mappedAmount));
+        return true;
+    }
+
+    private static NetherRuntimePopupResult TryMapEventPopup(
+        PopupRegistration registration,
+        NetherRuntimePopupKind kind,
+        int rawFloorType,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider
     )
     {
         long targetCharacterId = 0;
@@ -9392,6 +10064,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
 
         var options = new List<NetherEventOption>();
+        NetherStrategySemanticTierLookup semanticTiers =
+            NetherStrategySemanticTierLookup.Create(typedSemanticProvider);
         if (kind is NetherRuntimePopupKind.Event
             or NetherRuntimePopupKind.Recovery
             or NetherRuntimePopupKind.Treasure)
@@ -9433,6 +10107,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     ambiguousItemIds,
                     battleById,
                     ambiguousBattleIds,
+                    semanticTiers,
                     out effects,
                     out detail
                 );
@@ -9530,6 +10205,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         IReadOnlySet<long> ambiguousItemIds,
         IReadOnlyDictionary<long, MNetherFloorBattles> battleById,
         IReadOnlySet<long> ambiguousBattleIds,
+        NetherStrategySemanticTierLookup semanticTiers,
         out IReadOnlyList<NetherEffect>? effects,
         out string detail
     )
@@ -9580,14 +10256,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 30 or 31 when part.content_id > 0
                     && !ambiguousItemIds.Contains(part.content_id)
                     && itemById.TryGetValue(part.content_id, out MItems? item)
-                    && NetherEventNativeMapping.TryMapItemType(item.type, out int itemType)
-                    && NetherEventNativeMapping.TryMapRewardRarity(item.rarity, out NetherRewardRarity rarity) => new NetherEffect(NetherEffectKind.Item, (int)part.amount)
+                    && TryMapTypedEventReward(
+                        item.id,
+                        semanticTiers,
+                        out int typedItemType,
+                        out NetherRewardRarity rarity
+                    ) => new NetherEffect(NetherEffectKind.Item, (int)part.amount)
                 {
                     ContentId = part.content_id,
                     RewardEvidence = new NetherEventRewardEvidence(
                         part.content_id,
                         item.id,
-                        itemType,
+                        typedItemType,
                         rarity,
                         (int)part.amount
                     ),
@@ -9724,7 +10404,28 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             && TryConvertInt32(rawPopupType, out popupType);
     }
 
-    private static NetherRuntimePopupResult TryMapShopPopup(PopupRegistration registration)
+    private static NetherRuntimePopupResult TryMapShopPopup(
+        PopupRegistration registration,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider,
+        NetherRuntimeManagedShopPopupCaptureFactory? managedCaptureFactory,
+        NetherSnapshotFingerprint? authoritativeSnapshotFingerprint
+    )
+    {
+        if (managedCaptureFactory != null)
+            return TryMapManagedShopPopup(
+                registration,
+                typedSemanticProvider,
+                managedCaptureFactory,
+                authoritativeSnapshotFingerprint
+            );
+
+        return TryMapNativeShopPopup(registration, typedSemanticProvider);
+    }
+
+    private static NetherRuntimePopupResult TryMapNativeShopPopup(
+        PopupRegistration registration,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider
+    )
     {
         if (!TryReadMember(registration.Controller, "_mNetherFloorShopContentsArray", out object? rawContents) || rawContents == null)
             return NetherRuntimePopupResult.Failure("missing-native-shop-content-array");
@@ -9749,24 +10450,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             {
                 if (item == null || item.id <= 0)
                     continue;
-                if (!NetherEventNativeMapping.TryMapRewardRarity(item.rarity, out NetherRewardRarity rarity))
-                {
-                    return NetherRuntimePopupResult.Failure(
-                        "invalid-native-shop-item-rarity:" + item.id
-                    );
-                }
-                if (!NetherEventNativeMapping.TryMapItemType(item.type, out int itemType))
-                {
-                    return NetherRuntimePopupResult.Failure(
-                        "invalid-native-shop-item-type:" + item.id
-                    );
-                }
+                int rawItemType = item.type is >= int.MinValue and <= int.MaxValue
+                    ? (int)item.type
+                    : 0;
+                NetherRewardRarity rawRarity = item.rarity is >= 0 and <= (int)NetherRewardRarity.UniqueWeapon
+                    ? (NetherRewardRarity)item.rarity
+                    : NetherRewardRarity.NoEffect;
                 if (!itemById.TryAdd(
                         item.id,
                         new NetherShopItemMaster(
                             item.id,
-                            itemType,
-                            rarity
+                            rawItemType,
+                            rawRarity
                         )
                     ))
                 {
@@ -9797,10 +10492,63 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             ));
         }
 
-        NetherShopContentMapResult mapped = NetherShopContentMapper.Map(rows, itemById);
+        NetherShopContentMapResult mapped = NetherShopContentMapper.Map(
+            rows,
+            itemById,
+            typedSemanticProvider
+        );
         if (!mapped.IsSuccess)
             return NetherRuntimePopupResult.Failure("native-shop-map:" + mapped.Detail);
 
+        return NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
+        {
+            Kind = NetherRuntimePopupKind.Shop,
+            ShopContents = mapped.Contents,
+        });
+    }
+
+    private static NetherRuntimePopupResult TryMapManagedShopPopup(
+        PopupRegistration registration,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider,
+        NetherRuntimeManagedShopPopupCaptureFactory captureFactory,
+        NetherSnapshotFingerprint? authoritativeSnapshotFingerprint
+    )
+    {
+        NetherRuntimeManagedShopPopupCapture? capture;
+        try
+        {
+            capture = captureFactory(registration.Controller);
+        }
+        catch (Exception ex)
+        {
+            return NetherRuntimePopupResult.Failure(
+                "managed-shop-popup-capture-exception:" + ex.GetType().Name
+            );
+        }
+        if (capture == null)
+            return NetherRuntimePopupResult.Failure("managed-shop-popup-capture-unavailable");
+        if (authoritativeSnapshotFingerprint is not NetherSnapshotFingerprint currentFingerprint
+            || capture.SnapshotFingerprint is not NetherSnapshotFingerprint captureFingerprint
+            || captureFingerprint != currentFingerprint)
+        {
+            return NetherRuntimePopupResult.Failure("stale-managed-shop-popup-capture");
+        }
+        if (capture.Contents == null || capture.Items == null)
+            return NetherRuntimePopupResult.Failure("invalid-managed-shop-popup-capture");
+
+        var itemById = new Dictionary<long, NetherShopItemMaster>();
+        foreach (NetherShopItemMaster item in capture.Items)
+        {
+            if (item.ItemId <= 0 || !itemById.TryAdd(item.ItemId, item))
+                return NetherRuntimePopupResult.Failure("duplicate-managed-shop-item-master:" + item.ItemId);
+        }
+        NetherShopContentMapResult mapped = NetherShopContentMapper.Map(
+            capture.Contents,
+            itemById,
+            typedSemanticProvider
+        );
+        if (!mapped.IsSuccess)
+            return NetherRuntimePopupResult.Failure("managed-shop-map:" + mapped.Detail);
         return NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
         {
             Kind = NetherRuntimePopupKind.Shop,

@@ -1058,6 +1058,94 @@ internal enum NetherStrategyVisibleContentKind
     Boss = 7,
 }
 
+/// <summary>
+/// Typed route-tier proof supplied by an authoritative provider. Raw native item type/rarity and
+/// display rank are deliberately not converted into one of these values by production mapping.
+/// </summary>
+internal enum NetherCanonicalRewardTier
+{
+    Unknown = 0,
+    GoldRankFive = 1,
+    RedRankFive = 2,
+    UncolouredRankFive = 3,
+}
+
+/// <summary>
+/// Explicit semantic evidence supplied by an authoritative typed master-data adapter. The
+/// current native bridge has no such adapter: raw MItems type/rarity and raw battle type remain
+/// outside these records and therefore cannot promote a route tier.
+/// </summary>
+internal readonly record struct NetherCanonicalRewardTierProviderEvidence(
+    long ItemId,
+    NetherCanonicalRewardTier Tier,
+    int ItemType
+);
+
+internal readonly record struct NetherEventBattleTierProviderEvidence(
+    long BattleId,
+    NetherEventBattleTier Tier
+);
+
+/// <summary>
+/// Snapshot-scoped route-safety proof for an Event battle option. The semantic battle tier is not
+/// enough to authorize a route candidate: the provider must bind the exact option/battle identity
+/// to projected erosion, projected HP, and the current combat-owner character IDs. Raw native
+/// battle fields never populate this record.
+/// </summary>
+internal readonly record struct NetherEventBattleRouteSafetyProviderEvidence(
+    long EventId,
+    long EventPartId,
+    int OptionNumber,
+    long FloorId,
+    long NodeId,
+    long BattleId,
+    int ProjectedErosion,
+    int ProjectedHpDelta,
+    IReadOnlyList<long> CurrentCombatCharacterIds
+)
+{
+    public bool IsValid => EventId > 0
+        && EventPartId > 0
+        && OptionNumber > 0
+        && FloorId > 0
+        && NodeId > 0
+        && BattleId > 0
+        && ProjectedErosion is >= 0 and < 100
+        && CurrentCombatCharacterIds != null
+        && CurrentCombatCharacterIds.Count > 0
+        && CurrentCombatCharacterIds.All(characterId => characterId > 0)
+        && CurrentCombatCharacterIds.Distinct().Count() == CurrentCombatCharacterIds.Count;
+}
+
+/// <summary>
+/// Snapshot-scoped typed identity for a Shop key product. The raw content tuple is retained only
+/// as an exact correlation key; KeyIdentity is the authoritative semantic proof. A provider must
+/// not infer key status from raw content type, item ID, rarity, or amount alone.
+/// </summary>
+internal readonly record struct NetherShopKeyProviderEvidence(
+    long ShopContentId,
+    int RawContentType,
+    long ItemId,
+    int Amount,
+    long KeyIdentity
+);
+
+/// <summary>
+/// Future/update-tolerant typed provider boundary. Missing evidence is Unknown; the mapper also
+/// treats duplicate, conflicting, or invalid evidence for one identity as ambiguous and Unknown.
+/// </summary>
+internal sealed record NetherStrategyTypedSemanticProviderEvidence
+{
+    public IReadOnlyList<NetherCanonicalRewardTierProviderEvidence> CanonicalRewardTiers { get; init; } =
+        Array.Empty<NetherCanonicalRewardTierProviderEvidence>();
+    public IReadOnlyList<NetherEventBattleTierProviderEvidence> EventBattleTiers { get; init; } =
+        Array.Empty<NetherEventBattleTierProviderEvidence>();
+    public IReadOnlyList<NetherEventBattleRouteSafetyProviderEvidence> EventBattleRouteSafety { get; init; } =
+        Array.Empty<NetherEventBattleRouteSafetyProviderEvidence>();
+    public IReadOnlyList<NetherShopKeyProviderEvidence> ShopKeyIdentities { get; init; } =
+        Array.Empty<NetherShopKeyProviderEvidence>();
+}
+
 internal enum NetherStrategyVisibleEventEffectSource
 {
     Unknown = 0,
@@ -1103,10 +1191,22 @@ internal sealed record NetherStrategyVisibleContentRow(
     public long EventPartId { get; init; }
     public int ContentType { get; init; }
     public int BattleType { get; init; }
+    /// <summary>
+    /// Typed Event-battle tier supplied only by an authoritative semantic provider. The current
+    /// native MNetherFloorBattles row exposes raw type/stage/drop fields but no closed local tier.
+    /// </summary>
+    public NetherEventBattleTier EventBattleTier { get; init; } = NetherEventBattleTier.Unknown;
     public long BattleStageId { get; init; }
     public int CodeDropRatio { get; init; }
     public long ItemType { get; init; }
     public int ItemRarity { get; init; }
+    /// <summary>
+    /// Raw MItems fields retained for diagnostics only. They are never consumed as reward or
+    /// equipment semantics; ItemType/ItemRarity above are provider-backed typed values.
+    /// </summary>
+    public long RawItemType { get; init; }
+    public int RawItemRarity { get; init; }
+    public NetherCanonicalRewardTier CanonicalRewardTier { get; init; } = NetherCanonicalRewardTier.Unknown;
     public int ItemValue { get; init; }
     public int ItemPossessionLimit { get; init; }
     /// <summary>Exact shop-row currency flag copied from MNetherFloorShopContents.consume_content_type.</summary>
@@ -1117,6 +1217,12 @@ internal sealed record NetherStrategyVisibleContentRow(
     /// the product identity.
     /// </summary>
     public bool IsTreasureKey { get; init; }
+    /// <summary>
+    /// Nonzero only when an authoritative provider matched the complete Shop content identity.
+    /// This lets route policy accept an exact ID-less key row without treating MasterRowId=0 as
+    /// evidence of a valid product.
+    /// </summary>
+    public long ShopKeyIdentity { get; init; }
     public bool IsKnown { get; init; } = true;
     public string UnknownReason { get; init; } = string.Empty;
     public IReadOnlyList<NetherStrategyNamedValue> RawValues { get; init; } =
@@ -1512,6 +1618,10 @@ internal static class NetherStrategyEvidenceMapper
             );
         if (source.Floors == null || source.ContentRows == null)
             return NetherStrategyEvidenceComponent<NetherStrategyVisibleMapEvidence>.Unknown("invalid-visible-map-contract");
+        if (source.Floors.Count == 0 || source.ContentRows.Count == 0)
+            return NetherStrategyEvidenceComponent<NetherStrategyVisibleMapEvidence>.Unknown(
+                "visible-route-vector-unavailable-for-production"
+            );
 
         NetherFloorNode[] floors = source.Floors
             .Where(floor => floor != null && !floor.IsHidden && floor.IsUnlocked)
@@ -1533,7 +1643,9 @@ internal static class NetherStrategyEvidenceMapper
         {
             if (row == null || row.Kind == NetherStrategyVisibleContentKind.Unknown
                 || row.NodeId <= 0 || row.MasterRowId < 0
-                || row.MasterRowId == 0 && row.IsKnown
+                || row.MasterRowId == 0
+                    && row.IsKnown
+                    && !NetherCanonicalRewardTierProvider.IsAuthoritativeShopKeyRow(row)
                 || row.ContentId < 0
                 || row.ContentId == 0
                     && row.IsKnown

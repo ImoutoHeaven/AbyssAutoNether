@@ -162,6 +162,7 @@ public class NetherRoutePlannerTests
 
     private static NetherRouteSafetyContext Context() => new()
     {
+        AllowLegacyComparatorCompatibility = true,
         MinimumWorstCaseErosionToTerminal = new Dictionary<long, int>(),
         HpSafeByFloorId = new Dictionary<long, bool>(),
         KnownNodeByFloorId = new Dictionary<long, bool>(),

@@ -73,8 +73,11 @@ public sealed class NetherStrategyVisibleEvidenceMapperTests
         );
         Assert.Equal(601, reward.EventPartId);
         Assert.Equal(701, reward.ContentId);
-        Assert.Equal(77, reward.ItemType);
-        Assert.Equal(5, reward.ItemRarity);
+        Assert.False(reward.IsKnown);
+        Assert.Equal(0, reward.ItemType);
+        Assert.Equal(0, reward.ItemRarity);
+        Assert.Equal(77, reward.RawItemType);
+        Assert.Equal(5, reward.RawItemRarity);
         Assert.Equal(888, reward.ItemValue);
         Assert.Equal(9, reward.ItemPossessionLimit);
 
@@ -260,7 +263,36 @@ public sealed class NetherStrategyVisibleEvidenceMapperTests
             row => row.NodeId == 10003 && row.Kind == NetherStrategyVisibleContentKind.Item
         );
         Assert.False(item.IsKnown);
-        Assert.Contains("event-item-master-row-unavailable", item.UnknownReason);
+        Assert.Contains("event-item-canonical-semantic-unavailable", item.UnknownReason);
+    }
+
+    [Fact]
+    public void Production_visible_mapper_does_not_promote_raw_canonical_item_without_typed_provider()
+    {
+        NetherFloorNode eventFloor = Floor(103, 10003, NetherFloorNodeType.Event);
+        NetherStrategyVisibleEvidenceCaptureResult result = NetherStrategyVisibleEvidenceMapper.Map(
+            new NetherStrategyVisibleEvidenceCaptureRequest(
+                [eventFloor],
+                [],
+                [],
+                [new NetherFloorEventMasterRow(502, 103, 20, 602, 0, 0, 0)],
+                [new NetherFloorEventPartMasterRow(602, 0, 0, 0, 0, 0, 0, 30, 701, 1)],
+                [new NetherStrategyItemMasterRow(701, 91, (int)NetherRewardRarity.Red, 1, 99)]
+            )
+            {
+                ExtendIdByNodeId = new Dictionary<long, long> { [10003] = 502 },
+            }
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherStrategyVisibleContentRow item = Assert.Single(
+            result.Evidence!.ContentRows,
+            row => row.Kind == NetherStrategyVisibleContentKind.Item
+        );
+        Assert.False(item.IsKnown);
+        Assert.Equal(NetherCanonicalRewardTier.Unknown, item.CanonicalRewardTier);
+        Assert.Equal(0, item.ItemType);
+        Assert.Equal(0, item.ItemRarity);
     }
 
     [Fact]
@@ -448,6 +480,54 @@ public sealed class NetherStrategyVisibleEvidenceMapperTests
         Assert.Equal(NetherEffectKind.Battle, effect.EffectKind);
         Assert.False(effect.IsKnown);
         Assert.Contains("semantic", effect.UnknownReason);
+    }
+
+    [Fact]
+    public void Conflicting_typed_provider_evidence_is_ambiguous_for_both_reward_and_battle_rows()
+    {
+        NetherFloorNode floor = Floor(103, 10003, NetherFloorNodeType.Event);
+        NetherStrategyVisibleEvidenceCaptureResult result = NetherStrategyVisibleEvidenceMapper.Map(
+            new NetherStrategyVisibleEvidenceCaptureRequest(
+                [floor],
+                [new NetherStrategyBattleMasterRow(901, 999, 2, 1901, 321)],
+                [],
+                [new NetherFloorEventMasterRow(502, 103, 20, 602, 603, 0, 0)],
+                [
+                    new NetherFloorEventPartMasterRow(602, 8, 901, 0, 0, 0, 0, 0, 0, 0),
+                    new NetherFloorEventPartMasterRow(603, 0, 0, 0, 0, 0, 0, 30, 701, 1),
+                ],
+                [new NetherStrategyItemMasterRow(701, 91, 5, 1, 99)]
+            )
+            {
+                ExtendIdByNodeId = new Dictionary<long, long> { [floor.NodeId] = 502 },
+                TypedSemanticProvider = new NetherStrategyTypedSemanticProviderEvidence
+                {
+                    CanonicalRewardTiers =
+                    [
+                        new NetherCanonicalRewardTierProviderEvidence(701, NetherCanonicalRewardTier.GoldRankFive, 91),
+                        new NetherCanonicalRewardTierProviderEvidence(701, NetherCanonicalRewardTier.RedRankFive, 91),
+                    ],
+                    EventBattleTiers =
+                    [
+                        new NetherEventBattleTierProviderEvidence(901, NetherEventBattleTier.Boss),
+                        new NetherEventBattleTierProviderEvidence(901, NetherEventBattleTier.NormalBattle),
+                    ],
+                },
+            }
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherStrategyVisibleContentRow battle = Assert.Single(
+            result.Evidence!.ContentRows,
+            row => row.Kind == NetherStrategyVisibleContentKind.Battle
+        );
+        Assert.False(battle.IsKnown);
+        Assert.Equal(NetherEventBattleTier.Unknown, battle.EventBattleTier);
+        NetherStrategyVisibleContentRow item = Assert.Single(
+            result.Evidence.ContentRows,
+            row => row.Kind == NetherStrategyVisibleContentKind.Item
+        );
+        Assert.Equal(NetherCanonicalRewardTier.Unknown, item.CanonicalRewardTier);
     }
 
     private static NetherFloorNode Floor(long masterId, long nodeId, NetherFloorNodeType type) =>

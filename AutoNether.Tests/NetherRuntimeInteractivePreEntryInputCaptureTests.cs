@@ -108,6 +108,292 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
     }
 
     [Fact]
+    public void Production_preentry_typed_provider_reaches_mapper_through_assembler()
+    {
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            EventBattleTiers =
+            [new NetherEventBattleTierProviderEvidence(8201, NetherEventBattleTier.Boss)],
+        };
+        NetherRuntimeInteractivePreEntryCaptureResult captured = Capture(
+            floor: new FloorFixture { MNetherMapFloorId = 900, ExtendId = 42, FloorType = (int)NetherFloorNodeType.Event },
+            events: new object[] { Event(42, 900, 1, 4, 1001, 1002) },
+            parts: new object[]
+            {
+                Part(1001, target1: (int)NetherEffectKind.Battle, parameter1: 8201),
+                Part(1002, target1: (int)NetherEffectKind.Heal, parameter1: 1),
+            },
+            battleRows: new object[] { Battle(8201) },
+            typedSemanticProvider: provider
+        );
+        NetherFloorNode floor = new(900, 20, 0, NetherFloorNodeType.Event)
+        {
+            NodeId = 10003,
+            IsUnlocked = true,
+        };
+        var snapshot = new NetherSnapshot
+        {
+            Status = NetherSessionStatus.Play,
+            CurrentFloorId = floor.FloorId,
+            CurrentNodeId = floor.NodeId,
+            Floors = [floor],
+        };
+        NetherRuntimeInteractivePreEntryInputsResult interactive =
+            NetherRuntimeInteractivePreEntryInputsResult.Success(
+                new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
+                {
+                    [floor.NodeId] = captured with { Input = captured.Input! with { FloorNodeId = floor.NodeId } },
+                }
+            );
+
+        NetherStrategyVisibleEvidenceCaptureResult mapped = NetherStrategyVisibleEvidenceAssembler.Assemble(
+            new NetherStrategyVisibleEvidenceAssemblyRequest(
+                snapshot,
+                interactive,
+                NetherRuntimePopupResult.Failure("no-current-popup"),
+                new NetherStrategyVisibleEvidenceCaptureRequest(
+                    [floor],
+                    [new NetherStrategyBattleMasterRow(8201, 900, 1, 8202, 100)],
+                    [],
+                    [new NetherFloorEventMasterRow(42, 900, 1, 1001, 1002, 0, 0)],
+                    [
+                        new NetherFloorEventPartMasterRow(1001, 8, 8201, 0, 0, 0, 0, 0, 0, 0),
+                        new NetherFloorEventPartMasterRow(1002, (int)NetherEffectKind.Heal, 1, 0, 0, 0, 0, 0, 0, 0),
+                    ],
+                    []
+                )
+            )
+        );
+
+        Assert.True(mapped.IsSuccess, mapped.Detail);
+        NetherStrategyVisibleContentRow battle = Assert.Single(
+            mapped.Evidence!.ContentRows,
+            row => row.Kind == NetherStrategyVisibleContentKind.Battle
+        );
+        Assert.True(battle.IsKnown, battle.UnknownReason);
+        Assert.Equal(NetherEventBattleTier.Boss, battle.EventBattleTier);
+        NetherStrategyVisibleEventEffectEvidence effect = Assert.Single(
+            mapped.Evidence.ContentRows
+                .Single(row => row.Kind == NetherStrategyVisibleContentKind.Event && row.EventPartId == 1001)
+                .EventOptions[0]
+                .Effects,
+            candidate => candidate.RawType == (int)NetherEffectKind.Battle
+        );
+        Assert.True(effect.IsKnown, effect.UnknownReason);
+    }
+
+    [Fact]
+    public void RuntimeBridge_snapshot_scoped_provider_reaches_preentry_capture()
+    {
+        NetherSnapshot snapshot = new()
+        {
+            Status = NetherSessionStatus.Play,
+            CurrentFloorId = 900,
+            CurrentNodeId = 10003,
+            Characters = [new NetherCharacterState(1, 900)],
+        };
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            CanonicalRewardTiers =
+            [new NetherCanonicalRewardTierProviderEvidence(701, NetherCanonicalRewardTier.GoldRankFive, 91)],
+            EventBattleTiers =
+            [new NetherEventBattleTierProviderEvidence(8201, NetherEventBattleTier.Boss)],
+        };
+        NetherRuntimeBridge bridge = new(_ =>
+            new NetherRuntimeTypedSemanticProviderScope(snapshot.Fingerprint, provider));
+
+        NetherRuntimeInteractivePreEntryCaptureResult captured = bridge.CaptureInteractivePreEntryFloor(
+            snapshot,
+            new NetherAutoClimbSettings(),
+            new FloorFixture { MNetherMapFloorId = 900, ExtendId = 42, FloorType = (int)NetherFloorNodeType.Event },
+            mapFloorRows: null,
+            eventRows: null,
+            eventPartRows: null,
+            itemRows: null,
+            battleRows: null,
+            floorNodeId: 10003,
+            canCloseShop: false
+        );
+
+        Assert.True(captured.IsCaptured, captured.Detail);
+        Assert.NotNull(captured.Input);
+        Assert.Same(provider, captured.Input!.TypedSemanticProvider);
+    }
+
+    [Fact]
+    public void RuntimeBridge_without_provider_keeps_raw_battle_semantics_fail_closed_through_route_mapper()
+    {
+        NetherFloorNode floor = new(900, 20, 0, NetherFloorNodeType.Event)
+        {
+            NodeId = 10003,
+            IsUnlocked = true,
+        };
+        NetherSnapshot snapshot = new()
+        {
+            Status = NetherSessionStatus.Play,
+            CurrentFloorId = floor.FloorId,
+            CurrentNodeId = floor.NodeId,
+            Characters = [new NetherCharacterState(1, 900)],
+            Floors = [floor],
+        };
+        NetherRuntimeInteractivePreEntryCaptureResult captured = new NetherRuntimeBridge()
+            .CaptureInteractivePreEntryFloor(
+                snapshot,
+                new NetherAutoClimbSettings(),
+                new FloorFixture { MNetherMapFloorId = 900, ExtendId = 42, FloorType = (int)NetherFloorNodeType.Event },
+                mapFloorRows: null,
+                eventRows: new object[] { Event(42, 900, 1, 4, 1001) },
+                eventPartRows: new object[]
+                {
+                    Part(1001, target1: (int)NetherEffectKind.Battle, parameter1: 8201),
+                },
+                itemRows: null,
+                battleRows: new object[] { Battle(8201) },
+                floorNodeId: floor.NodeId,
+                canCloseShop: false
+            );
+
+        Assert.True(captured.IsCaptured, captured.Detail);
+        Assert.Null(captured.Input!.TypedSemanticProvider);
+        NetherRuntimeInteractivePreEntryInputsResult interactive =
+            NetherRuntimeInteractivePreEntryInputsResult.Success(
+                new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
+                {
+                    [floor.NodeId] = captured,
+                },
+                snapshot.Fingerprint
+            );
+        NetherStrategyVisibleEvidenceCaptureResult mapped = NetherStrategyVisibleEvidenceAssembler.Assemble(
+            new NetherStrategyVisibleEvidenceAssemblyRequest(
+                snapshot,
+                interactive,
+                NetherRuntimePopupResult.Failure("no-current-popup"),
+                new NetherStrategyVisibleEvidenceCaptureRequest(
+                    [floor],
+                    [new NetherStrategyBattleMasterRow(8201, 900, 7, 8202, 100)],
+                    [],
+                    [new NetherFloorEventMasterRow(42, 900, 1, 1001, 0, 0, 0)],
+                    [new NetherFloorEventPartMasterRow(1001, 8, 8201, 0, 0, 0, 0, 0, 0, 0)],
+                    []
+                )
+            )
+        );
+
+        Assert.True(mapped.IsSuccess, mapped.Detail);
+        NetherStrategyVisibleContentRow battle = Assert.Single(
+            mapped.Evidence!.ContentRows,
+            row => row.Kind == NetherStrategyVisibleContentKind.Battle
+        );
+        Assert.False(battle.IsKnown);
+        Assert.Equal(NetherEventBattleTier.Unknown, battle.EventBattleTier);
+    }
+
+    [Fact]
+    public void RuntimeBridge_discards_provider_with_stale_snapshot_scope()
+    {
+        NetherSnapshot snapshot = new()
+        {
+            Status = NetherSessionStatus.Play,
+            CurrentFloorId = 900,
+            CurrentNodeId = 10003,
+            Characters = [new NetherCharacterState(1, 900)],
+        };
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            CanonicalRewardTiers =
+            [new NetherCanonicalRewardTierProviderEvidence(701, NetherCanonicalRewardTier.GoldRankFive, 91)],
+        };
+        NetherRuntimeBridge bridge = new(_ =>
+            new NetherRuntimeTypedSemanticProviderScope(
+                new NetherSnapshot { CurrentFloorId = 901 }.Fingerprint,
+                provider
+            ));
+
+        NetherRuntimeInteractivePreEntryCaptureResult captured = bridge.CaptureInteractivePreEntryFloor(
+            snapshot,
+            new NetherAutoClimbSettings(),
+            new FloorFixture { MNetherMapFloorId = 900, ExtendId = 42, FloorType = (int)NetherFloorNodeType.Event },
+            mapFloorRows: null,
+            eventRows: null,
+            eventPartRows: null,
+            itemRows: null,
+            battleRows: null,
+            floorNodeId: snapshot.CurrentNodeId,
+            canCloseShop: false
+        );
+
+        Assert.True(captured.IsCaptured, captured.Detail);
+        Assert.Null(captured.Input!.TypedSemanticProvider);
+    }
+
+    [Fact]
+    public void Production_controller_registration_reaches_actual_runtime_bridge_singleton()
+    {
+        NetherSnapshot snapshot = new()
+        {
+            Status = NetherSessionStatus.Play,
+            CurrentFloorId = 900,
+            CurrentNodeId = 10003,
+            Characters = [new NetherCharacterState(1, 900)],
+        };
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            CanonicalRewardTiers =
+            [new NetherCanonicalRewardTierProviderEvidence(701, NetherCanonicalRewardTier.GoldRankFive, 91)],
+        };
+        NetherAutoClimbController.RegisterTypedSemanticProviderFactory(_ =>
+            new NetherRuntimeTypedSemanticProviderScope(snapshot.Fingerprint, provider));
+        try
+        {
+            NetherRuntimeInteractivePreEntryCaptureResult captured = NetherRuntimeBridge.Instance
+                .CaptureInteractivePreEntryFloor(
+                    snapshot,
+                    new NetherAutoClimbSettings(),
+                    new FloorFixture
+                    {
+                        MNetherMapFloorId = 900,
+                        ExtendId = 42,
+                        FloorType = (int)NetherFloorNodeType.Event,
+                    },
+                    mapFloorRows: null,
+                    eventRows: null,
+                    eventPartRows: null,
+                    itemRows: null,
+                    battleRows: null,
+                    floorNodeId: snapshot.CurrentNodeId,
+                    canCloseShop: false
+                );
+
+            Assert.True(captured.IsCaptured, captured.Detail);
+            Assert.Same(provider, captured.Input!.TypedSemanticProvider);
+        }
+        finally
+        {
+            NetherAutoClimbController.RegisterTypedSemanticProviderFactory(null);
+        }
+    }
+
+    [Fact]
+    public void Raw_gold_shop_without_typed_provider_is_not_a_route_purchase_candidate()
+    {
+        NetherShopContent rawGoldBag = new(3001, 9001, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true);
+
+        NetherShopDecision decision = new NetherEventPolicy().DecideShop(
+            new NetherSnapshot
+            {
+                Status = NetherSessionStatus.Play,
+                FloorLevel = 91,
+                NetherGold = 300,
+            },
+            [rawGoldBag],
+            new NetherAutoClimbSettings { ShopMode = NetherShopMode.EquipmentBags }
+        );
+
+        Assert.Equal(NetherCanonicalRewardTier.Unknown, rawGoldBag.CanonicalRewardTier);
+        Assert.Equal(NetherShopDecisionKind.Leave, decision.Kind);
+    }
+
+    [Fact]
     public void Production_recovery_capture_fails_closed_when_selected_horizon_proofs_are_absent()
     {
         NetherRuntimeInteractivePreEntryCaptureResult result = Capture(
@@ -376,7 +662,8 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
         IEnumerable? itemRows = null,
         IEnumerable? battleRows = null,
         IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? committedProcurement = null,
-        bool requireCompleteRecoveryBranchSafety = false
+        bool requireCompleteRecoveryBranchSafety = false,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider = null
     ) => new NetherRuntimeInteractivePreEntryInputCapture().Capture(new NetherRuntimeInteractivePreEntryCaptureRequest(
         FloorModel: floor ?? new FloorFixture
         {
@@ -405,6 +692,7 @@ public class NetherRuntimeInteractivePreEntryInputCaptureTests
         CodeCapacity = 5,
         ItemRows = itemRows,
         BattleRows = battleRows,
+        TypedSemanticProvider = typedSemanticProvider,
         CommittedProcurementByOption = committedProcurement
             ?? new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>(),
         RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,

@@ -41,18 +41,26 @@ internal readonly record struct NetherShopContentMapResult(
 
 /// <summary>
 /// Converts the heterogeneous native shop catalogue into the narrow EquipmentBags policy
-/// model.  Raw content types 30/31 are MItems-backed.  Other product families are fully valid
-/// shop rows but are deliberately marked as known/ineligible so they cannot poison the whole
-/// popup and cannot accidentally become a purchase candidate.
+/// model.  Raw content types 30/31 are MItems-backed.  The only known non-item families are the
+/// native-proven code-offer/resource content types; every other raw type remains unknown so an
+/// unproven sibling cannot make a Shop look eligible.
 /// </summary>
 internal static class NetherShopContentMapper
 {
     private const int ItemContentType = 30;
     private const int LimitedItemContentType = 31;
 
+    private static bool IsKnownNonItem(NetherRawShopContent row) => row.RawContentType switch
+    {
+        160 => NetherEventNativeMapping.IsCodeOfferContentId(row.ItemId),
+        165 or 166 => NetherEventNativeMapping.IsValidResourceContentId(row.ItemId),
+        _ => false,
+    };
+
     public static NetherShopContentMapResult Map(
         IReadOnlyList<NetherRawShopContent> rows,
-        IReadOnlyDictionary<long, NetherShopItemMaster> itemById
+        IReadOnlyDictionary<long, NetherShopItemMaster> itemById,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider = null
     )
     {
         if (rows == null)
@@ -60,6 +68,8 @@ internal static class NetherShopContentMapper
         if (itemById == null)
             throw new ArgumentNullException(nameof(itemById));
 
+        NetherStrategySemanticTierLookup semanticTiers =
+            NetherStrategySemanticTierLookup.Create(typedSemanticProvider);
         var mapped = new List<NetherShopContent>(rows.Count);
         var seenContentIds = new HashSet<long>();
         foreach (NetherRawShopContent row in rows)
@@ -72,6 +82,14 @@ internal static class NetherShopContentMapper
             bool isItem = row.RawContentType is ItemContentType or LimitedItemContentType;
             if (!isItem)
             {
+                bool knownNonItem = IsKnownNonItem(row);
+                bool typedShopKey = semanticTiers.TryGetShopKey(
+                    row.ContentId,
+                    row.RawContentType,
+                    row.ItemId,
+                    row.Amount,
+                    out long shopKeyIdentity
+                );
                 mapped.Add(new NetherShopContent(
                     row.ContentId,
                     row.ItemId,
@@ -80,8 +98,15 @@ internal static class NetherShopContentMapper
                     row.Price,
                     row.UsesNetherGold,
                     row.Amount,
-                    known: true
-                ) { RawContentType = row.RawContentType });
+                    known: knownNonItem
+                )
+                {
+                    RawContentType = row.RawContentType,
+                    RawItemType = 0,
+                    RawRarity = NetherRewardRarity.NoEffect,
+                    IsTreasureKey = typedShopKey,
+                    ShopKeyIdentity = typedShopKey ? shopKeyIdentity : 0,
+                });
                 continue;
             }
 
@@ -90,16 +115,37 @@ internal static class NetherShopContentMapper
             if (!itemById.TryGetValue(row.ItemId, out NetherShopItemMaster item))
                 return NetherShopContentMapResult.Failure("missing-shop-item-master:" + row.ItemId);
 
+            bool typedItemShopKey = semanticTiers.TryGetShopKey(
+                row.ContentId,
+                row.RawContentType,
+                row.ItemId,
+                row.Amount,
+                out long itemShopKeyIdentity
+            );
+            bool typedCanonical = semanticTiers.TryGetCanonicalRewardEvidence(
+                item.ItemId,
+                out NetherCanonicalRewardTier tier,
+                out int typedItemType,
+                out NetherRewardRarity typedRarity
+            );
             mapped.Add(new NetherShopContent(
                 row.ContentId,
                 row.ItemId,
-                item.ItemType,
-                item.Rarity,
+                typedCanonical ? typedItemType : 0,
+                typedCanonical ? typedRarity : NetherRewardRarity.NoEffect,
                 row.Price,
                 row.UsesNetherGold,
                 row.Amount,
                 known: true
-            ) { RawContentType = row.RawContentType });
+            )
+            {
+                CanonicalRewardTier = typedCanonical ? tier : NetherCanonicalRewardTier.Unknown,
+                RawItemType = item.ItemType,
+                RawRarity = item.Rarity,
+                RawContentType = row.RawContentType,
+                IsTreasureKey = typedItemShopKey,
+                ShopKeyIdentity = typedItemShopKey ? itemShopKeyIdentity : 0,
+            });
         }
 
         return NetherShopContentMapResult.Success(mapped);

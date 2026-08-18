@@ -49,6 +49,115 @@ internal static class NetherRankFiveKeyProcurementPredicates
             && effect.Amount == 1) == 1;
 }
 
+/// <summary>
+/// Route-value adapter for a typed canonical reward-tier provider. It validates the exact visible
+/// row identity but never derives rank-five or colour from native MItems type/rarity fields.
+/// </summary>
+internal static class NetherCanonicalRewardTierProvider
+{
+    internal static bool TryGetTypedRewardEvidence(
+        NetherStrategyVisibleContentRow? row,
+        out NetherEventRewardEvidence evidence
+    )
+    {
+        evidence = null!;
+        if (row == null
+            || row.Kind != NetherStrategyVisibleContentKind.Item
+            || !row.IsKnown
+            || row.ContentId <= 0
+            || row.MasterRowId <= 0
+            || row.ItemType != 91
+            || row.Amount <= 0)
+        {
+            return false;
+        }
+        NetherRewardRarity expectedRarity = row.CanonicalRewardTier switch
+        {
+            NetherCanonicalRewardTier.GoldRankFive => NetherRewardRarity.Gold,
+            NetherCanonicalRewardTier.RedRankFive => NetherRewardRarity.Red,
+            NetherCanonicalRewardTier.UncolouredRankFive => NetherRewardRarity.UniqueWeapon,
+            _ => NetherRewardRarity.NoEffect,
+        };
+        if (expectedRarity == NetherRewardRarity.NoEffect || row.ItemRarity != (int)expectedRarity)
+            return false;
+        evidence = new NetherEventRewardEvidence(
+            row.ContentId,
+            row.MasterRowId,
+            (int)row.ItemType,
+            expectedRarity,
+            row.Amount
+        );
+        return evidence.IsKnown;
+    }
+
+    internal static bool IsCanonicalGoldRankFiveShopContent(NetherShopContent content) =>
+        content.Known
+        && content.ContentId > 0
+        && content.ItemId > 0
+        && content.ItemType == 91
+        && content.Amount > 0
+        && content.UsesNetherGold
+        && content.Price == 300
+        && content.CanonicalRewardTier == NetherCanonicalRewardTier.GoldRankFive;
+
+    internal static bool IsCanonicalGoldRankFiveShopRow(NetherStrategyVisibleContentRow? row) =>
+        row != null
+        && row.Kind == NetherStrategyVisibleContentKind.ShopInventory
+        && row.IsKnown
+        && row.MasterRowId > 0
+        && row.ContentId > 0
+        && row.ItemType == 91
+        && row.Amount > 0
+        && row.Cost == 300
+        && row.UsesNetherGold
+        && row.CanonicalRewardTier == NetherCanonicalRewardTier.GoldRankFive;
+
+    internal static bool IsAuthoritativeShopKeyRow(NetherStrategyVisibleContentRow? row) =>
+        row != null
+        && row.Kind == NetherStrategyVisibleContentKind.ShopInventory
+        && row.IsKnown
+        && row.IsTreasureKey
+        && row.ShopKeyIdentity > 0
+        && row.ContentId > 0
+        && row.ContentType == 166
+        && row.ItemType >= 0
+        && row.Amount > 0
+        && row.Cost >= 0
+        && row.UsesNetherGold;
+
+    internal static bool TryGetRankFiveTier(
+        NetherStrategyVisibleContentRow? row,
+        long treasureNodeId,
+        long treasureEventId,
+        out NetherCanonicalRewardTier tier
+    )
+    {
+        tier = NetherCanonicalRewardTier.Unknown;
+        if (row == null
+            || row.Kind != NetherStrategyVisibleContentKind.Item
+            || !row.IsKnown
+            || row.NodeId != treasureNodeId
+            || row.EventId != treasureEventId
+            || row.EventPartId <= 0
+            || row.ContentId <= 0
+            || row.ItemType != 91
+            || row.Amount <= 0)
+        {
+            return false;
+        }
+        if (row.CanonicalRewardTier is not (
+                NetherCanonicalRewardTier.GoldRankFive
+                or NetherCanonicalRewardTier.RedRankFive
+                or NetherCanonicalRewardTier.UncolouredRankFive
+            ))
+        {
+            return false;
+        }
+        tier = row.CanonicalRewardTier;
+        return true;
+    }
+}
+
 internal readonly record struct NetherRankFiveTreasureIdentity(
     long ObjectiveNodeId,
     long ObjectiveEventId,
@@ -399,21 +508,19 @@ internal sealed class NetherRankFiveKeyProcurementPolicy
 
     /// <summary>
     /// One shared native-visible reward predicate used by both objective discovery and identity
-    /// construction. Rank five means the exact UniqueWeapon item row, not merely a Treasure node.
+    /// construction. Raw UniqueWeapon rarity is not semantic proof; only the canonical typed
+    /// provider may mark this exact row as rank five.
     /// </summary>
     internal static bool IsRankFiveTreasureReward(
         NetherStrategyVisibleContentRow? row,
         long treasureNodeId,
         long treasureEventId
-    ) => row != null
-        && row.Kind == NetherStrategyVisibleContentKind.Item
-        && row.IsKnown
-        && row.NodeId == treasureNodeId
-        && row.EventId == treasureEventId
-        && row.EventPartId > 0
-        && row.ItemType == 91
-        && row.ItemRarity == (int)NetherRewardRarity.UniqueWeapon
-        && row.Amount > 0;
+    ) => NetherCanonicalRewardTierProvider.TryGetRankFiveTier(
+        row,
+        treasureNodeId,
+        treasureEventId,
+        out _
+    );
 
     private static bool TryFindExactEventSource(
         IReadOnlyList<NetherStrategyVisibleContentRow> rows,
@@ -453,7 +560,7 @@ internal sealed class NetherRankFiveKeyProcurementPolicy
             .Where(row => row != null
                 && row.Kind == NetherStrategyVisibleContentKind.ShopInventory
                 && row.IsKnown
-                && row.IsTreasureKey
+                && NetherCanonicalRewardTierProvider.IsAuthoritativeShopKeyRow(row)
                 && row.UsesNetherGold
                 && row.Cost == 200
                 && row.ContentId > 0

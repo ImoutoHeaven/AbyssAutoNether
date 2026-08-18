@@ -123,6 +123,8 @@ internal sealed class NetherRuntimeFlowCoordinator
         {
             _ownedPopupReadinessWait.ObserveReady();
             NetherRuntimePopupContext context = popup.Popup!;
+            if (context.Sequence <= 0)
+                return Fail("owned-popup-unavailable:success-popup-owner-mismatch");
             if (context.RuntimeGeneration > 0
                 && context.OwnerAction == NetherActionKind.SelectFloor
                 && context.OwnerGeneration == _generation

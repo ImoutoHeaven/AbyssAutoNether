@@ -427,15 +427,21 @@ internal static class NetherActionReconcilePolicy
     {
         if (action.ContentId <= 0 || action.ContentAmount <= 0 || action.GoldCost < 0)
             return NetherActionOutcome.Ambiguous;
+        // A native Shop child cannot debit more NetherGold than the authoritative pre-click
+        // balance. Without this gate, a malformed post-refresh with a negative balance could
+        // satisfy the arithmetic and be mistaken for an applied purchase.
+        if (before.NetherGold < action.GoldCost)
+            return NetherActionOutcome.Ambiguous;
         if (action.ShopProcurementCommitment is NetherShopProcurementCommitment procurement)
         {
+            bool matchesCommittedKey = procurement.RequiresRankFiveKey
+                && procurement.KeyContentId == action.ContentId
+                && procurement.KeyCost == action.GoldCost;
+            bool matchesCommittedBag = procurement.RequiresRankFiveBag
+                && procurement.BagContentId == action.ContentId
+                && procurement.BagCost == action.GoldCost;
             if (!procurement.IsValid
-                || procurement.RequiresRankFiveKey
-                    && (procurement.KeyContentId != action.ContentId
-                        || procurement.KeyCost != action.GoldCost)
-                || procurement.RequiresRankFiveBag
-                    && (procurement.BagContentId != action.ContentId
-                        || procurement.BagCost != action.GoldCost))
+                || !matchesCommittedKey && !matchesCommittedBag)
             {
                 return NetherActionOutcome.Ambiguous;
             }

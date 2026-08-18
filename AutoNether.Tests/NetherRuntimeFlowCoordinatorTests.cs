@@ -77,6 +77,41 @@ public class NetherRuntimeFlowCoordinatorTests
     }
 
     [Fact]
+    public void Successful_popup_without_a_registered_sequence_fails_closed_as_an_owner_mismatch()
+    {
+        var driver = new FakeDriver();
+        var coordinator = new NetherRuntimeFlowCoordinator(driver);
+        Assert.True(coordinator.BeginFloorParent(
+            new NetherPlannedAction(NetherActionKind.SelectFloor)
+            {
+                FloorId = 9,
+                FloorLevel = 2,
+            }
+        ));
+        driver.Popup = new NetherRuntimePopupContext
+        {
+            Kind = NetherRuntimePopupKind.Event,
+            RuntimeGeneration = 1,
+            OwnerAction = NetherActionKind.SelectFloor,
+            OwnerGeneration = coordinator.Generation,
+            Sequence = 0,
+        };
+        driver.ParentPoll = NetherNativeActionResult.Completed("must-not-poll-parent");
+
+        NetherRuntimeParentPollResult result = coordinator.Poll(
+            _ => throw new Xunit.Sdk.XunitException("unregistered popup must not dispatch")
+        );
+
+        Assert.Equal(NetherRuntimeParentPollKind.Faulted, result.Kind);
+        Assert.Equal(
+            "owned-popup-unavailable:success-popup-owner-mismatch",
+            result.Detail
+        );
+        Assert.Equal(0, driver.ParentPollCount);
+        Assert.False(coordinator.HasPendingParent);
+    }
+
+    [Fact]
     public void Parent_terminal_is_not_consumed_on_the_same_tick_as_owned_modal_dispatch()
     {
         var driver = new FakeDriver();

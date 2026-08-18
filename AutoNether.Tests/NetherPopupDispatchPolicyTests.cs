@@ -962,7 +962,7 @@ public class NetherPopupDispatchPolicyTests
             KeyCost = 200,
         };
         NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
-            Snapshot() with { NetherGold = 250 },
+            Snapshot() with { NetherGold = 300, FloorLevel = 91 },
             new NetherRuntimePopupContext
             {
                 Kind = NetherRuntimePopupKind.Shop,

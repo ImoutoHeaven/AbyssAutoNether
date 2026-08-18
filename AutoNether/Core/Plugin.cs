@@ -31,7 +31,10 @@ public sealed class Plugin : BasePlugin
         AutoNether.Config.Initialize();
         Instance = AddComponent<Hotkey>();
         PatchManager.Initialize();
-        NetherAutoClimbController.Initialize();
+        // The production startup seam accepts only a snapshot-scoped authoritative provider.
+        // This standalone build has no native-backed semantic provider, so null is explicit and
+        // raw item/battle fields remain Unknown/fail-closed until an adapter is registered.
+        NetherAutoClimbController.Initialize(typedSemanticProviderFactory: null);
 
         Log.LogInfo($"{PluginName} {PluginVersion} loaded; F12 controls Nether auto-climb.");
         bool abyssModDetected = AppDomain.CurrentDomain

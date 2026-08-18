@@ -39,6 +39,305 @@ internal sealed record NetherStrategyShopInventoryCapture(
     string UnknownReason
 );
 
+/// <summary>
+/// Normalized lookup for the only semantic tier authority accepted by production mapping. Raw
+/// rows never enter this lookup, and an identity with duplicate/conflicting provider evidence is
+/// deliberately kept ambiguous instead of selecting an arbitrary entry.
+/// </summary>
+internal sealed class NetherStrategySemanticTierLookup
+{
+    private readonly record struct ShopKeyLookupKey(
+        long ShopContentId,
+        int RawContentType,
+        long ItemId,
+        int Amount
+    );
+
+    private readonly record struct BattleRouteSafetyLookupKey(
+        long EventId,
+        long EventPartId,
+        int OptionNumber,
+        long FloorId,
+        long NodeId,
+        long BattleId
+    );
+
+    private readonly IReadOnlyDictionary<long, NetherCanonicalRewardTierProviderEvidence> _canonicalRewardEvidence;
+    private readonly IReadOnlySet<long> _ambiguousCanonicalRewardIds;
+    private readonly IReadOnlyDictionary<long, NetherEventBattleTier> _eventBattleTiers;
+    private readonly IReadOnlySet<long> _ambiguousEventBattleIds;
+    private readonly IReadOnlyDictionary<BattleRouteSafetyLookupKey, NetherEventBattleRouteSafetyProviderEvidence>
+        _eventBattleRouteSafety;
+    private readonly IReadOnlySet<BattleRouteSafetyLookupKey> _ambiguousEventBattleRouteSafety;
+    private readonly IReadOnlyDictionary<ShopKeyLookupKey, long> _shopKeyIdentities;
+    private readonly IReadOnlySet<ShopKeyLookupKey> _ambiguousShopKeyIdentities;
+
+    private NetherStrategySemanticTierLookup(
+        IReadOnlyDictionary<long, NetherCanonicalRewardTierProviderEvidence> canonicalRewardEvidence,
+        IReadOnlySet<long> ambiguousCanonicalRewardIds,
+        IReadOnlyDictionary<long, NetherEventBattleTier> eventBattleTiers,
+        IReadOnlySet<long> ambiguousEventBattleIds,
+        IReadOnlyDictionary<BattleRouteSafetyLookupKey, NetherEventBattleRouteSafetyProviderEvidence>
+            eventBattleRouteSafety,
+        IReadOnlySet<BattleRouteSafetyLookupKey> ambiguousEventBattleRouteSafety,
+        IReadOnlyDictionary<ShopKeyLookupKey, long> shopKeyIdentities,
+        IReadOnlySet<ShopKeyLookupKey> ambiguousShopKeyIdentities
+    )
+    {
+        _canonicalRewardEvidence = canonicalRewardEvidence;
+        _ambiguousCanonicalRewardIds = ambiguousCanonicalRewardIds;
+        _eventBattleTiers = eventBattleTiers;
+        _ambiguousEventBattleIds = ambiguousEventBattleIds;
+        _eventBattleRouteSafety = eventBattleRouteSafety;
+        _ambiguousEventBattleRouteSafety = ambiguousEventBattleRouteSafety;
+        _shopKeyIdentities = shopKeyIdentities;
+        _ambiguousShopKeyIdentities = ambiguousShopKeyIdentities;
+    }
+
+    public static NetherStrategySemanticTierLookup Create(
+        NetherStrategyTypedSemanticProviderEvidence? provider
+    )
+    {
+        (Dictionary<long, NetherCanonicalRewardTierProviderEvidence> canonical, HashSet<long> ambiguousCanonical) =
+            BuildLookup(
+                provider?.CanonicalRewardTiers,
+                evidence => evidence.ItemId,
+                evidence => evidence,
+                evidence => evidence.ItemType == 91
+                    && evidence.Tier is
+                        NetherCanonicalRewardTier.GoldRankFive
+                        or NetherCanonicalRewardTier.RedRankFive
+                        or NetherCanonicalRewardTier.UncolouredRankFive
+            );
+        (Dictionary<long, NetherEventBattleTier> battles, HashSet<long> ambiguousBattles) =
+            BuildLookup(
+                provider?.EventBattleTiers,
+                evidence => evidence.BattleId,
+                evidence => evidence.Tier,
+                evidence => evidence.Tier is
+                    NetherEventBattleTier.Boss
+                    or NetherEventBattleTier.MiniBoss
+                    or NetherEventBattleTier.NormalBattle
+            );
+        (Dictionary<BattleRouteSafetyLookupKey, NetherEventBattleRouteSafetyProviderEvidence> routeSafety,
+            HashSet<BattleRouteSafetyLookupKey> ambiguousRouteSafety) =
+            BuildBattleRouteSafetyLookup(provider?.EventBattleRouteSafety);
+        (Dictionary<ShopKeyLookupKey, long> shopKeys, HashSet<ShopKeyLookupKey> ambiguousShopKeys) =
+            BuildShopKeyLookup(provider?.ShopKeyIdentities);
+        return new NetherStrategySemanticTierLookup(
+            canonical,
+            ambiguousCanonical,
+            battles,
+            ambiguousBattles,
+            routeSafety,
+            ambiguousRouteSafety,
+            shopKeys,
+            ambiguousShopKeys
+        );
+    }
+
+    public bool TryGetCanonicalRewardTier(
+        long itemId,
+        out NetherCanonicalRewardTier tier
+    )
+    {
+        tier = NetherCanonicalRewardTier.Unknown;
+        return TryGetCanonicalRewardEvidence(itemId, out NetherCanonicalRewardTierProviderEvidence evidence)
+            && (tier = evidence.Tier) != NetherCanonicalRewardTier.Unknown;
+    }
+
+    public bool TryGetCanonicalRewardEvidence(
+        long itemId,
+        out NetherCanonicalRewardTier tier,
+        out int itemType,
+        out NetherRewardRarity rarity
+    )
+    {
+        tier = NetherCanonicalRewardTier.Unknown;
+        itemType = 0;
+        rarity = NetherRewardRarity.NoEffect;
+        if (!TryGetCanonicalRewardEvidence(itemId, out NetherCanonicalRewardTierProviderEvidence evidence))
+            return false;
+        tier = evidence.Tier;
+        itemType = evidence.ItemType;
+        rarity = tier switch
+        {
+            NetherCanonicalRewardTier.GoldRankFive => NetherRewardRarity.Gold,
+            NetherCanonicalRewardTier.RedRankFive => NetherRewardRarity.Red,
+            NetherCanonicalRewardTier.UncolouredRankFive => NetherRewardRarity.UniqueWeapon,
+            _ => NetherRewardRarity.NoEffect,
+        };
+        return rarity != NetherRewardRarity.NoEffect;
+    }
+
+    private bool TryGetCanonicalRewardEvidence(
+        long itemId,
+        out NetherCanonicalRewardTierProviderEvidence evidence
+    )
+    {
+        evidence = default;
+        return itemId > 0
+            && !_ambiguousCanonicalRewardIds.Contains(itemId)
+            && _canonicalRewardEvidence.TryGetValue(itemId, out evidence);
+    }
+
+    public bool TryGetEventBattleTier(
+        long battleId,
+        out NetherEventBattleTier tier
+    )
+    {
+        tier = NetherEventBattleTier.Unknown;
+        return battleId > 0
+            && !_ambiguousEventBattleIds.Contains(battleId)
+            && _eventBattleTiers.TryGetValue(battleId, out tier);
+    }
+
+    public bool TryGetEventBattleRouteSafety(
+        long eventId,
+        long eventPartId,
+        int optionNumber,
+        long floorId,
+        long nodeId,
+        long battleId,
+        out NetherEventBattleRouteSafetyProviderEvidence evidence
+    )
+    {
+        evidence = default;
+        BattleRouteSafetyLookupKey key = new(
+            eventId,
+            eventPartId,
+            optionNumber,
+            floorId,
+            nodeId,
+            battleId
+        );
+        return !_ambiguousEventBattleRouteSafety.Contains(key)
+            && _eventBattleRouteSafety.TryGetValue(key, out evidence)
+            && evidence.IsValid;
+    }
+
+    public bool TryGetShopKey(
+        long shopContentId,
+        int rawContentType,
+        long itemId,
+        int amount,
+        out long keyIdentity
+    )
+    {
+        keyIdentity = 0;
+        if (shopContentId < 0 || rawContentType < 0 || itemId < 0 || amount <= 0)
+            return false;
+        ShopKeyLookupKey key = new(shopContentId, rawContentType, itemId, amount);
+        return !_ambiguousShopKeyIdentities.Contains(key)
+            && _shopKeyIdentities.TryGetValue(key, out keyIdentity)
+            && keyIdentity > 0;
+    }
+
+    private static (Dictionary<long, TValue> Known, HashSet<long> Ambiguous) BuildLookup<TEvidence, TValue>(
+        IEnumerable<TEvidence>? source,
+        Func<TEvidence, long> keySelector,
+        Func<TEvidence, TValue> valueSelector,
+        Func<TEvidence, bool> isValid
+    )
+        where TValue : struct
+    {
+        var known = new Dictionary<long, TValue>();
+        var ambiguous = new HashSet<long>();
+        foreach (TEvidence evidence in source ?? Array.Empty<TEvidence>())
+        {
+            long key = keySelector(evidence);
+            if (key <= 0)
+                continue;
+            if (!isValid(evidence))
+            {
+                known.Remove(key);
+                ambiguous.Add(key);
+                continue;
+            }
+            if (ambiguous.Contains(key))
+                continue;
+            if (!known.TryAdd(key, valueSelector(evidence)))
+            {
+                known.Remove(key);
+                ambiguous.Add(key);
+            }
+        }
+        return (known, ambiguous);
+    }
+
+    private static (
+        Dictionary<ShopKeyLookupKey, long> Known,
+        HashSet<ShopKeyLookupKey> Ambiguous
+    ) BuildShopKeyLookup(IEnumerable<NetherShopKeyProviderEvidence>? source)
+    {
+        var known = new Dictionary<ShopKeyLookupKey, long>();
+        var ambiguous = new HashSet<ShopKeyLookupKey>();
+        foreach (NetherShopKeyProviderEvidence evidence in source ?? Array.Empty<NetherShopKeyProviderEvidence>())
+        {
+            if (evidence.ShopContentId < 0
+                || evidence.RawContentType < 0
+                || evidence.ItemId < 0
+                || evidence.Amount <= 0)
+            {
+                continue;
+            }
+            ShopKeyLookupKey key = new(
+                evidence.ShopContentId,
+                evidence.RawContentType,
+                evidence.ItemId,
+                evidence.Amount
+            );
+            if (evidence.KeyIdentity <= 0 || ambiguous.Contains(key))
+            {
+                known.Remove(key);
+                ambiguous.Add(key);
+                continue;
+            }
+            if (!known.TryAdd(key, evidence.KeyIdentity))
+            {
+                known.Remove(key);
+                ambiguous.Add(key);
+            }
+        }
+        return (known, ambiguous);
+    }
+
+    private static (
+        Dictionary<BattleRouteSafetyLookupKey, NetherEventBattleRouteSafetyProviderEvidence> Known,
+        HashSet<BattleRouteSafetyLookupKey> Ambiguous
+    ) BuildBattleRouteSafetyLookup(
+        IEnumerable<NetherEventBattleRouteSafetyProviderEvidence>? source
+    )
+    {
+        var known = new Dictionary<BattleRouteSafetyLookupKey, NetherEventBattleRouteSafetyProviderEvidence>();
+        var ambiguous = new HashSet<BattleRouteSafetyLookupKey>();
+        foreach (NetherEventBattleRouteSafetyProviderEvidence evidence in source
+            ?? Array.Empty<NetherEventBattleRouteSafetyProviderEvidence>())
+        {
+            BattleRouteSafetyLookupKey key = new(
+                evidence.EventId,
+                evidence.EventPartId,
+                evidence.OptionNumber,
+                evidence.FloorId,
+                evidence.NodeId,
+                evidence.BattleId
+            );
+            if (!evidence.IsValid || ambiguous.Contains(key))
+            {
+                known.Remove(key);
+                ambiguous.Add(key);
+                continue;
+            }
+            if (!known.TryAdd(key, evidence))
+            {
+                known.Remove(key);
+                ambiguous.Add(key);
+            }
+        }
+        return (known, ambiguous);
+    }
+}
+
 internal sealed record NetherStrategyVisibleEvidenceCaptureRequest(
     IReadOnlyList<NetherFloorNode> Floors,
     IReadOnlyList<NetherStrategyBattleMasterRow> BattleRows,
@@ -48,6 +347,12 @@ internal sealed record NetherStrategyVisibleEvidenceCaptureRequest(
     IReadOnlyList<NetherStrategyItemMasterRow> ItemRows
 )
 {
+    /// <summary>
+    /// Optional authoritative semantic provider. The production RuntimeBridge supplies this only
+    /// when a snapshot-scoped authoritative adapter is registered; its default remains null
+    /// because fresh native evidence exposes only raw item/battle fields.
+    /// </summary>
+    public NetherStrategyTypedSemanticProviderEvidence? TypedSemanticProvider { get; init; }
     public IReadOnlyDictionary<long, long> ExtendIdByNodeId { get; init; } =
         new Dictionary<long, long>();
     public IReadOnlyDictionary<long, NetherStrategyShopInventoryCapture> ShopInventoryByNodeId { get; init; } =
@@ -105,6 +410,9 @@ internal static class NetherStrategyVisibleEvidenceMapper
             );
         }
 
+        NetherStrategySemanticTierLookup semanticTiers =
+            NetherStrategySemanticTierLookup.Create(request.TypedSemanticProvider);
+
         var rows = new List<NetherStrategyVisibleContentRow>();
         foreach (NetherFloorNode floor in request.Floors.Where(floor =>
             floor != null && floor.IsUnlocked && !floor.IsHidden))
@@ -127,7 +435,8 @@ internal static class NetherStrategyVisibleEvidenceMapper
                         eventById,
                         partById,
                         itemById,
-                        battleById
+                        battleById,
+                        semanticTiers
                     );
                     break;
                 case NetherFloorNodeType.Event:
@@ -139,11 +448,12 @@ internal static class NetherStrategyVisibleEvidenceMapper
                         eventById,
                         partById,
                         itemById,
-                        battleById
+                        battleById,
+                        semanticTiers
                     );
                     break;
                 case NetherFloorNodeType.Shop:
-                    AppendShop(rows, floor, request.ShopInventoryByNodeId);
+                    AppendShop(rows, floor, request.ShopInventoryByNodeId, semanticTiers);
                     break;
             }
         }
@@ -185,7 +495,8 @@ internal static class NetherStrategyVisibleEvidenceMapper
         IReadOnlyDictionary<long, NetherFloorEventMasterRow> eventById,
         IReadOnlyDictionary<long, NetherFloorEventPartMasterRow> partById,
         IReadOnlyDictionary<long, NetherStrategyItemMasterRow> itemById,
-        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow> battleById
+        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow> battleById,
+        NetherStrategySemanticTierLookup semanticTiers
     )
     {
         NetherStrategyTreasureMasterRow[] matches = treasureById.Values
@@ -230,7 +541,7 @@ internal static class NetherStrategyVisibleEvidenceMapper
                 EventId = eventRow.EventId,
                 Weight = Math.Max(0, eventRow.Weight),
             });
-            AppendEventParts(rows, floor, eventRow, partById, itemById, battleById);
+            AppendEventParts(rows, floor, eventRow, partById, itemById, battleById, semanticTiers);
         }
     }
 
@@ -241,7 +552,8 @@ internal static class NetherStrategyVisibleEvidenceMapper
         IReadOnlyDictionary<long, NetherFloorEventMasterRow> eventById,
         IReadOnlyDictionary<long, NetherFloorEventPartMasterRow> partById,
         IReadOnlyDictionary<long, NetherStrategyItemMasterRow> itemById,
-        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow> battleById
+        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow> battleById,
+        NetherStrategySemanticTierLookup semanticTiers
     )
     {
         if (!TryResolveEvents(floor, request, eventById, out NetherFloorEventMasterRow[] events, out string error))
@@ -250,7 +562,7 @@ internal static class NetherStrategyVisibleEvidenceMapper
             return;
         }
         foreach (NetherFloorEventMasterRow eventRow in events)
-            AppendEventParts(rows, floor, eventRow, partById, itemById, battleById);
+            AppendEventParts(rows, floor, eventRow, partById, itemById, battleById, semanticTiers);
     }
 
     private static bool TryResolveEvents(
@@ -292,7 +604,8 @@ internal static class NetherStrategyVisibleEvidenceMapper
         NetherFloorEventMasterRow eventRow,
         IReadOnlyDictionary<long, NetherFloorEventPartMasterRow> partById,
         IReadOnlyDictionary<long, NetherStrategyItemMasterRow> itemById,
-        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow> battleById
+        IReadOnlyDictionary<long, NetherStrategyBattleMasterRow> battleById,
+        NetherStrategySemanticTierLookup semanticTiers
     )
     {
         long[] partIds = { eventRow.PartId1, eventRow.PartId2, eventRow.PartId3, eventRow.PartId4 };
@@ -357,12 +670,12 @@ internal static class NetherStrategyVisibleEvidenceMapper
                     new NetherStrategyVisibleEventOptionEvidence(
                         index + 1,
                         part.PartId,
-                        MapEventEffects(part)
+                        MapEventEffects(part, semanticTiers)
                     ),
                 ],
             });
             if (part.ContentType is 30 or 31)
-                AppendItem(rows, floor, eventRow, part, itemById, amount, amountKnown);
+                AppendItem(rows, floor, eventRow, part, itemById, semanticTiers, amount, amountKnown);
             else if (part.ContentType is 160 or 165 or 166)
                 AppendResource(rows, floor, eventRow, part, amount, amountKnown);
 
@@ -375,7 +688,14 @@ internal static class NetherStrategyVisibleEvidenceMapper
             {
                 if (battleById.TryGetValue(battleId, out NetherStrategyBattleMasterRow battle))
                 {
-                    rows.Add(Battle(floor, battle, isBoss: false, eventRow.EventId, part.PartId));
+                    rows.Add(Battle(
+                        floor,
+                        battle,
+                        isBoss: false,
+                        eventRow.EventId,
+                        part.PartId,
+                        semanticTiers
+                    ));
                 }
                 else
                 {
@@ -394,26 +714,30 @@ internal static class NetherStrategyVisibleEvidenceMapper
     }
 
     private static IReadOnlyList<NetherStrategyVisibleEventEffectEvidence> MapEventEffects(
-        NetherFloorEventPartMasterRow part
+        NetherFloorEventPartMasterRow part,
+        NetherStrategySemanticTierLookup semanticTiers
     ) =>
     [
         MapTargetEffect(
             NetherStrategyVisibleEventEffectSource.Target1,
             part.TargetType1,
             part.SelectParameter1,
-            part.PartId
+            part.PartId,
+            semanticTiers
         ),
         MapTargetEffect(
             NetherStrategyVisibleEventEffectSource.Target2,
             part.TargetType2,
             part.SelectParameter2,
-            part.PartId
+            part.PartId,
+            semanticTiers
         ),
         MapTargetEffect(
             NetherStrategyVisibleEventEffectSource.Target3,
             part.TargetType3,
             part.SelectParameter3,
-            part.PartId
+            part.PartId,
+            semanticTiers
         ),
         MapContentEffect(part),
     ];
@@ -422,7 +746,8 @@ internal static class NetherStrategyVisibleEvidenceMapper
         NetherStrategyVisibleEventEffectSource source,
         int rawType,
         long parameter,
-        long partId
+        long partId,
+        NetherStrategySemanticTierLookup semanticTiers
     )
     {
         if (rawType == 0)
@@ -444,6 +769,11 @@ internal static class NetherStrategyVisibleEvidenceMapper
             out string mappingDetail
         );
         bool battleSemanticKnown = mapped && rawType != (int)NetherEffectKind.Battle;
+        if (mapped && rawType == (int)NetherEffectKind.Battle)
+        {
+            battleSemanticKnown = parameter == 0
+                || semanticTiers.TryGetEventBattleTier(parameter, out _);
+        }
         return new NetherStrategyVisibleEventEffectEvidence(source, rawType, parameter)
         {
             EffectKind = mapped ? mappedKind : NetherEffectKind.Unknown,
@@ -511,19 +841,31 @@ internal static class NetherStrategyVisibleEvidenceMapper
         NetherFloorEventMasterRow eventRow,
         NetherFloorEventPartMasterRow part,
         IReadOnlyDictionary<long, NetherStrategyItemMasterRow> itemById,
+        NetherStrategySemanticTierLookup semanticTiers,
         int amount,
         bool amountKnown
     )
     {
         NetherStrategyItemMasterRow item = default;
-        bool itemKnown = part.ContentId > 0
+        NetherCanonicalRewardTier tier = NetherCanonicalRewardTier.Unknown;
+        int typedItemType = 0;
+        NetherRewardRarity typedRarity = NetherRewardRarity.NoEffect;
+        bool itemMasterKnown = part.ContentId > 0
             && itemById.TryGetValue(part.ContentId, out item)
-            && NetherEventNativeMapping.TryMapItemType(item.ItemType, out _)
-            && NetherEventNativeMapping.IsKnownRewardRarity((NetherRewardRarity)item.Rarity);
+            && item.HasRequiredFields
+            && item.Id > 0;
+        bool typedRewardKnown = itemMasterKnown
+            && semanticTiers.TryGetCanonicalRewardEvidence(
+                item.Id,
+                out tier,
+                out typedItemType,
+                out typedRarity
+            );
+        bool itemKnown = amountKnown && typedRewardKnown;
         rows.Add(new NetherStrategyVisibleContentRow(
             NetherStrategyVisibleContentKind.Item,
             floor.NodeId,
-            itemKnown ? item.Id : Math.Max(0, part.ContentId),
+            itemMasterKnown ? item.Id : Math.Max(0, part.ContentId),
             Math.Max(0, part.ContentId)
         )
         {
@@ -533,16 +875,21 @@ internal static class NetherStrategyVisibleEvidenceMapper
             ContentType = part.ContentType,
             Amount = amount,
             Weight = Math.Max(0, eventRow.Weight),
-            ItemType = itemKnown ? item.ItemType : 0,
-            ItemRarity = itemKnown ? item.Rarity : 0,
-            ItemValue = itemKnown ? item.Value : 0,
-            ItemPossessionLimit = itemKnown ? item.PossessionLimit : 0,
-            IsKnown = amountKnown && itemKnown,
-            UnknownReason = amountKnown && itemKnown
+            ItemType = typedRewardKnown ? typedItemType : 0,
+            ItemRarity = typedRewardKnown ? (int)typedRarity : 0,
+            RawItemType = itemMasterKnown ? item.ItemType : 0,
+            RawItemRarity = itemMasterKnown ? item.Rarity : 0,
+            ItemValue = itemMasterKnown ? item.Value : 0,
+            ItemPossessionLimit = itemMasterKnown ? item.PossessionLimit : 0,
+            CanonicalRewardTier = typedRewardKnown ? tier : NetherCanonicalRewardTier.Unknown,
+            IsKnown = itemKnown,
+            UnknownReason = itemKnown
                 ? string.Empty
                 : !amountKnown
                     ? "invalid-event-item-amount:" + part.PartId
-                    : "event-item-master-row-unavailable:" + part.ContentId,
+                    : !itemMasterKnown
+                        ? "event-item-master-row-unavailable:" + part.ContentId
+                        : "event-item-canonical-semantic-unavailable:" + part.ContentId,
         });
     }
 
@@ -581,7 +928,8 @@ internal static class NetherStrategyVisibleEvidenceMapper
         NetherStrategyBattleMasterRow battle,
         bool isBoss,
         long eventId,
-        long eventPartId
+        long eventPartId,
+        NetherStrategySemanticTierLookup? semanticTiers = null
     ) => new(
         isBoss ? NetherStrategyVisibleContentKind.Boss : NetherStrategyVisibleContentKind.Battle,
         floor.NodeId,
@@ -595,19 +943,36 @@ internal static class NetherStrategyVisibleEvidenceMapper
         BattleType = battle.BattleType,
         BattleStageId = battle.BattleStageId,
         CodeDropRatio = battle.CodeDropRatio,
-        IsKnown = false,
+        EventBattleTier = semanticTiers != null
+            && semanticTiers.TryGetEventBattleTier(battle.Id, out NetherEventBattleTier tier)
+            && battle.HasRequiredFields
+            && battle.Id > 0
+            && battle.BattleStageId > 0
+            && battle.CodeDropRatio >= 0
+            ? tier
+            : NetherEventBattleTier.Unknown,
+        IsKnown = battle.HasRequiredFields
+            && battle.Id > 0
+            && battle.BattleStageId > 0
+            && battle.CodeDropRatio >= 0
+            && semanticTiers != null
+            && semanticTiers.TryGetEventBattleTier(battle.Id, out _),
         UnknownReason = battle.HasRequiredFields
                 && battle.Id > 0
                 && battle.BattleStageId > 0
                 && battle.CodeDropRatio >= 0
-            ? "event-battle-semantic-tier-unavailable-for-raw-type:" + battle.BattleType
+            ? semanticTiers != null
+                && semanticTiers.TryGetEventBattleTier(battle.Id, out _)
+                ? string.Empty
+                : "event-battle-semantic-tier-unavailable-for-raw-type:" + battle.BattleType
             : "invalid-battle-master-row:" + battle.Id,
     };
 
     private static void AppendShop(
         ICollection<NetherStrategyVisibleContentRow> rows,
         NetherFloorNode floor,
-        IReadOnlyDictionary<long, NetherStrategyShopInventoryCapture> captures
+        IReadOnlyDictionary<long, NetherStrategyShopInventoryCapture> captures,
+        NetherStrategySemanticTierLookup semanticTiers
     )
     {
         if (!captures.TryGetValue(floor.NodeId, out NetherStrategyShopInventoryCapture? capture)
@@ -624,16 +989,23 @@ internal static class NetherStrategyVisibleEvidenceMapper
         }
         foreach (NetherShopContent content in capture.Contents)
         {
+            bool typedShopKey = semanticTiers.TryGetShopKey(
+                content.ContentId,
+                content.RawContentType,
+                content.ItemId,
+                content.Amount,
+                out long shopKeyIdentity
+            );
             bool known = content.Known
-                && content.ContentId > 0
+                && (content.ContentId > 0 || typedShopKey)
                 && content.ItemId >= 0
                 && content.Amount > 0
                 && content.Price >= 0;
             rows.Add(new NetherStrategyVisibleContentRow(
                 NetherStrategyVisibleContentKind.ShopInventory,
                 floor.NodeId,
-                content.ContentId,
-                Math.Max(0, content.ItemId)
+                Math.Max(0, content.ItemId),
+                content.ContentId
             )
             {
                 MapFloorMasterId = floor.FloorId,
@@ -641,9 +1013,17 @@ internal static class NetherStrategyVisibleEvidenceMapper
                 Amount = Math.Max(0, content.Amount),
                 Cost = Math.Max(0, content.Price),
                 Rank = Math.Max(0, (int)content.Rarity),
+                ItemRarity = Math.Max(0, (int)content.Rarity),
+                RawItemType = content.RawItemType,
+                RawItemRarity = (int)content.RawRarity,
                 ItemType = content.ItemType,
+                CanonicalRewardTier = semanticTiers.TryGetCanonicalRewardTier(
+                    content.ItemId,
+                    out NetherCanonicalRewardTier tier
+                ) ? tier : NetherCanonicalRewardTier.Unknown,
                 UsesNetherGold = content.UsesNetherGold,
-                IsTreasureKey = content.IsTreasureKey,
+                IsTreasureKey = typedShopKey,
+                ShopKeyIdentity = typedShopKey ? shopKeyIdentity : 0,
                 IsKnown = known,
                 UnknownReason = known ? string.Empty : "invalid-shop-inventory-row:" + content.ContentId,
             });

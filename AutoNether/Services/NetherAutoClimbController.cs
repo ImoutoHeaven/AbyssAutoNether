@@ -23,6 +23,7 @@ internal static class NetherAutoClimbController
     private static readonly NetherCheckpointReturnPreflight CheckpointReturnPreflight = new();
     private static NetherActionProjectionCalibration ProjectionCalibration = new();
     private static INetherRuntimeBridge _bridge = NetherRuntimeBridge.Instance;
+    private static NetherRuntimeTypedSemanticProviderFactory? RegisteredTypedSemanticProviderFactory;
     // This production coordinator is deliberately free of Unity/reflection dependencies.
     // The bridge remains the thin native adapter; characterization tests exercise the exact
     // owner/generation/parent-terminal transitions used below.
@@ -141,11 +142,16 @@ internal static class NetherAutoClimbController
         return scope;
     }
 
-    public static void Initialize()
+    public static void Initialize(
+        NetherRuntimeTypedSemanticProviderFactory? typedSemanticProviderFactory = null
+    )
     {
         if (_initialized)
             return;
 
+        RegisterTypedSemanticProviderFactory(
+            typedSemanticProviderFactory ?? RegisteredTypedSemanticProviderFactory
+        );
         _initialized = true;
         NetherBattleSettingsLease.Initialize();
         // Durable discovery intentionally happens before an accessor exists, but performs no
@@ -163,6 +169,20 @@ internal static class NetherAutoClimbController
             new("leasePhase", BattleSettingsLifecycle.LeasePhase.ToString()),
             new("leaseRuntime", BattleSettingsLifecycle.RuntimeState.ToString())
         );
+    }
+
+    /// <summary>
+    /// Production startup/configuration seam for an optional authoritative semantic provider.
+    /// Registration is retained until the runtime bridge is initialized; an absent registration
+    /// deliberately leaves the native raw-type/rarity path Unknown.
+    /// </summary>
+    internal static void RegisterTypedSemanticProviderFactory(
+        NetherRuntimeTypedSemanticProviderFactory? factory
+    )
+    {
+        RegisteredTypedSemanticProviderFactory = factory;
+        if (_bridge is INetherTypedSemanticProviderRegistration registration)
+            registration.RegisterTypedSemanticProviderFactory(factory);
     }
 
     public static void ObserveHotkeyInput(bool accepted)
@@ -554,6 +574,7 @@ internal static class NetherAutoClimbController
 
     public static void OnPluginUnload()
     {
+        RegisterTypedSemanticProviderFactory(null);
         if (State.IsEnabled)
             State.Toggle(isInNether: true);
         ObserveBattleSettingsLeaseBoundary(

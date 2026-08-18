@@ -15,7 +15,13 @@ public class NetherRouteSafetyProductionCoordinatorTests
     {
         var key = new NetherInteractiveEventOptionKey(8801, 8802, 1);
         var budget = new NetherEventProcurementBudget(190, 2);
-        NetherRuntimeRouteSafetyData runtime = Runtime() with
+        NetherSnapshot snapshot = SnapshotWithHp(
+            erosion: 40,
+            hpPermille: 500,
+            Floor(1, 1, NetherFloorNodeType.Recovery),
+            Floor(2, 2, NetherFloorNodeType.Battle, 1)
+        );
+        NetherRuntimeRouteSafetyData runtime = Runtime(snapshot) with
         {
             EventProcurementCommitments = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
             {
@@ -24,12 +30,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
         };
 
         NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
-            SnapshotWithHp(
-                erosion: 40,
-                hpPermille: 500,
-                Floor(1, 1, NetherFloorNodeType.Recovery),
-                Floor(2, 2, NetherFloorNodeType.Battle, 1)
-            ),
+            snapshot,
             130,
             Settings(),
             runtime
@@ -63,6 +64,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
         NetherInteractiveEventOptionKey goldKey = new(100, 1001, 1);
         NetherInteractiveEventOptionKey keyKey = new(100, 1002, 2);
         NetherRuntimeRouteSafetyData runtime = Runtime(
+            snapshot,
             hpPermille: 500,
             bounds: new Dictionary<long, NetherFloorMasterBounds>
             {
@@ -83,6 +85,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
                     )
                     {
                         IsKnown = true,
+                        ContentType = 166,
                         Cost = 200,
                         Amount = 1,
                         UsesNetherGold = true,
@@ -115,13 +118,18 @@ public class NetherRouteSafetyProductionCoordinatorTests
                 ]
             ),
         };
+        NetherStrategyTypedSemanticProviderEvidence provider = ProcurementProvider();
+        runtime = runtime with
+        {
+            VisibleMap = BindProviderBackedCanonicalEvidence(runtime.VisibleMap, provider),
+        };
 
         NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
             snapshot,
             130,
             settings,
             runtime,
-            BranchInteractive(snapshot, settings, goldKey, keyKey)
+            BranchInteractive(snapshot, settings, goldKey, keyKey, provider)
         );
 
         Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
@@ -232,6 +240,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             130,
             settings,
             Runtime(
+                snapshot,
                 hpPermille: 500,
                 bounds: new Dictionary<long, NetherFloorMasterBounds>
                 {
@@ -269,7 +278,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             after,
             130,
             Settings(),
-            Runtime() with
+            Runtime(after) with
             {
                 EventProcurementCommitments = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
                 {
@@ -363,6 +372,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             130,
             Settings(),
             Runtime(
+                snapshot,
                 hpPermille: 500,
                 bounds: new Dictionary<long, NetherFloorMasterBounds> { [2] = Bounds(2, 1, 1) }
             )
@@ -402,6 +412,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             130,
             Settings(),
             Runtime(
+                snapshot,
                 hpPermille: hpPermille,
                 bounds: new Dictionary<long, NetherFloorMasterBounds> { [2] = Bounds(2, 0, 1) }
             )
@@ -489,7 +500,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             snapshot,
             130,
             Settings(),
-            Runtime(hp: runtimeHp)
+            Runtime(snapshot, hp: runtimeHp)
         );
 
         Assert.True(
@@ -520,7 +531,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             snapshot,
             130,
             Settings(),
-            Runtime(hp: runtimeHp)
+            Runtime(snapshot, hp: runtimeHp)
         );
 
         Assert.False(plan.Route.HasSelection);
@@ -551,7 +562,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             snapshot,
             130,
             Settings(),
-            Runtime(hp: runtimeHp)
+            Runtime(snapshot, hp: runtimeHp)
         );
 
         Assert.False(plan.Route.HasSelection);
@@ -580,7 +591,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             snapshot,
             130,
             Settings(),
-            Runtime(hp: runtimeHp)
+            Runtime(snapshot, hp: runtimeHp)
         );
 
         Assert.False(plan.Route.HasSelection);
@@ -609,7 +620,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             snapshot,
             130,
             Settings(minimumCharacterHpPermille: 1),
-            Runtime(hp: runtimeHp)
+            Runtime(snapshot, hp: runtimeHp)
         );
 
         Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
@@ -694,6 +705,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             130,
             Settings(),
             Runtime(
+                snapshot,
                 hpPermille: 500,
                 bounds: new Dictionary<long, NetherFloorMasterBounds> { [2] = Bounds(2, 1, 1) }
             )
@@ -718,6 +730,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             2,
             Settings(),
             Runtime(
+                snapshot,
                 hpPermille: 500,
                 bounds: new Dictionary<long, NetherFloorMasterBounds>
                 {
@@ -780,7 +793,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             snapshot,
             130,
             Settings(),
-            Runtime(bounds: new Dictionary<long, NetherFloorMasterBounds>
+            Runtime(snapshot, bounds: new Dictionary<long, NetherFloorMasterBounds>
             {
                 [200] = Bounds(3, 0, 0),
                 [300] = Bounds(9, 0, 0),
@@ -894,6 +907,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             130,
             settings,
             Runtime(
+                snapshot,
                 hpPermille: 500,
                 bounds: new Dictionary<long, NetherFloorMasterBounds> { [3] = Bounds(3, 0, 0) }
             ),
@@ -978,6 +992,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             }
         );
         NetherRuntimeRouteSafetyData runtime = Runtime(
+            snapshot,
             hpPermille: 500,
             bounds: new Dictionary<long, NetherFloorMasterBounds> { [3] = Bounds(3, 0, 0) }
         );
@@ -1082,6 +1097,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             105, 1051, 1, 5, 5, 0,
             [new NetherEffect(NetherEffectKind.TreasureKeyGain, 1)]
         );
+        NetherStrategyTypedSemanticProviderEvidence provider = CanonicalRewardProvider(5011);
         NetherRuntimeInteractivePreEntryInputsResult capture = InteractiveCapture(
             snapshot,
             settings,
@@ -1106,7 +1122,8 @@ public class NetherRouteSafetyProductionCoordinatorTests
                         }
                     )
                 ),
-            }
+            },
+            typedSemanticProvider: provider
         );
         NetherStrategyVisibleMapEvidence visibleMap = new(
             floors,
@@ -1139,12 +1156,14 @@ public class NetherRouteSafetyProductionCoordinatorTests
                 },
             ]
         );
+        visibleMap = BindProviderBackedCanonicalEvidence(visibleMap, provider);
 
         NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
             snapshot,
             130,
             settings,
             Runtime(
+                snapshot,
                 hpPermille: 500,
                 bounds: new Dictionary<long, NetherFloorMasterBounds> { [6] = Bounds(6, 0, 0) }
             ) with
@@ -1219,6 +1238,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             130,
             settings,
             Runtime(
+                snapshot,
                 bounds: new Dictionary<long, NetherFloorMasterBounds> { [3] = Bounds(3, 0, 0) },
                 hp: NetherRouteSafetyHpTestEvidence.FromStates(snapshot.Characters)
             ),
@@ -1284,7 +1304,8 @@ public class NetherRouteSafetyProductionCoordinatorTests
     private static NetherRuntimeInteractivePreEntryInputsResult InteractiveCapture(
         NetherSnapshot snapshot,
         NetherAutoClimbSettings settings,
-        IReadOnlyDictionary<long, NetherInteractiveFloorPreEntryCaptureSpec> specs
+        IReadOnlyDictionary<long, NetherInteractiveFloorPreEntryCaptureSpec> specs,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider = null
     )
     {
         var entries = new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
@@ -1308,11 +1329,16 @@ public class NetherRouteSafetyProductionCoordinatorTests
                 )
                 {
                     FloorNodeId = nodeId,
+                    TypedSemanticProvider = typedSemanticProvider,
                 },
                 Safety = spec.Safety,
             };
         }
-        return NetherRuntimeInteractivePreEntryInputsResult.Success(entries, snapshot.Fingerprint);
+        return NetherRuntimeInteractivePreEntryInputsResult.Success(
+            entries,
+            snapshot.Fingerprint,
+            typedSemanticProvider
+        );
     }
 
     private static NetherStrategyVisibleContentRow VisibleErosionKeyEvent(
@@ -1400,7 +1426,8 @@ public class NetherRouteSafetyProductionCoordinatorTests
         NetherSnapshot snapshot,
         NetherAutoClimbSettings settings,
         NetherInteractiveEventOptionKey goldKey,
-        NetherInteractiveEventOptionKey keyKey
+        NetherInteractiveEventOptionKey keyKey,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider = null
     )
     {
         NetherInteractiveOptionProjection goldProjection = new(
@@ -1472,6 +1499,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             )
             {
                 FloorNodeId = floor.NodeId,
+                TypedSemanticProvider = typedSemanticProvider,
             };
             NetherInteractiveFloorPreEntrySafetyResult safety;
             if (!optionFloor)
@@ -1504,7 +1532,11 @@ public class NetherRouteSafetyProductionCoordinatorTests
                 Safety = safety,
             };
         }
-        return NetherRuntimeInteractivePreEntryInputsResult.Success(entries, snapshot.Fingerprint);
+        return NetherRuntimeInteractivePreEntryInputsResult.Success(
+            entries,
+            snapshot.Fingerprint,
+            typedSemanticProvider
+        );
     }
 
     private static NetherProductionRouteSafetyPlan Plan(
@@ -1513,18 +1545,22 @@ public class NetherRouteSafetyProductionCoordinatorTests
         NetherActivePartyHpSafety? hp = null,
         IReadOnlyDictionary<long, NetherFloorMasterBounds>? bounds = null,
         NetherActiveCodeErosionProjection? code = null
-    ) => new NetherRouteSafetyProductionCoordinator().Plan(
-        SnapshotWithHp(
+    )
+    {
+        NetherSnapshot snapshot = SnapshotWithHp(
             erosion,
             hpPermille,
             Floor(1, 1, NetherFloorNodeType.Recovery),
             Floor(2, 2, NetherFloorNodeType.Battle, 1),
             Floor(3, 3, NetherFloorNodeType.Boss, 2, previous: new long[] { 2 })
-        ),
-        130,
-        Settings(),
-        Runtime(hpPermille, hp, bounds, code)
-    );
+        );
+        return new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            Settings(),
+            Runtime(snapshot, hpPermille, hp, bounds, code)
+        );
+    }
 
     private static NetherProductionRouteSafetyPlan PlanSameBranchProcurement(int shopCost, long itemType)
     {
@@ -1546,6 +1582,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
         NetherInteractiveEventOptionKey goldKey = new(100, 1001, 1);
         NetherInteractiveEventOptionKey keyKey = new(100, 1002, 2);
         NetherRuntimeRouteSafetyData runtime = Runtime(
+            snapshot,
             hpPermille: 500,
             bounds: new Dictionary<long, NetherFloorMasterBounds>
             {
@@ -1566,6 +1603,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
                     )
                     {
                         IsKnown = true,
+                        ContentType = 166,
                         Cost = shopCost,
                         Amount = 1,
                         UsesNetherGold = true,
@@ -1599,17 +1637,119 @@ public class NetherRouteSafetyProductionCoordinatorTests
             ),
         };
 
+        NetherStrategyTypedSemanticProviderEvidence provider = ProcurementProvider();
+        runtime = runtime with
+        {
+            VisibleMap = BindProviderBackedCanonicalEvidence(runtime.VisibleMap, provider),
+        };
         return new NetherRouteSafetyProductionCoordinator().Plan(
             snapshot,
             130,
             settings,
             runtime,
-            BranchInteractive(snapshot, settings, goldKey, keyKey)
+            BranchInteractive(snapshot, settings, goldKey, keyKey, provider)
         );
+    }
+
+    private static NetherStrategyVisibleMapEvidence BindProviderBackedCanonicalEvidence(
+        NetherStrategyVisibleMapEvidence visibleMap,
+        NetherStrategyTypedSemanticProviderEvidence provider
+    )
+    {
+        NetherStrategySemanticTierLookup semanticTiers = NetherStrategySemanticTierLookup.Create(provider);
+        return visibleMap with
+        {
+            ContentRows = visibleMap.ContentRows
+                .Select(row =>
+                {
+                    if (row.Kind is NetherStrategyVisibleContentKind.ShopInventory
+                        && semanticTiers.TryGetShopKey(
+                            row.ContentId,
+                            row.ContentType,
+                            row.MasterRowId,
+                            row.Amount,
+                            out long shopKeyIdentity
+                        ))
+                    {
+                        return row with
+                        {
+                            IsTreasureKey = true,
+                            ShopKeyIdentity = shopKeyIdentity,
+                        };
+                    }
+                    if (row.Kind is not (
+                            NetherStrategyVisibleContentKind.Item
+                            or NetherStrategyVisibleContentKind.ShopInventory
+                        )
+                        || !semanticTiers.TryGetCanonicalRewardTier(
+                            row.ContentId,
+                            out NetherCanonicalRewardTier tier
+                        ))
+                    {
+                        return row;
+                    }
+                    return row with { CanonicalRewardTier = tier };
+                })
+                .ToArray(),
+        };
+    }
+
+    private static NetherStrategyTypedSemanticProviderEvidence ProcurementProvider() =>
+        CanonicalRewardProvider(4011) with
+        {
+            ShopKeyIdentities =
+            [new NetherShopKeyProviderEvidence(3001, 166, 3001, 1, 3011)],
+        };
+
+    private static NetherStrategyTypedSemanticProviderEvidence CanonicalRewardProvider(long itemId)
+    {
+        NetherSnapshot snapshot = SnapshotWithHp(
+            erosion: 0,
+            hpPermille: 1000,
+            Floor(1, 1, NetherFloorNodeType.Recovery)
+        );
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            CanonicalRewardTiers =
+            [new NetherCanonicalRewardTierProviderEvidence(itemId, NetherCanonicalRewardTier.GoldRankFive, 91)],
+        };
+        NetherRuntimeBridge bridge = new(_ =>
+            new NetherRuntimeTypedSemanticProviderScope(snapshot.Fingerprint, provider));
+        NetherRuntimeInteractivePreEntryCaptureResult captured = bridge.CaptureInteractivePreEntryFloor(
+            snapshot,
+            new NetherAutoClimbSettings(),
+            new RuntimeFloorFixture
+            {
+                MNetherMapFloorId = snapshot.CurrentFloorId,
+                ExtendId = 0,
+                FloorType = (int)NetherFloorNodeType.Recovery,
+            },
+            mapFloorRows: null,
+            eventRows: null,
+            eventPartRows: null,
+            itemRows: null,
+            battleRows: null,
+            floorNodeId: snapshot.CurrentNodeId,
+            canCloseShop: false
+        );
+        Assert.True(captured.IsCaptured, captured.Detail);
+        Assert.Same(provider, captured.Input!.TypedSemanticProvider);
+        return provider;
     }
 
     private static string UnknownCandidateDetail(NetherProductionRouteSafetyPlan plan) =>
         Assert.Single(plan.Route.Audit, audit => audit.Reason == "unknown-node").Detail;
+
+    private static NetherRuntimeRouteSafetyData Runtime(
+        NetherSnapshot snapshot,
+        int hpPermille = 500,
+        NetherActivePartyHpSafety? hp = null,
+        IReadOnlyDictionary<long, NetherFloorMasterBounds>? bounds = null,
+        NetherActiveCodeErosionProjection? code = null
+    ) => Runtime(hpPermille, hp, bounds, code) with
+    {
+        VisibleMap = CaptureVisibleMap(snapshot),
+    };
 
     private static NetherRuntimeRouteSafetyData Runtime(
         int hpPermille = 500,
@@ -1630,10 +1770,80 @@ public class NetherRouteSafetyProductionCoordinatorTests
             CodeHash = "nether-codes:none",
             ErosionEffects = Array.Empty<NetherCodeEffect>(),
         },
+        // These Equipment production fixtures intentionally provide a complete strategy state;
+        // a missing value is reserved for the explicit native-unknown pause tests.
+        ResearchIncomplete = false,
     };
+
+    private static NetherStrategyVisibleMapEvidence CaptureVisibleMap(NetherSnapshot snapshot)
+    {
+        Assert.NotNull(snapshot);
+        NetherRuntimeBridge bridge = new(_ => null);
+        var entries = new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
+        foreach (NetherFloorNode floor in snapshot.Floors ?? Array.Empty<NetherFloorNode>())
+        {
+            if (floor.NodeType is not (
+                    NetherFloorNodeType.Event
+                    or NetherFloorNodeType.Recovery
+                    or NetherFloorNodeType.Shop
+                    or NetherFloorNodeType.Treasure
+                ))
+            {
+                continue;
+            }
+            NetherRuntimeInteractivePreEntryCaptureResult captured = bridge.CaptureInteractivePreEntryFloor(
+                snapshot,
+                Settings(),
+                new RuntimeFloorFixture
+                {
+                    MNetherMapFloorId = floor.FloorId,
+                    ExtendId = 0,
+                    FloorType = (int)floor.NodeType,
+                },
+                mapFloorRows: null,
+                eventRows: null,
+                eventPartRows: null,
+                itemRows: null,
+                battleRows: null,
+                floorNodeId: floor.NodeId,
+                canCloseShop: false
+            );
+            Assert.True(captured.IsCaptured, captured.Detail);
+            entries[floor.NodeId] = captured;
+        }
+
+        NetherRuntimeInteractivePreEntryInputsResult interactive =
+            NetherRuntimeInteractivePreEntryInputsResult.Success(entries, snapshot.Fingerprint);
+        NetherStrategyVisibleEvidenceCaptureResult mapped =
+            NetherStrategyVisibleEvidenceAssembler.Assemble(
+                new NetherStrategyVisibleEvidenceAssemblyRequest(
+                    snapshot,
+                    interactive,
+                    NetherRuntimePopupResult.Failure("no-current-popup"),
+                    new NetherStrategyVisibleEvidenceCaptureRequest(
+                        snapshot.Floors ?? Array.Empty<NetherFloorNode>(),
+                        Array.Empty<NetherStrategyBattleMasterRow>(),
+                        Array.Empty<NetherStrategyTreasureMasterRow>(),
+                        Array.Empty<NetherFloorEventMasterRow>(),
+                        Array.Empty<NetherFloorEventPartMasterRow>(),
+                        Array.Empty<NetherStrategyItemMasterRow>()
+                    )
+                )
+            );
+        Assert.True(mapped.IsSuccess, mapped.Detail);
+        Assert.NotEmpty(mapped.Evidence!.ContentRows);
+        return mapped.Evidence!;
+    }
 
     private static NetherFloorMasterBounds Bounds(long floorId, int min, int max) =>
         new(floorId, min, max, IsKnown: true, Detail: string.Empty);
+
+    private sealed class RuntimeFloorFixture
+    {
+        public long MNetherMapFloorId { get; init; }
+        public long ExtendId { get; init; }
+        public int FloorType { get; init; }
+    }
 
     private static NetherAutoClimbSettings Settings(
         int minimumCharacterHpPermille = 300
@@ -1655,7 +1865,8 @@ public class NetherRouteSafetyProductionCoordinatorTests
     {
         Status = NetherSessionStatus.Play,
         MapId = 1,
-        CurrentFloorId = 1,
+        CurrentFloorId = floors.FirstOrDefault()?.FloorId ?? 0,
+        CurrentNodeId = floors.FirstOrDefault()?.NodeId ?? 0,
         ErosionPoint = erosion,
         Floors = floors,
         Characters = new[] { new NetherCharacterState(1, hpPermille, IsActive: true) },

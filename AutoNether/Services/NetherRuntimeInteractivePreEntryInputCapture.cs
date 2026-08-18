@@ -31,6 +31,12 @@ internal sealed record NetherRuntimeInteractivePreEntryCaptureRequest(
     public long FloorNodeId { get; init; }
     public IEnumerable? ItemRows { get; init; }
     public IEnumerable? BattleRows { get; init; }
+    /// <summary>
+    /// Optional authoritative semantic evidence. The default RuntimeBridge instance leaves this
+    /// unset because its raw rows do not prove reward or battle tiers; an explicitly bound,
+    /// snapshot-scoped provider may populate it.
+    /// </summary>
+    public NetherStrategyTypedSemanticProviderEvidence? TypedSemanticProvider { get; init; }
     public IReadOnlyList<NetherInteractivePartialDeathEligibility> PartialDeathEligibility { get; init; } =
         Array.Empty<NetherInteractivePartialDeathEligibility>();
     public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> CommittedProcurementByOption { get; init; } =
@@ -40,6 +46,21 @@ internal sealed record NetherRuntimeInteractivePreEntryCaptureRequest(
     public bool RequireCompleteRecoveryBranchSafety { get; init; }
     public NetherRankFiveKeyProcurementDecision? RankFiveKeyProcurement { get; init; }
 }
+
+/// <summary>
+/// Snapshot-scoped authoritative semantic evidence supplied by a runtime adapter.  The scope is
+/// checked by <see cref="NetherRuntimeBridge"/> before the evidence reaches any mapper; a provider
+/// for another snapshot is therefore indistinguishable from absent evidence and remains
+/// fail-closed.
+/// </summary>
+internal sealed record NetherRuntimeTypedSemanticProviderScope(
+    NetherSnapshotFingerprint SnapshotFingerprint,
+    NetherStrategyTypedSemanticProviderEvidence Evidence
+);
+
+internal delegate NetherRuntimeTypedSemanticProviderScope? NetherRuntimeTypedSemanticProviderFactory(
+    NetherSnapshot snapshot
+);
 
 /// <summary>
 /// Captured source input and the immediate fail-closed pre-entry decision.  <c>IsCaptured</c>
@@ -67,16 +88,19 @@ internal sealed record NetherRuntimeInteractivePreEntryInputsResult
     /// <summary>Keyed by stable runtime node identity, while each value retains its master ID.</summary>
     public IReadOnlyDictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> ByFloorNodeId { get; init; } =
         new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>();
+    public NetherStrategyTypedSemanticProviderEvidence? TypedSemanticProvider { get; init; }
     public string Detail { get; init; } = string.Empty;
 
     public static NetherRuntimeInteractivePreEntryInputsResult Success(
         IReadOnlyDictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> entries,
-        NetherSnapshotFingerprint? snapshotFingerprint = null
+        NetherSnapshotFingerprint? snapshotFingerprint = null,
+        NetherStrategyTypedSemanticProviderEvidence? typedSemanticProvider = null
     ) => new()
     {
         IsSuccess = true,
         ByFloorNodeId = entries,
         SnapshotFingerprint = snapshotFingerprint,
+        TypedSemanticProvider = typedSemanticProvider,
     };
 
     public static NetherRuntimeInteractivePreEntryInputsResult Failure(string detail) => new()
@@ -142,6 +166,7 @@ internal sealed class NetherRuntimeInteractivePreEntryInputCapture
             CodeCapacity = request.CodeCapacity,
             ItemRows = itemRows,
             BattleRows = battleRows,
+            TypedSemanticProvider = request.TypedSemanticProvider,
             PartialDeathEligibility = request.PartialDeathEligibility
                 ?? Array.Empty<NetherInteractivePartialDeathEligibility>(),
             RecoveryBranchSafetyByPartId = request.RecoveryBranchSafetyByPartId

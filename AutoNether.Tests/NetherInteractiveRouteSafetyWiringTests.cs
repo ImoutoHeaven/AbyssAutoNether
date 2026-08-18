@@ -417,12 +417,14 @@ public class NetherInteractiveRouteSafetyWiringTests
         NetherFloorNodeType interactiveKind,
         NetherRuntimeInteractivePreEntryCaptureResult capture,
         int keys = 1
-    ) => new NetherAutoClimbRouteSafetyWiring().Plan(
-        new NetherSnapshot
+    )
+    {
+        NetherSnapshot snapshot = new()
         {
             Status = NetherSessionStatus.Play,
             MapId = 1,
             CurrentFloorId = 1,
+            CurrentNodeId = 1,
             ErosionPoint = 20,
             NetherGold = 100,
             TreasureKeyCount = keys,
@@ -433,36 +435,39 @@ public class NetherInteractiveRouteSafetyWiringTests
                 Floor(2, 2, interactiveKind, previous: [1]),
                 Floor(3, 3, NetherFloorNodeType.Boss, previous: [2]),
             ],
-        },
-        Settings(),
-        effectiveMaximumDepth: 130,
-        runtime: new NetherRuntimeRouteSafetyData
-        {
-            FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+        };
+        return PlanWithCapturedVisibleEvidence(
+            snapshot,
+            Settings(),
+            effectiveMaximumDepth: 130,
+            new NetherRuntimeRouteSafetyData
             {
-                [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
+                FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+                {
+                    [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
+                },
+                ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 500),
+                ActiveCodeErosion = new NetherActiveCodeErosionProjection
+                {
+                    ErosionProjectionKnown = true,
+                    CodeHash = "nether-codes:none",
+                    ErosionEffects = Array.Empty<NetherCodeEffect>(),
+                },
             },
-            ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 500),
-            ActiveCodeErosion = new NetherActiveCodeErosionProjection
-            {
-                ErosionProjectionKnown = true,
-                CodeHash = "nether-codes:none",
-                ErosionEffects = Array.Empty<NetherCodeEffect>(),
-            },
-        },
-        interactivePreEntry: NetherRuntimeInteractivePreEntryInputsResult.Success(
-            new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> { [2] = capture }
-        )
-    );
+            capture
+        );
+    }
 
     private static NetherAutoClimbRouteSafetyDecision DecideWorstEventBudget(
         NetherRuntimeInteractivePreEntryCaptureResult capture
-    ) => new NetherAutoClimbRouteSafetyWiring().Plan(
-        new NetherSnapshot
+    )
+    {
+        NetherSnapshot snapshot = new()
         {
             Status = NetherSessionStatus.Play,
             MapId = 1,
             CurrentFloorId = 1,
+            CurrentNodeId = 1,
             ErosionPoint = 20,
             NetherGold = 100,
             TreasureKeyCount = 1,
@@ -473,38 +478,41 @@ public class NetherInteractiveRouteSafetyWiringTests
                 Floor(2, 2, NetherFloorNodeType.Event, previous: [1]),
                 Floor(3, 3, NetherFloorNodeType.Boss, previous: [2]),
             ],
-        },
-        Settings(),
-        effectiveMaximumDepth: 130,
-        runtime: new NetherRuntimeRouteSafetyData
-        {
-            FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+        };
+        return PlanWithCapturedVisibleEvidence(
+            snapshot,
+            Settings(),
+            effectiveMaximumDepth: 130,
+            new NetherRuntimeRouteSafetyData
             {
-                [3] = new NetherFloorMasterBounds(3, 0, 100, IsKnown: true, Detail: string.Empty),
+                FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+                {
+                    [3] = new NetherFloorMasterBounds(3, 0, 100, IsKnown: true, Detail: string.Empty),
+                },
+                ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 500),
+                ActiveCodeErosion = new NetherActiveCodeErosionProjection
+                {
+                    ErosionProjectionKnown = true,
+                    CodeHash = "nether-codes:none",
+                    ErosionEffects = Array.Empty<NetherCodeEffect>(),
+                },
             },
-            ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 500),
-            ActiveCodeErosion = new NetherActiveCodeErosionProjection
-            {
-                ErosionProjectionKnown = true,
-                CodeHash = "nether-codes:none",
-                ErosionEffects = Array.Empty<NetherCodeEffect>(),
-            },
-        },
-        interactivePreEntry: NetherRuntimeInteractivePreEntryInputsResult.Success(
-            new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> { [2] = capture }
-        )
-    );
+            capture
+        );
+    }
 
     private static NetherAutoClimbRouteSafetyDecision DecideExactHpCost(
         NetherFloorNodeType interactiveKind,
         NetherRuntimeInteractivePreEntryCaptureResult capture,
         IReadOnlyList<int> activeHp
-    ) => new NetherAutoClimbRouteSafetyWiring().Plan(
-        new NetherSnapshot
+    )
+    {
+        NetherSnapshot snapshot = new()
         {
             Status = NetherSessionStatus.Play,
             MapId = 1,
             CurrentFloorId = 1,
+            CurrentNodeId = 1,
             ErosionPoint = 20,
             NetherGold = 100,
             TreasureKeyCount = 0,
@@ -517,38 +525,41 @@ public class NetherInteractiveRouteSafetyWiringTests
                 Floor(2, 2, interactiveKind, previous: [1]),
                 Floor(3, 3, NetherFloorNodeType.Boss, previous: [2]),
             ],
-        },
-        Settings(),
-        effectiveMaximumDepth: 130,
-        runtime: new NetherRuntimeRouteSafetyData
-        {
-            FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+        };
+        return PlanWithCapturedVisibleEvidence(
+            snapshot,
+            Settings(),
+            effectiveMaximumDepth: 130,
+            new NetherRuntimeRouteSafetyData
             {
-                [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
+                FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+                {
+                    [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
+                },
+                ActivePartyHp = NetherRouteSafetyHpTestEvidence.FromStates(
+                    activeHp.Select((hp, index) => new NetherCharacterState(index + 1L, hp))
+                ),
+                ActiveCodeErosion = new NetherActiveCodeErosionProjection
+                {
+                    ErosionProjectionKnown = true,
+                    CodeHash = "nether-codes:none",
+                    ErosionEffects = Array.Empty<NetherCodeEffect>(),
+                },
             },
-            ActivePartyHp = NetherRouteSafetyHpTestEvidence.FromStates(
-                activeHp.Select((hp, index) => new NetherCharacterState(index + 1L, hp))
-            ),
-            ActiveCodeErosion = new NetherActiveCodeErosionProjection
-            {
-                ErosionProjectionKnown = true,
-                CodeHash = "nether-codes:none",
-                ErosionEffects = Array.Empty<NetherCodeEffect>(),
-            },
-        },
-        interactivePreEntry: NetherRuntimeInteractivePreEntryInputsResult.Success(
-            new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> { [2] = capture }
-        )
-    );
+            capture
+        );
+    }
 
     private static NetherAutoClimbRouteSafetyDecision DecideRecoveryBeforeBoss(
         NetherRuntimeInteractivePreEntryCaptureResult capture
-    ) => new NetherAutoClimbRouteSafetyWiring().Plan(
-        new NetherSnapshot
+    )
+    {
+        NetherSnapshot snapshot = new()
         {
             Status = NetherSessionStatus.Play,
             MapId = 1,
             CurrentFloorId = 1,
+            CurrentNodeId = 1,
             ErosionPoint = 20,
             NetherGold = 100,
             TreasureKeyCount = 1,
@@ -559,27 +570,83 @@ public class NetherInteractiveRouteSafetyWiringTests
                 Floor(2, 2, NetherFloorNodeType.Recovery, previous: [1]),
                 Floor(3, 3, NetherFloorNodeType.Boss, previous: [2]),
             ],
-        },
-        Settings(),
-        effectiveMaximumDepth: 130,
-        runtime: new NetherRuntimeRouteSafetyData
-        {
-            FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+        };
+        return PlanWithCapturedVisibleEvidence(
+            snapshot,
+            Settings(),
+            effectiveMaximumDepth: 130,
+            new NetherRuntimeRouteSafetyData
             {
-                [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
+                FloorBoundsByFloorId = new Dictionary<long, NetherFloorMasterBounds>
+                {
+                    [3] = new NetherFloorMasterBounds(3, 0, 0, IsKnown: true, Detail: string.Empty),
+                },
+                ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 299),
+                ActiveCodeErosion = new NetherActiveCodeErosionProjection
+                {
+                    ErosionProjectionKnown = true,
+                    CodeHash = "nether-codes:none",
+                    ErosionEffects = Array.Empty<NetherCodeEffect>(),
+                },
             },
-            ActivePartyHp = NetherRouteSafetyHpTestEvidence.Single(1, 299),
-            ActiveCodeErosion = new NetherActiveCodeErosionProjection
+            capture
+        );
+    }
+
+    private static NetherAutoClimbRouteSafetyDecision PlanWithCapturedVisibleEvidence(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        int effectiveMaximumDepth,
+        NetherRuntimeRouteSafetyData runtime,
+        NetherRuntimeInteractivePreEntryCaptureResult capture
+    )
+    {
+        NetherInteractiveFloorPreEntrySafetyInput input =
+            Assert.IsType<NetherInteractiveFloorPreEntrySafetyInput>(capture.Input);
+        long nodeId = input.FloorNodeId;
+        NetherRuntimeInteractivePreEntryInputsResult interactive =
+            NetherRuntimeInteractivePreEntryInputsResult.Success(
+                new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
+                {
+                    [nodeId] = capture,
+                },
+                snapshot.Fingerprint,
+                input.TypedSemanticProvider
+            );
+        NetherStrategyVisibleEvidenceCaptureRequest capturedMasters =
+            new(
+                snapshot.Floors,
+                input.BattleRows ?? Array.Empty<NetherStrategyBattleMasterRow>(),
+                Array.Empty<NetherStrategyTreasureMasterRow>(),
+                input.EventRows ?? Array.Empty<NetherFloorEventMasterRow>(),
+                input.EventPartRows ?? Array.Empty<NetherFloorEventPartMasterRow>(),
+                input.ItemRows ?? Array.Empty<NetherStrategyItemMasterRow>()
+            )
             {
-                ErosionProjectionKnown = true,
-                CodeHash = "nether-codes:none",
-                ErosionEffects = Array.Empty<NetherCodeEffect>(),
-            },
-        },
-        interactivePreEntry: NetherRuntimeInteractivePreEntryInputsResult.Success(
-            new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult> { [2] = capture }
-        )
-    );
+                TypedSemanticProvider = input.TypedSemanticProvider,
+                ExtendIdByNodeId = new Dictionary<long, long>
+                {
+                    [nodeId] = input.FloorExtendId,
+                },
+            };
+        NetherStrategyVisibleEvidenceCaptureResult visible =
+            NetherStrategyVisibleEvidenceAssembler.Assemble(
+                new NetherStrategyVisibleEvidenceAssemblyRequest(
+                    snapshot,
+                    interactive,
+                    NetherRuntimePopupResult.Failure("no-current-popup"),
+                    capturedMasters
+                )
+            );
+        Assert.True(visible.IsSuccess, visible.Detail);
+        return new NetherAutoClimbRouteSafetyWiring().Plan(
+            snapshot,
+            settings,
+            effectiveMaximumDepth,
+            runtime with { VisibleMap = visible.Evidence },
+            interactive
+        );
+    }
 
     private static NetherRuntimeInteractivePreEntryCaptureResult Capture(
         NetherFloorNodeType kind,
@@ -609,6 +676,7 @@ public class NetherInteractiveRouteSafetyWiringTests
         CanCloseShop: canCloseShop
     )
     {
+        FloorNodeId = 2,
         PartialDeathEligibility = partialDeathEligibility ?? [],
     });
 

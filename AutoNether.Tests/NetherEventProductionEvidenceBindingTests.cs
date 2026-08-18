@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using AutoNether.Services;
 using Xunit;
 
@@ -161,6 +162,38 @@ public sealed class NetherEventProductionEvidenceBindingTests
         {
             bridge.ClearRegistrations();
         }
+    }
+
+    [Fact]
+    public void Real_runtime_bridge_observing_a_new_snapshot_invalidates_cached_interactive_provider_scope()
+    {
+        NetherRuntimeBridge bridge = new();
+        NetherSnapshot before = Snapshot() with { MapHash = "provider-before" };
+        NetherSnapshot after = before with { MapHash = "provider-after" };
+        NetherRuntimeInteractivePreEntryInputsResult cached =
+            NetherRuntimeInteractivePreEntryInputsResult.Success(
+                new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>(),
+                before.Fingerprint,
+                new NetherStrategyTypedSemanticProviderEvidence
+                {
+                    CanonicalRewardTiers =
+                    [new NetherCanonicalRewardTierProviderEvidence(701, NetherCanonicalRewardTier.GoldRankFive, 91)],
+                }
+            );
+        FieldInfo cachedField = typeof(NetherRuntimeBridge).GetField(
+            "_latestInteractivePreEntryInputs",
+            BindingFlags.Instance | BindingFlags.NonPublic
+        )!;
+        FieldInfo fingerprintField = typeof(NetherRuntimeBridge).GetField(
+            "_authoritativeRouteSnapshotFingerprint",
+            BindingFlags.Instance | BindingFlags.NonPublic
+        )!;
+        cachedField.SetValue(bridge, cached);
+        fingerprintField.SetValue(bridge, before.Fingerprint);
+
+        bridge.ObserveAuthoritativeRouteSnapshot(after.Fingerprint);
+
+        Assert.Null(cachedField.GetValue(bridge));
     }
 
     [Fact]
@@ -470,6 +503,199 @@ public sealed class NetherEventProductionEvidenceBindingTests
         Assert.False(bound.Options[0].StrategyEvidence!.IsKnown);
         Assert.NotEmpty(bound.Options[0].StrategyEvidence!.UnknownReason);
         Assert.Empty(bound.ExpectedEventCommitments);
+    }
+
+    [Fact]
+    public void Production_binding_carries_authoritative_typed_event_battle_into_event_policy()
+    {
+        NetherEffect battle = new(NetherEffectKind.Battle, 1);
+        NetherRuntimePopupContext popup = Popup(711, 712, battle);
+        NetherSnapshot snapshot = Snapshot();
+        NetherStrategyEvidencePackage package = Package(
+            snapshot,
+            research: null,
+            battle,
+            new NetherAutoClimbSettings()
+        );
+        NetherStrategyVisibleMapEvidence visible = package.VisibleMap.Value!;
+        package = package with
+        {
+            VisibleMap = NetherStrategyEvidenceComponent<NetherStrategyVisibleMapEvidence>.Known(
+                visible with
+                {
+                    ContentRows = visible.ContentRows
+                        .Append(new NetherStrategyVisibleContentRow(
+                            NetherStrategyVisibleContentKind.Battle,
+                            snapshot.CurrentNodeId,
+                            1,
+                            0
+                        )
+                        {
+                            EventId = 711,
+                            EventPartId = 712,
+                            IsKnown = true,
+                            BattleStageId = 713,
+                            BattleType = 9,
+                            CodeDropRatio = 1000,
+                            EventBattleTier = NetherEventBattleTier.Boss,
+                        })
+                        .ToArray(),
+                }
+            ),
+        };
+        NetherRuntimeInteractivePreEntryInputsResult interactive = Interactive(
+            snapshot,
+            popup,
+            battle,
+            reward: null
+        );
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            popup,
+            package,
+            interactive,
+            new NetherAutoClimbSettings { StrategyMode = NetherStrategyMode.Equipment }
+        );
+
+        NetherEventBattleEvidence evidence = Assert.IsType<NetherEventBattleEvidence>(
+            bound.Options[0].BattleEvidence
+        );
+        Assert.True(evidence.IsKnown, evidence.UnknownReason);
+        Assert.Equal(NetherEventBattleTier.Boss, evidence.SemanticTier);
+        NetherEventDecision decision = new NetherEventPolicy().DecideEvent(
+            snapshot,
+            bound.Options,
+            new NetherAutoClimbSettings { StrategyMode = NetherStrategyMode.Equipment },
+            [],
+            bound.EventStrategyEvidence
+        );
+        Assert.True(bound.Options[0].StrategyEvidence?.IsKnown, bound.Options[0].StrategyEvidence?.UnknownReason);
+        Assert.True(decision.Kind == NetherEventDecisionKind.Select, decision.Detail);
+    }
+
+    [Fact]
+    public void Production_binding_prefers_exact_typed_projection_over_native_unknown_battle_evidence()
+    {
+        NetherEffect battle = new(NetherEffectKind.Battle, 1);
+        NetherRuntimePopupContext popup = Popup(711, 712, battle);
+        NetherEventBattleEvidence rawUnknown = NetherEventBattleEvidence.Unknown(
+            1,
+            "native-battle-semantic-tier-unavailable"
+        ) with
+        {
+            BattleStageId = 713,
+            BattleType = 9,
+            CodeDropRatio = 1000,
+        };
+        popup = popup with
+        {
+            Options = [popup.Options[0] with { BattleEvidence = rawUnknown }],
+        };
+        NetherSnapshot snapshot = Snapshot();
+        NetherStrategyEvidencePackage package = Package(
+            snapshot,
+            research: null,
+            battle,
+            new NetherAutoClimbSettings()
+        );
+        NetherStrategyVisibleMapEvidence visible = package.VisibleMap.Value!;
+        package = package with
+        {
+            VisibleMap = NetherStrategyEvidenceComponent<NetherStrategyVisibleMapEvidence>.Known(
+                visible with
+                {
+                    ContentRows = visible.ContentRows
+                        .Append(new NetherStrategyVisibleContentRow(
+                            NetherStrategyVisibleContentKind.Battle,
+                            snapshot.CurrentNodeId,
+                            1,
+                            0
+                        )
+                        {
+                            EventId = 711,
+                            EventPartId = 712,
+                            IsKnown = true,
+                            BattleStageId = 713,
+                            BattleType = 9,
+                            CodeDropRatio = 1000,
+                            EventBattleTier = NetherEventBattleTier.Unknown,
+                        })
+                        .ToArray(),
+                }
+            ),
+        };
+        NetherEventBattleEvidence typedProjection = new(
+            1,
+            713,
+            9,
+            1000,
+            NetherEventBattleTier.Boss
+        );
+        NetherRuntimeInteractivePreEntryInputsResult interactive = Interactive(
+            snapshot,
+            popup,
+            battle,
+            reward: null,
+            battle: typedProjection
+        );
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            popup,
+            package,
+            interactive,
+            new NetherAutoClimbSettings { StrategyMode = NetherStrategyMode.Equipment }
+        );
+
+        NetherEventBattleEvidence evidence = Assert.IsType<NetherEventBattleEvidence>(
+            bound.Options[0].BattleEvidence
+        );
+        Assert.True(evidence.IsKnown, evidence.UnknownReason);
+        Assert.Equal(NetherEventBattleTier.Boss, evidence.SemanticTier);
+        NetherEventDecision decision = new NetherEventPolicy().DecideEvent(
+            snapshot,
+            bound.Options,
+            new NetherAutoClimbSettings { StrategyMode = NetherStrategyMode.Equipment },
+            [],
+            bound.EventStrategyEvidence
+        );
+        Assert.True(bound.Options[0].StrategyEvidence?.IsKnown, bound.Options[0].StrategyEvidence?.UnknownReason);
+        Assert.True(decision.Kind == NetherEventDecisionKind.Select, decision.Detail);
+    }
+
+    [Fact]
+    public void Production_binding_rejects_known_option_battle_evidence_when_effect_identity_mismatches()
+    {
+        NetherEffect battle = new(NetherEffectKind.Battle, 2);
+        NetherRuntimePopupContext popup = Popup(711, 712, battle) with
+        {
+            Options =
+            [
+                Popup(711, 712, battle).Options[0] with
+                {
+                    BattleEvidence = new NetherEventBattleEvidence(
+                        1,
+                        713,
+                        9,
+                        1000,
+                        NetherEventBattleTier.Boss
+                    ),
+                },
+            ],
+        };
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            popup,
+            Package(Snapshot(), research: null, battle, new NetherAutoClimbSettings()),
+            Interactive(Snapshot(), popup, battle, reward: null),
+            new NetherAutoClimbSettings { StrategyMode = NetherStrategyMode.Equipment }
+        );
+
+        NetherEventBattleEvidence evidence = Assert.IsType<NetherEventBattleEvidence>(
+            bound.Options[0].BattleEvidence
+        );
+        Assert.False(evidence.IsKnown);
+        Assert.Contains("identity", evidence.UnknownReason);
+        Assert.False(bound.Options[0].StrategyEvidence!.IsKnown);
     }
 
     [Fact]
@@ -989,7 +1215,7 @@ public sealed class NetherEventProductionEvidenceBindingTests
     [Fact]
     public void Production_rank_five_shop_commitment_survives_binding_dispatch_and_reconciliation()
     {
-        NetherSnapshot snapshot = Snapshot();
+        NetherSnapshot snapshot = Snapshot() with { FloorLevel = 91 };
         NetherRankFiveTreasureIdentity objective = new(9001, 9002, 9003);
         NetherRankFiveKeyProcurementCommitment procurement = new()
         {
@@ -1017,6 +1243,10 @@ public sealed class NetherEventProductionEvidenceBindingTests
                 {
                     IsTreasureKey = true,
                 },
+                new NetherShopContent(3002, 9002, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true)
+                {
+                    CanonicalRewardTier = NetherCanonicalRewardTier.GoldRankFive,
+                },
             ],
         };
         NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.BindRankFiveShopCommitment(
@@ -1029,7 +1259,7 @@ public sealed class NetherEventProductionEvidenceBindingTests
             ShopMode = NetherShopMode.EquipmentBags,
         };
         NetherPopupDispatchDecision dispatched = NetherPopupDispatchPolicy.Decide(
-            snapshot with { NetherGold = 250 },
+            snapshot with { NetherGold = 300 },
             bound,
             settings
         );
@@ -1037,18 +1267,61 @@ public sealed class NetherEventProductionEvidenceBindingTests
         Assert.Equal(NetherPopupDispatchKind.NativeAction, dispatched.Kind);
         Assert.Equal(NetherActionKind.BuyShopItem, dispatched.Action.Kind);
         Assert.Equal(bound.ShopProcurementCommitment, dispatched.Action.ShopProcurementCommitment);
+        Assert.True(bound.ShopProcurementCommitment!.RequiresRankFiveBag);
         Assert.Equal(
             NetherActionOutcome.Applied,
             NetherActionReconcilePolicy.Evaluate(
                 dispatched.Action,
-                snapshot with { NetherGold = 250 },
+                snapshot with { NetherGold = 300 },
                 snapshot with
                 {
-                    NetherGold = 50,
+                    NetherGold = 100,
                     AcquiredItems = [new NetherRewardItem(3001, 1)],
                 }
             )
         );
+    }
+
+    [Fact]
+    public void Production_shop_commitment_rejects_raw_gold_bag_without_typed_provider()
+    {
+        NetherRankFiveKeyProcurementDecision decision = new()
+        {
+            IsKnown = true,
+            HasMandatoryObjective = true,
+            Objective = new NetherRankFiveTreasureIdentity(9001, 9002, 9003),
+            SourceKind = NetherKeyProcurementSourceKind.ShopGold200,
+            GoldCost = 200,
+            Commitment = new NetherRankFiveKeyProcurementCommitment
+            {
+                Objective = new NetherRankFiveTreasureIdentity(9001, 9002, 9003),
+                SourceKind = NetherKeyProcurementSourceKind.ShopGold200,
+                SourceNodeId = 3,
+                SourceContentId = 3001,
+                GoldCost = 200,
+            },
+        };
+        NetherRuntimePopupContext popup = new()
+        {
+            Kind = NetherRuntimePopupKind.Shop,
+            ShopContents =
+            [
+                new NetherShopContent(3001, 0, 0, NetherRewardRarity.NoEffect, 200, true)
+                {
+                    IsTreasureKey = true,
+                },
+                new NetherShopContent(3002, 9002, 91, NetherRewardRarity.Gold, 300, true),
+            ],
+        };
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.BindRankFiveShopCommitment(
+            popup,
+            decision
+        );
+
+        Assert.NotNull(bound.ShopProcurementCommitment);
+        Assert.False(bound.ShopProcurementCommitment!.RequiresRankFiveBag);
+        Assert.Equal(0, bound.ShopProcurementCommitment.BagContentId);
     }
 
     [Fact]
@@ -1218,6 +1491,7 @@ public sealed class NetherEventProductionEvidenceBindingTests
         NetherRuntimePopupContext popup,
         NetherEffect effect,
         NetherEventRewardEvidence? reward,
+        NetherEventBattleEvidence? battle = null,
         bool allowsPartialActiveDeaths = false,
         NetherInteractivePartialDeathEligibility? partialDeathEligibility = null,
         NetherRankFiveKeyProcurementCommitment? rankFiveCommitment = null,
@@ -1237,6 +1511,7 @@ public sealed class NetherEventProductionEvidenceBindingTests
             FloorId = snapshot.CurrentFloorId,
             NodeId = snapshot.CurrentNodeId,
             Reward = reward,
+            Battle = battle,
             HasRouteSafetyEvidence = true,
             RouteSafetyAllowed = true,
             AllowsPartialActiveDeaths = allowsPartialActiveDeaths,

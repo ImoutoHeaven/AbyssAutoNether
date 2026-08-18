@@ -104,6 +104,10 @@ internal static class NetherEventProductionEvidenceBinding
         {
             return popup;
         }
+        NetherShopContent[] exactBags = (popup.ShopContents ?? Array.Empty<NetherShopContent>())
+            .Where(NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopContent)
+            .Take(2)
+            .ToArray();
         return popup with
         {
             ShopProcurementCommitment = new NetherShopProcurementCommitment
@@ -113,6 +117,9 @@ internal static class NetherEventProductionEvidenceBinding
                 KeyContentId = commitment.SourceContentId,
                 KeyCost = 200,
                 Objective = commitment.Objective,
+                RequiresRankFiveBag = exactBags.Length == 1,
+                BagContentId = exactBags.Length == 1 ? exactBags[0].ContentId : 0,
+                BagCost = 300,
             },
         };
     }
@@ -213,9 +220,7 @@ internal static class NetherEventProductionEvidenceBinding
         NetherEventRewardEvidence? reward = option.RewardEvidence
             ?? projection?.Reward
             ?? FindReward(visible, option.EventId, option.EventPartId);
-        NetherEventBattleEvidence? battle = option.BattleEvidence
-            ?? projection?.Battle
-            ?? FindBattle(visible, option.EventId, option.EventPartId);
+        NetherEventBattleEvidence? battle = ResolveBattleEvidence(option, projection, visible);
         long floorId = projection?.FloorId > 0
             ? projection.FloorId
             : package?.Server?.CurrentFloorId > 0
@@ -554,6 +559,73 @@ internal static class NetherEventProductionEvidenceBinding
         return true;
     }
 
+    /// <summary>
+    /// Native popup mapping deliberately retains a non-null BattleEvidence.Unknown record so raw
+    /// battle identity is available for diagnostics. That record must not mask an exact typed
+    /// projection for the same snapshot/Event/part/option. A typed candidate is accepted only
+    /// when the option's battle effect identifies the same battle; mismatches remain unknown.
+    /// </summary>
+    private static NetherEventBattleEvidence? ResolveBattleEvidence(
+        NetherEventOption option,
+        NetherInteractiveOptionProjection? projection,
+        NetherStrategyVisibleMapEvidence? visible
+    )
+    {
+        NetherEventBattleEvidence? optionEvidence = option.BattleEvidence;
+        NetherEffect? battleEffect = option.Effects.FirstOrDefault(
+            effect => effect.Kind == NetherEffectKind.Battle
+        );
+        if (battleEffect == null)
+        {
+            if (optionEvidence?.IsKnown == true
+                || projection?.Battle?.IsKnown == true)
+            {
+                long battleId = optionEvidence?.BattleId
+                    ?? projection?.Battle?.BattleId
+                    ?? 0;
+                return NetherEventBattleEvidence.Unknown(
+                    battleId,
+                    "event-battle-effect-identity-unavailable"
+                );
+            }
+            return optionEvidence
+                ?? projection?.Battle
+                ?? FindBattle(visible, option.EventId, option.EventPartId);
+        }
+
+        bool IsExactKnown(NetherEventBattleEvidence? evidence) =>
+            evidence?.IsKnown == true
+            && evidence.BattleId == battleEffect.Amount;
+
+        if (IsExactKnown(projection?.Battle))
+            return projection!.Battle;
+        if (IsExactKnown(battleEffect.BattleEvidence))
+            return battleEffect.BattleEvidence;
+        NetherEventBattleEvidence? visibleEvidence = FindBattle(
+            visible,
+            option.EventId,
+            option.EventPartId
+        );
+        if (IsExactKnown(visibleEvidence))
+            return visibleEvidence;
+        if (optionEvidence?.IsKnown == true
+            || projection?.Battle?.IsKnown == true
+            || battleEffect.BattleEvidence?.IsKnown == true
+            || visibleEvidence?.IsKnown == true)
+        {
+            NetherEventBattleEvidence? mismatched =
+                optionEvidence?.IsKnown == true ? optionEvidence
+                : projection?.Battle?.IsKnown == true ? projection.Battle
+                : battleEffect.BattleEvidence?.IsKnown == true ? battleEffect.BattleEvidence
+                : visibleEvidence;
+            return NetherEventBattleEvidence.Unknown(
+                mismatched?.BattleId ?? battleEffect.Amount,
+                "event-battle-identity-mismatch"
+            );
+        }
+        return optionEvidence ?? projection?.Battle ?? battleEffect.BattleEvidence ?? visibleEvidence;
+    }
+
     private static bool TryProjectResources(
         NetherStrategyServerEvidence server,
         IReadOnlyList<NetherEffect> effects,
@@ -681,22 +753,14 @@ internal static class NetherEventProductionEvidenceBinding
             && candidate.IsKnown
         );
         if (row is not NetherStrategyVisibleContentRow exact
-            || exact.ContentId <= 0
-            || exact.MasterRowId <= 0
-            || exact.ItemType < 0
-            || exact.ItemRarity < 0
-            || exact.Amount < 0
-            || !NetherEventNativeMapping.TryMapItemType(exact.ItemType, out int itemType))
+            || !NetherCanonicalRewardTierProvider.TryGetTypedRewardEvidence(
+                exact,
+                out NetherEventRewardEvidence rewardEvidence
+            ))
         {
             return null;
         }
-        return new NetherEventRewardEvidence(
-            exact.ContentId,
-            exact.MasterRowId,
-            itemType,
-            (NetherRewardRarity)exact.ItemRarity,
-            exact.Amount
-        );
+        return rewardEvidence;
     }
 
     private static NetherEventBattleEvidence? FindBattle(
@@ -706,7 +770,7 @@ internal static class NetherEventProductionEvidenceBinding
     )
     {
         NetherStrategyVisibleContentRow? row = visible?.ContentRows.FirstOrDefault(candidate =>
-            candidate.Kind == NetherStrategyVisibleContentKind.Battle
+            candidate.Kind is NetherStrategyVisibleContentKind.Battle or NetherStrategyVisibleContentKind.Boss
             && candidate.EventId == eventId
             && candidate.EventPartId == eventPartId
             && candidate.IsKnown
@@ -718,15 +782,25 @@ internal static class NetherEventProductionEvidenceBinding
         {
             return null;
         }
-        return NetherEventBattleEvidence.Unknown(
-            exact.MasterRowId,
-            "event-battle-semantic-tier-unavailable-for-raw-type:" + exact.BattleType
-        ) with
+        if (exact.EventBattleTier == NetherEventBattleTier.Unknown)
         {
-            BattleStageId = exact.BattleStageId,
-            BattleType = exact.BattleType,
-            CodeDropRatio = exact.CodeDropRatio,
-        };
+            return NetherEventBattleEvidence.Unknown(
+                exact.MasterRowId,
+                "event-battle-semantic-tier-unavailable-for-raw-type:" + exact.BattleType
+            ) with
+            {
+                BattleStageId = exact.BattleStageId,
+                BattleType = exact.BattleType,
+                CodeDropRatio = exact.CodeDropRatio,
+            };
+        }
+        return new NetherEventBattleEvidence(
+            exact.MasterRowId,
+            exact.BattleStageId,
+            exact.BattleType,
+            exact.CodeDropRatio,
+            exact.EventBattleTier
+        );
     }
 
 }

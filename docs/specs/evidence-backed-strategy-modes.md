@@ -200,17 +200,17 @@ Current-version evidence boundary: fresh `Project.dll` SHA-256 `53806a5b4dec1863
 
 79. As an Equipment user, or after Research completion, the pre-boundary order places Normal Battle before Direct Code Offer.
 
-80. As an Equipment user above floor 90, safe branches follow `Terminal Boss > known Red rank-5 Treasure > known Gold rank-5 Treasure or eligible late Shop > Event Boss > Elite/Event MiniBoss > Normal Battle > Direct Code Offer > ordinary Event > Recovery`.
+80. As an Equipment user above floor 90, safe branches follow `Terminal Boss > canonical Red rank-5 Treasure > canonical Gold rank-5 Treasure or eligible late Shop > Event Boss > Elite/Event MiniBoss > Normal Battle > Direct Code Offer > ordinary Event > Recovery`. Raw Gold/Red rarity plus an untrusted display rank is not rank-five proof.
 
 81. As an Equipment user, a direct tie between a known Gold rank-5 Treasure and an eligible late Shop favors the Treasure to preserve 300 Nether Gold.
 
-82. As a user, an Event contributes the exact semantic tier of the option the Event policy would select, including Boss, MiniBoss, Normal Battle, direct Code Offer, or ordinary reward.
+82. As a user, an Event contributes the exact semantic tier of the option and Event part the Event policy would select from the current snapshot, resources, and route-owned commitments; a fixed priority over unselected parts is not a valid route value.
 
-83. As a user, an Event Boss is valued as a nonterminal Boss-grade encounter and never mistaken for a normal settlement window.
+83. As a user, an Event Boss is valued as a nonterminal Boss-grade encounter only when an authoritative typed battle provider supplies the Boss tier, and is never mistaken for a normal settlement window.
 
-84. As a user, an Event MiniBoss shares the Elite tier and an Event Normal Battle shares the Normal Battle tier.
+84. As a user, an Event MiniBoss shares the Elite tier and an Event Normal Battle shares the Normal Battle tier only after typed battle evidence proves that semantic mapping; raw native battle `type` and `code_drop_ratio` remain unknown.
 
-85. As a user, a missing or stale Event battle row rejects only that option rather than the entire Event.
+85. As a user, a missing, stale, or semantically untyped Event battle row rejects only that option/part rather than the entire Event.
 
 86. As a user, exact Event choices first satisfy binding, resources, route safety, and committed budgets; only then do they apply the active mode objective and deterministic option-number tie break.
 
@@ -336,7 +336,23 @@ Current-version evidence boundary: fresh `Project.dll` SHA-256 `53806a5b4dec1863
 
 21. Compare branches lexicographically through the next terminal map Boss using the active mode's semantic order. Count like-tier encounters across the whole visible branch, prefer fewer Recovery nodes only after semantic equality, then apply erosion, HP, and deterministic-coordinate tie breaks.
 
-22. Resolve a visible Event through the same Event option policy that will execute after entry. Store the resulting exact option and projection as the route commitment. Hidden or unresolved Event data contributes no value.
+Visible-vector comparison is permitted only when the Research completion state required by the
+mode-sensitive order is authoritative. A nullable/native-unknown pre-settlement state is not
+completed Research; Research mode pauses with unknown master data rather than choosing an order.
+Equipment mode follows its explicit Equipment target/order even when the nullable Research state is
+true or unknown. Gold Treasure and eligible late-Shop nodes share one tier: compare their combined
+count first, then prefer Treasure only when that count ties. Rank-five Treasure classification uses
+the canonical rank-five predicate or an authoritative typed provider; raw Gold/Red rarity is not a
+fallback.
+
+22. Resolve a visible Event through the same Event option policy that will execute after entry,
+using the current snapshot, resources, active mode, and route-owned procurement commitments. Store
+the returned exact Event/part/option identity and projection as the route commitment; an unselected
+part contributes no route tier. Hidden or unresolved Event data contributes no value.
+
+An Event's four native part references are independent option-local groups. A raw battle tier that
+has no authoritative semantic provider invalidates only that part; exact ordinary/direct-code or
+reward parts remain classifiable and must not be discarded with the whole Event.
 
 23. Replace generic Event scoring with ordered eligibility and mode-objective stages. Evaluate all exact effects on an option, reject only the failing option, preserve committed budgets, and use option number only as the final tie break.
 
@@ -387,6 +403,11 @@ Current-version evidence boundary: fresh `Project.dll` SHA-256 `53806a5b4dec1863
 13. Prefer observable decisions, planned actions, audit reason codes, runtime calls, and reconciled snapshots over assertions on private scoring helpers. Numerical tests should assert exact native projections only where all inputs are authoritative; qualitative tiers should assert ordering without inventing a numeric score.
 
 14. Verification is complete only when the full test suite and production build pass, the deployed DLL comes from the verified build output, and a detailed-log smoke run shows one decision record per state transition without battle-result polling spam.
+
+15. Add public route-vector regressions for an actual Event-policy selection that rejects a higher
+priority typed battle part while selecting a known sibling, local unknown battle invalidation,
+Equipment mode with Research completion true and null, Research true/false/null behavior, and
+noncanonical Gold/Red Treasure rows that must not receive rank-five value.
 
 ## Out of Scope
 

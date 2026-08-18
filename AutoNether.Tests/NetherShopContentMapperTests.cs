@@ -31,8 +31,105 @@ public sealed class NetherShopContentMapperTests
         NetherShopContent equipmentBag = result.Contents[1];
         Assert.True(equipmentBag.Known);
         Assert.Equal(210001, equipmentBag.ItemId);
-        Assert.Equal(91, equipmentBag.ItemType);
-        Assert.Equal(NetherRewardRarity.Gold, equipmentBag.Rarity);
+        Assert.Equal(0, equipmentBag.ItemType);
+        Assert.Equal(NetherRewardRarity.NoEffect, equipmentBag.Rarity);
+        Assert.Equal(91, equipmentBag.RawItemType);
+        Assert.Equal(NetherRewardRarity.Gold, equipmentBag.RawRarity);
+        Assert.Equal(NetherCanonicalRewardTier.Unknown, equipmentBag.CanonicalRewardTier);
+    }
+
+    [Fact]
+    public void Typed_provider_marks_the_exact_shop_item_as_canonical_without_using_raw_rarity()
+    {
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            CanonicalRewardTiers =
+            [new NetherCanonicalRewardTierProviderEvidence(210001, NetherCanonicalRewardTier.GoldRankFive, 91)],
+        };
+        NetherShopContentMapResult result = NetherShopContentMapper.Map(
+            [new NetherRawShopContent(10, 31, 210001, 300, true, 1)],
+            new Dictionary<long, NetherShopItemMaster>
+            {
+                [210001] = new NetherShopItemMaster(210001, 91, NetherRewardRarity.Red),
+            },
+            provider
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.Equal(NetherCanonicalRewardTier.GoldRankFive, Assert.Single(result.Contents).CanonicalRewardTier);
+    }
+
+    [Fact]
+    public void Typed_provider_marks_an_idless_key_by_exact_shop_identity()
+    {
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            ShopKeyIdentities =
+            [new NetherShopKeyProviderEvidence(10, 166, 0, 1, 7001)],
+        };
+        NetherShopContentMapResult result = NetherShopContentMapper.Map(
+            [new NetherRawShopContent(10, 166, 0, 200, true, 1)],
+            new Dictionary<long, NetherShopItemMaster>(),
+            provider
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherShopContent key = Assert.Single(result.Contents);
+        Assert.True(key.Known);
+        Assert.True(key.IsTreasureKey);
+        Assert.Equal(7001, key.ShopKeyIdentity);
+        Assert.Equal(0, key.ItemId);
+    }
+
+    [Fact]
+    public void Unknown_raw_non_item_sibling_stays_unknown_beside_a_typed_canonical_bag()
+    {
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            CanonicalRewardTiers =
+            [new NetherCanonicalRewardTierProviderEvidence(210001, NetherCanonicalRewardTier.GoldRankFive, 91)],
+        };
+        NetherShopContentMapResult result = NetherShopContentMapper.Map(
+            [
+                new NetherRawShopContent(10, 31, 210001, 300, true, 1),
+                new NetherRawShopContent(11, 999, 0, 1, true, 1),
+            ],
+            new Dictionary<long, NetherShopItemMaster>
+            {
+                [210001] = new NetherShopItemMaster(210001, 91, NetherRewardRarity.Red),
+            },
+            provider
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.True(result.Contents[0].Known);
+        Assert.Equal(NetherCanonicalRewardTier.GoldRankFive, result.Contents[0].CanonicalRewardTier);
+        Assert.False(result.Contents[1].Known);
+    }
+
+    [Fact]
+    public void Duplicate_or_conflicting_provider_shop_evidence_remains_unknown()
+    {
+        NetherStrategyTypedSemanticProviderEvidence provider = new()
+        {
+            CanonicalRewardTiers =
+            [
+                new NetherCanonicalRewardTierProviderEvidence(210001, NetherCanonicalRewardTier.GoldRankFive, 91),
+                new NetherCanonicalRewardTierProviderEvidence(210001, NetherCanonicalRewardTier.GoldRankFive, 91),
+                new NetherCanonicalRewardTierProviderEvidence(210001, NetherCanonicalRewardTier.RedRankFive, 91),
+            ],
+        };
+        NetherShopContentMapResult result = NetherShopContentMapper.Map(
+            [new NetherRawShopContent(10, 31, 210001, 300, true, 1)],
+            new Dictionary<long, NetherShopItemMaster>
+            {
+                [210001] = new NetherShopItemMaster(210001, 91, NetherRewardRarity.Gold),
+            },
+            provider
+        );
+
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.Equal(NetherCanonicalRewardTier.Unknown, Assert.Single(result.Contents).CanonicalRewardTier);
     }
 
     [Fact]

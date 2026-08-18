@@ -219,15 +219,23 @@ public class NetherRouteSafetyContextBuilderTests
         IReadOnlySet<long>? terminals = null,
         IReadOnlyDictionary<long, bool>? exits = null,
         int maximumDepth = 130
-    ) => new NetherRouteSafetyContextBuilder().Build(new NetherRouteSafetyContextBuilderInput(
-        Floors: floors,
-        NecessaryTerminalFloorIds: terminals ?? floors
-            .Where(floor => floor.ServerNode.NodeType == NetherFloorNodeType.Boss)
-            .Select(floor => floor.ServerNode.FloorId)
-            .ToHashSet(),
-        SafeExitKnownByFloorId: exits ?? SafeExits(floors),
-        MaximumFloorLevel: maximumDepth
-    ));
+    )
+    {
+        NetherRouteSafetyContext context = new NetherRouteSafetyContextBuilder().Build(
+            new NetherRouteSafetyContextBuilderInput(
+                Floors: floors,
+                NecessaryTerminalFloorIds: terminals ?? floors
+                    .Where(floor => floor.ServerNode.NodeType == NetherFloorNodeType.Boss)
+                    .Select(floor => floor.ServerNode.FloorId)
+                    .ToHashSet(),
+                SafeExitKnownByFloorId: exits ?? SafeExits(floors),
+                MaximumFloorLevel: maximumDepth
+            )
+        );
+        NetherStrategyVisibleEvidenceCaptureResult visible = CaptureVisibleMap(floors);
+        Assert.True(visible.IsSuccess, visible.Detail);
+        return context with { VisibleMap = visible.Evidence };
+    }
 
     private static Dictionary<long, bool> SafeExits(IEnumerable<NetherRouteSafetyFloorInput> floors) =>
         floors.ToDictionary(floor => floor.ServerNode.FloorId, _ => true);
@@ -240,9 +248,90 @@ public class NetherRouteSafetyContextBuilderTests
     {
         Status = NetherSessionStatus.Play,
         CurrentFloorId = currentFloorId,
+        CurrentNodeId = currentFloorId,
         ErosionPoint = erosion,
         Floors = floors.Select(floor => floor.ServerNode).ToArray(),
     };
+
+    private static NetherStrategyVisibleEvidenceCaptureResult CaptureVisibleMap(
+        IReadOnlyList<NetherRouteSafetyFloorInput> floors
+    )
+    {
+        var battles = new List<NetherStrategyBattleMasterRow>();
+        var eventRows = new List<NetherFloorEventMasterRow>();
+        var eventParts = new List<NetherFloorEventPartMasterRow>();
+        var extendIds = new Dictionary<long, long>();
+        var battleTiers = new List<NetherEventBattleTierProviderEvidence>();
+        foreach (NetherRouteSafetyFloorInput floor in floors)
+        {
+            NetherFloorNode node = floor.ServerNode;
+            if (node.NodeType is NetherFloorNodeType.Battle
+                or NetherFloorNodeType.MiniBoss
+                or NetherFloorNodeType.Boss)
+            {
+                long battleId = 100000 + node.FloorId;
+                battles.Add(new NetherStrategyBattleMasterRow(
+                    battleId,
+                    node.FloorId,
+                    1,
+                    1,
+                    0
+                ));
+                battleTiers.Add(new NetherEventBattleTierProviderEvidence(
+                    battleId,
+                    node.NodeType == NetherFloorNodeType.Boss
+                        ? NetherEventBattleTier.Boss
+                        : node.NodeType == NetherFloorNodeType.MiniBoss
+                            ? NetherEventBattleTier.MiniBoss
+                            : NetherEventBattleTier.NormalBattle
+                ));
+            }
+            if (node.NodeType == NetherFloorNodeType.Event)
+            {
+                long eventId = 200000 + node.FloorId;
+                long partId = 300000 + node.FloorId;
+                extendIds[node.NodeId] = eventId;
+                eventRows.Add(new NetherFloorEventMasterRow(
+                    eventId,
+                    node.FloorId,
+                    1,
+                    partId,
+                    0,
+                    0,
+                    0
+                ));
+                eventParts.Add(new NetherFloorEventPartMasterRow(
+                    partId,
+                    (int)NetherEffectKind.Heal,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                ));
+            }
+        }
+        return NetherStrategyVisibleEvidenceMapper.Map(
+            new NetherStrategyVisibleEvidenceCaptureRequest(
+                floors.Select(floor => floor.ServerNode).ToArray(),
+                battles,
+                Array.Empty<NetherStrategyTreasureMasterRow>(),
+                eventRows,
+                eventParts,
+                Array.Empty<NetherStrategyItemMasterRow>()
+            )
+            {
+                ExtendIdByNodeId = extendIds,
+                TypedSemanticProvider = new NetherStrategyTypedSemanticProviderEvidence
+                {
+                    EventBattleTiers = battleTiers,
+                },
+            }
+        );
+    }
 
     private static NetherRouteSafetyFloorInput Floor(
         long floorId,

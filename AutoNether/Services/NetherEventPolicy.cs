@@ -399,6 +399,14 @@ internal readonly record struct NetherShopContent(
     public bool UsesNetherGold => usesNetherGold;
     public int Amount => amount;
     public bool Known => known;
+    /// <summary>
+    /// Only an authoritative typed provider may mark an equipment row as canonical Gold rank
+    /// five. Raw native rarity remains characterization data and defaults to Unknown.
+    /// </summary>
+    public NetherCanonicalRewardTier CanonicalRewardTier { get; init; } = NetherCanonicalRewardTier.Unknown;
+    /// <summary>Raw MItems metadata retained for diagnostics only; policy uses typed ItemType/Rarity.</summary>
+    public int RawItemType { get; init; }
+    public NetherRewardRarity RawRarity { get; init; } = NetherRewardRarity.NoEffect;
     /// <summary>Exact MNetherFloorShopContents.content_type; retained for strategy evidence.</summary>
     public int RawContentType { get; init; }
     /// <summary>
@@ -407,6 +415,8 @@ internal readonly record struct NetherShopContent(
     /// fails closed.
     /// </summary>
     public bool IsTreasureKey { get; init; }
+    /// <summary>Authoritative provider identity for this exact Shop key, when available.</summary>
+    public long ShopKeyIdentity { get; init; }
 }
 
 internal enum NetherShopDecisionKind
@@ -443,8 +453,10 @@ internal sealed record NetherShopProcurementCommitment
     public string UnknownReason { get; init; } = string.Empty;
 
     public bool IsValid => IsKnown
+        && (!RequiresRankFiveKey || KeyContentId > 0)
         && (!RequiresRankFiveKey || KeyCost == 200)
         && (!RequiresRankFiveKey || Objective is { IsValid: true })
+        && (!RequiresRankFiveBag || BagContentId > 0)
         && (!RequiresRankFiveBag || BagCost == 300);
 }
 
@@ -730,14 +742,11 @@ internal sealed class NetherEventPolicy
 
             if (commitment.RequiresRankFiveBag)
             {
-                NetherShopContent[] exactBags = contents
-                    .Where(content => content.ItemId > 0
-                        && content.ItemType == 91
-                        && content.Rarity >= NetherRewardRarity.Gold
-                        && content.UsesNetherGold
-                        && content.Price == commitment.BagCost
-                        && (commitment.BagContentId <= 0 || content.ContentId == commitment.BagContentId))
-                    .ToArray();
+                // The native key child is independently actionable at 200 Gold. Only the
+                // optional late rank-five bag is subject to the floor>90/300-Gold boundary.
+                if (snapshot.FloorLevel <= 90 || snapshot.NetherGold < 300)
+                    return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+                NetherShopContent[] exactBags = FindExactLateShopBags(contents, commitment);
                 if (exactBags.Length == 1 && exactBags[0].Price <= snapshot.NetherGold)
                 {
                     NetherShopContent bag = exactBags[0];
@@ -754,28 +763,36 @@ internal sealed class NetherEventPolicy
             }
         }
 
-        NetherShopContent? selected = contents
-            .Where(content => content.ItemId > 0)
-            .Where(content => content.ItemType == 91)
-            .Where(content => content.Rarity >= NetherRewardRarity.Gold)
-            .Where(content => content.UsesNetherGold)
-            .Where(content => content.Price <= snapshot.NetherGold)
-            .OrderByDescending(content => content.Rarity)
-            .ThenBy(content => content.Price)
-            .ThenBy(content => content.ContentId)
-            .Cast<NetherShopContent?>()
-            .FirstOrDefault();
-        if (selected == null)
+        // An uncommitted purchase is only the optional late rank-five bag. An ineligible Shop
+        // remains legal transit, so leaving is safer than pausing or inferring value.
+        if (snapshot.FloorLevel <= 90 || snapshot.NetherGold < 300)
             return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+        NetherShopContent[] exactLateBags = contents
+            .Where(NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopContent)
+            .Take(2)
+            .ToArray();
+        if (exactLateBags.Length != 1)
+            return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+        NetherShopContent selected = exactLateBags[0];
 
         return new NetherShopDecision
         {
             Kind = NetherShopDecisionKind.Buy,
-            ContentId = selected.Value.ContentId,
-            Amount = selected.Value.Amount,
-            GoldCost = selected.Value.Price,
+            ContentId = selected.ContentId,
+            Amount = selected.Amount,
+            GoldCost = selected.Price,
         };
     }
+
+    private static NetherShopContent[] FindExactLateShopBags(
+        IReadOnlyList<NetherShopContent> contents,
+        NetherShopProcurementCommitment commitment
+    ) => contents
+        .Where(content => NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopContent(content)
+            && content.Price == commitment.BagCost
+            && (commitment.BagContentId <= 0 || content.ContentId == commitment.BagContentId))
+        .Take(2)
+        .ToArray();
 
     private bool TryDecideRecoveryFromCompleteBranchEvidence(
         NetherSnapshot snapshot,
@@ -1053,7 +1070,20 @@ internal sealed class NetherEventPolicy
             return false;
         }
         NetherEffect? battleEffect = option.Effects.FirstOrDefault(effect => effect.Kind == NetherEffectKind.Battle);
-        NetherEventBattleEvidence? battleEvidence = option.BattleEvidence ?? battleEffect?.BattleEvidence;
+        NetherEventBattleEvidence? battleEvidence = option.BattleEvidence;
+        if (battleEvidence?.IsKnown != true
+            && battleEffect?.BattleEvidence?.IsKnown == true
+            && battleEffect.BattleEvidence.BattleId == battleEffect.Amount)
+        {
+            // Runtime mapping keeps a non-null raw BattleEvidence.Unknown record. A precise
+            // option projection may replace only that unknown record; an identity mismatch stays
+            // unknown and therefore fail-closed.
+            battleEvidence = battleEffect.BattleEvidence;
+        }
+        else if (battleEvidence == null)
+        {
+            battleEvidence = battleEffect?.BattleEvidence;
+        }
         if (battleEffect != null && option.RequiresExactBinding
             && (battleEvidence == null || !battleEvidence.IsKnown))
         {

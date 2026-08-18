@@ -25,6 +25,39 @@ internal sealed record NetherRouteSafetyContext
     public IReadOnlyDictionary<long, NetherRouteHorizonSafetyEvaluation> HorizonEvaluationByFloorId
         { get; init; } = new Dictionary<long, NetherRouteHorizonSafetyEvaluation>();
     /// <summary>
+    /// Strategy facts used only after the complete visible horizon passes the hard safety gate.
+    /// A null research state is deliberately not guessed from mode or displayed points.
+    /// </summary>
+    public NetherStrategyMode StrategyMode { get; init; } = NetherStrategyMode.Equipment;
+    public NetherCodeFamily PrimaryResearchFamily { get; init; } = NetherCodeFamily.Unknown;
+    public bool? ResearchIncomplete { get; init; }
+    /// <summary>
+    /// The explicit settings used by the same Event policy that will execute a selected popup.
+    /// Route analysis may narrow only the mode; it must not reconstruct a different objective.
+    /// </summary>
+    public NetherAutoClimbSettings StrategySettings { get; init; } = new();
+    /// <summary>
+    /// Exact procurement budgets already owned by the current route lifecycle. A missing key is
+    /// not a zero budget and never authorizes a speculative resource commitment.
+    /// </summary>
+    public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        EventProcurementCommitments { get; init; } =
+        new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+    public NetherStrategyVisibleMapEvidence? VisibleMap { get; init; }
+    /// <summary>
+    /// Snapshot-scoped interactive capture used to bind an Event battle route candidate to the
+    /// typed projected HP/erosion/ownership proof. A missing or stale result never authorizes a
+    /// semantic battle tier.
+    /// </summary>
+    public NetherRuntimeInteractivePreEntryInputsResult? InteractivePreEntry { get; init; }
+    /// <summary>
+    /// Explicit unit/compatibility seam for callers that intentionally exercise the pre-visible
+    /// legacy comparator. Production coordinators leave this false; missing or malformed visible
+    /// branch evidence therefore pauses instead of silently selecting from erosion/HP/reward
+    /// fallback fields.
+    /// </summary>
+    public bool AllowLegacyComparatorCompatibility { get; init; }
+    /// <summary>
     /// Exact visible rank-five Treasure nodes proven on a current branch. The planner only treats
     /// an objective as reachable when the selected candidate's already-safe horizon contains it;
     /// this prevents an alternate branch's Treasure from creating a global priority.
@@ -167,6 +200,16 @@ internal sealed class NetherRoutePlanner
             }
         }
 
+        bool useVisibleBranchVector = HasUsableVisibleBranchVector(snapshot, context.VisibleMap);
+        if (!useVisibleBranchVector && !context.AllowLegacyComparatorCompatibility)
+        {
+            return Pause(
+                NetherPauseReason.UnknownMasterData,
+                "visible-route-vector-unavailable-for-production",
+                audit
+            );
+        }
+
         var safeCandidates = new List<Candidate>();
         foreach (NetherFloorNode candidate in candidates)
         {
@@ -209,13 +252,46 @@ internal sealed class NetherRoutePlanner
                 continue;
             }
 
+            NetherRouteHorizonSafetyEvaluation? horizon = context.HorizonEvaluation(candidate.NodeId);
+            if (useVisibleBranchVector && horizon == null)
+            {
+                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-node")
+                {
+                    Detail = "visible-route-horizon-unavailable",
+                });
+                continue;
+            }
+            if (useVisibleBranchVector && !HasCompleteVisibleHorizon(candidate.NodeId, horizon))
+            {
+                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-node")
+                {
+                    Detail = "visible-route-vector-unavailable",
+                });
+                continue;
+            }
+
+            NetherRouteEncounterVector? vector = useVisibleBranchVector
+                ? NetherRouteEncounterVectorPolicy.Build(snapshot, context, candidate, horizon!)
+                : null;
+            if (useVisibleBranchVector && vector is not { IsKnown: true })
+            {
+                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-node")
+                {
+                    Detail = string.IsNullOrWhiteSpace(vector?.UnknownReason)
+                        ? "visible-route-vector-unknown"
+                        : vector.UnknownReason,
+                });
+                continue;
+            }
             safeCandidates.Add(new Candidate(
                 candidate,
                 true,
                 true,
                 context.ProjectedErosionDelta(candidate.NodeId),
                 context.ProjectedHpDelta(candidate.NodeId),
-                context.SafeCodeOpportunity(candidate.NodeId)
+                context.SafeCodeOpportunity(candidate.NodeId),
+                horizon,
+                vector
             ));
         }
 
@@ -233,26 +309,42 @@ internal sealed class NetherRoutePlanner
             return Pause(reason, "no-safe-frontier", audit);
         }
 
-        Candidate selected = safeCandidates
-            .OrderByDescending(candidate => candidate.HardSafe)
-            .ThenByDescending(candidate => candidate.TerminalReachable)
-            .ThenByDescending(candidate => candidate.Node.NodeType == NetherFloorNodeType.Boss)
-            .ThenByDescending(candidate => context.HasMandatoryRankFiveKeyObjective(candidate.Node.NodeId))
-            .ThenBy(candidate => candidate.ProjectedErosionDelta)
-            .ThenByDescending(candidate => candidate.ProjectedHpDelta)
-            .ThenByDescending(candidate => candidate.SafeCodeOpportunity)
-            .ThenByDescending(candidate => candidate.Node.RewardTier)
-            .ThenBy(candidate => candidate.Node.OptionalCombatCount)
-            .ThenBy(candidate => candidate.Node.FloorIndex)
-            .ThenBy(candidate => candidate.Node.FloorId)
-            .ThenBy(candidate => candidate.Node.NodeId)
-            .First();
+        if (useVisibleBranchVector
+            && context.StrategyMode == NetherStrategyMode.Research
+            && safeCandidates.Any(candidate => candidate.EncounterVector != null)
+            && context.ResearchIncomplete is null)
+        {
+            audit.Add(new NetherRouteCandidateAudit(
+                currentNodeId,
+                "research-completion-unknown"
+            )
+            {
+                Detail = "native-settlement-does-not-prove-pre-settlement-research-completion",
+            });
+            return Pause(
+                NetherPauseReason.UnknownMasterData,
+                "research-completion-state-unknown-for-visible-route-vector",
+                audit
+            );
+        }
+
+        bool? modeResearchIncomplete = context.StrategyMode == NetherStrategyMode.Research
+            ? context.ResearchIncomplete
+            : false;
+        Candidate selected = safeCandidates[0];
+        for (int index = 1; index < safeCandidates.Count; index++)
+        {
+            Candidate contender = safeCandidates[index];
+            if (CompareCandidates(contender, selected, context, modeResearchIncomplete) > 0)
+                selected = contender;
+        }
 
         audit.Add(new NetherRouteCandidateAudit(selected.Node.NodeId, "selected"));
         IReadOnlyList<long> selectedPathNodeIds = CreateSelectedPathNodeIds(
             currentNodeId,
             selected.Node,
-            context
+            context,
+            selected.Horizon
         );
         NetherRouteBranchIdentity? branchIdentity = selectedPathNodeIds.Count == 0
             ? null
@@ -272,13 +364,93 @@ internal sealed class NetherRoutePlanner
         };
     }
 
+    private static bool HasUsableVisibleBranchVector(
+        NetherSnapshot snapshot,
+        NetherStrategyVisibleMapEvidence? visibleMap
+    )
+    {
+        if (snapshot == null
+            || visibleMap?.Floors == null
+            || visibleMap.ContentRows == null
+            || visibleMap.Floors.Count == 0
+            || visibleMap.ContentRows.Count == 0)
+            return false;
+        var nodeIds = new HashSet<long>();
+        foreach (NetherFloorNode floor in visibleMap.Floors)
+        {
+            if (floor == null
+                || floor.NodeId <= 0
+                || floor.FloorId <= 0
+                || !nodeIds.Add(floor.NodeId))
+            {
+                return false;
+            }
+        }
+        if (nodeIds.Count == 0 || snapshot.CurrentNodeId <= 0 || !nodeIds.Contains(snapshot.CurrentNodeId))
+            return false;
+        foreach (NetherStrategyVisibleContentRow? row in visibleMap.ContentRows)
+        {
+            if (row == null
+                || row.Kind == NetherStrategyVisibleContentKind.Unknown
+                || row.NodeId <= 0
+                || !nodeIds.Contains(row.NodeId)
+                || !row.IsKnown && string.IsNullOrWhiteSpace(row.UnknownReason))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool HasCompleteVisibleHorizon(
+        long candidateNodeId,
+        NetherRouteHorizonSafetyEvaluation? horizon
+    )
+    {
+        if (horizon == null
+            || !horizon.IsEligible
+            || horizon.Steps == null
+            || horizon.HorizonSteps == null
+            || horizon.Steps.Count == 0
+            || horizon.Steps.Count != horizon.HorizonSteps.Count
+            || horizon.HorizonSteps[0] == null
+            || horizon.HorizonSteps[0].NodeId != candidateNodeId)
+        {
+            return false;
+        }
+
+        NetherRouteHorizonStep terminal = horizon.HorizonSteps[^1];
+        if (terminal == null
+            || terminal.NodeId <= 0
+            || terminal.NodeType != NetherFloorNodeType.Boss
+            || !terminal.IsTerminalBoss)
+        {
+            return false;
+        }
+
+        var nodeIds = new HashSet<long>();
+        for (int index = 0; index < horizon.HorizonSteps.Count; index++)
+        {
+            NetherRouteHorizonStep step = horizon.HorizonSteps[index];
+            if (step == null
+                || step.NodeId <= 0
+                || !nodeIds.Add(step.NodeId)
+                || horizon.Steps[index].NodeId != step.NodeId)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static IReadOnlyList<long> CreateSelectedPathNodeIds(
         long currentNodeId,
         NetherFloorNode selected,
-        NetherRouteSafetyContext context
+        NetherRouteSafetyContext context,
+        NetherRouteHorizonSafetyEvaluation? selectedHorizon
     )
     {
-        NetherRouteHorizonSafetyEvaluation? horizon = context.HorizonEvaluation(selected.NodeId);
+        NetherRouteHorizonSafetyEvaluation? horizon = selectedHorizon ?? context.HorizonEvaluation(selected.NodeId);
         if (horizon == null
             || !horizon.IsEligible
             || horizon.Steps == null
@@ -395,6 +567,88 @@ internal sealed class NetherRoutePlanner
         bool TerminalReachable,
         int ProjectedErosionDelta,
         int ProjectedHpDelta,
-        int SafeCodeOpportunity
+        int SafeCodeOpportunity,
+        NetherRouteHorizonSafetyEvaluation? Horizon,
+        NetherRouteEncounterVector? EncounterVector
     );
+
+    private static int CompareCandidates(
+        Candidate left,
+        Candidate right,
+        NetherRouteSafetyContext context,
+        bool? researchIncomplete
+    )
+    {
+        if (left.EncounterVector != null || right.EncounterVector != null)
+        {
+            if (researchIncomplete is not bool knownResearchIncomplete)
+                return 0;
+            if (left.EncounterVector is not { IsKnown: true } leftVector
+                || right.EncounterVector is not { IsKnown: true } rightVector)
+            {
+                return 0;
+            }
+            int semantic = leftVector.CompareTo(rightVector, knownResearchIncomplete);
+            if (semantic != 0)
+                return semantic;
+
+            // These are true route-vector tie breaks only. Safety was already filtered above.
+            int peak = right.Horizon?.PeakErosion is int rightPeak
+                && left.Horizon?.PeakErosion is int leftPeak
+                    ? rightPeak.CompareTo(leftPeak)
+                    : 0;
+            if (peak != 0)
+                return peak;
+            int hp = left.Horizon?.MinimumActiveCharacterHpPermille is int leftHp
+                && right.Horizon?.MinimumActiveCharacterHpPermille is int rightHp
+                    ? leftHp.CompareTo(rightHp)
+                    : 0;
+            if (hp != 0)
+                return hp;
+            return CompareCoordinates(left.Node, right.Node);
+        }
+
+        // Compatibility path for route fixtures that intentionally carry no visible semantic
+        // package. It retains the pre-13 deterministic policy while new production captures use
+        // the complete visible vector above.
+        int result = left.HardSafe.CompareTo(right.HardSafe);
+        if (result != 0)
+            return result;
+        result = left.TerminalReachable.CompareTo(right.TerminalReachable);
+        if (result != 0)
+            return result;
+        result = (left.Node.NodeType == NetherFloorNodeType.Boss)
+            .CompareTo(right.Node.NodeType == NetherFloorNodeType.Boss);
+        if (result != 0)
+            return result;
+        result = context.HasMandatoryRankFiveKeyObjective(left.Node.NodeId)
+            .CompareTo(context.HasMandatoryRankFiveKeyObjective(right.Node.NodeId));
+        if (result != 0)
+            return result;
+        result = right.ProjectedErosionDelta.CompareTo(left.ProjectedErosionDelta);
+        if (result != 0)
+            return result;
+        result = left.ProjectedHpDelta.CompareTo(right.ProjectedHpDelta);
+        if (result != 0)
+            return result;
+        result = left.SafeCodeOpportunity.CompareTo(right.SafeCodeOpportunity);
+        if (result != 0)
+            return result;
+        result = left.Node.RewardTier.CompareTo(right.Node.RewardTier);
+        if (result != 0)
+            return result;
+        result = right.Node.OptionalCombatCount.CompareTo(left.Node.OptionalCombatCount);
+        if (result != 0)
+            return result;
+        return CompareCoordinates(left.Node, right.Node);
+    }
+
+    private static int CompareCoordinates(NetherFloorNode left, NetherFloorNode right)
+    {
+        int result = right.FloorIndex.CompareTo(left.FloorIndex);
+        if (result != 0)
+            return result;
+        result = right.FloorId.CompareTo(left.FloorId);
+        return result != 0 ? result : right.NodeId.CompareTo(left.NodeId);
+    }
 }

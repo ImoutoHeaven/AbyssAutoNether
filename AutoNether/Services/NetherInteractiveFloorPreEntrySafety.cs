@@ -152,6 +152,12 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyInput(
     public IReadOnlyList<NetherStrategyItemMasterRow>? ItemRows { get; init; }
     public IReadOnlyList<NetherStrategyBattleMasterRow>? BattleRows { get; init; }
     /// <summary>
+    /// Optional authoritative semantic provider. The native capture currently supplies no
+    /// provider because its item/battle rows expose only raw fields; absent or ambiguous evidence
+    /// leaves the dependent option Unknown.
+    /// </summary>
+    public NetherStrategyTypedSemanticProviderEvidence? TypedSemanticProvider { get; init; }
+    /// <summary>
     /// Exact route commitments keyed by native Event/part/option identity. Missing keys mean no
     /// committed procurement for that option; invalid values make only that option unknown.
     /// </summary>
@@ -394,6 +400,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     parts!,
                     input.ItemRows,
                     input.BattleRows,
+                    NetherStrategySemanticTierLookup.Create(input.TypedSemanticProvider),
                     input.PartialDeathEligibility,
                     input.RecoveryBranchSafetyByPartId,
                     input.FloorNodeId,
@@ -555,6 +562,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         NetherInteractiveEventPartIndex parts,
         IReadOnlyList<NetherStrategyItemMasterRow>? itemRows,
         IReadOnlyList<NetherStrategyBattleMasterRow>? battleRows,
+        NetherStrategySemanticTierLookup semanticTiers,
         IReadOnlyList<NetherInteractivePartialDeathEligibility> partialDeathEligibility,
         IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryBranchSafetyByPartId,
         long floorNodeId,
@@ -630,6 +638,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     ambiguousItemIds,
                     battleById,
                     ambiguousBattleIds,
+                    semanticTiers,
                     out IReadOnlyList<NetherEffect>? effects,
                     out string partError
                 ))
@@ -851,6 +860,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         IReadOnlySet<long> ambiguousItemIds,
         IReadOnlyDictionary<long, NetherStrategyBattleMasterRow>? battleById,
         IReadOnlySet<long> ambiguousBattleIds,
+        NetherStrategySemanticTierLookup semanticTiers,
         out IReadOnlyList<NetherEffect>? effects,
         out string error
     )
@@ -862,6 +872,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 part.SelectParameter1,
                 battleById,
                 ambiguousBattleIds,
+                semanticTiers,
                 mapped,
                 out error
             )
@@ -870,6 +881,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 part.SelectParameter2,
                 battleById,
                 ambiguousBattleIds,
+                semanticTiers,
                 mapped,
                 out error
             )
@@ -878,6 +890,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 part.SelectParameter3,
                 battleById,
                 ambiguousBattleIds,
+                semanticTiers,
                 mapped,
                 out error
             ))
@@ -899,6 +912,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                         part,
                         itemById,
                         ambiguousItemIds,
+                        semanticTiers,
                         out NetherEventRewardEvidence? rewardEvidence
                     ) => new NetherEffect(NetherEffectKind.Item, checked((int)part.Amount))
                 {
@@ -941,6 +955,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         long parameter,
         IReadOnlyDictionary<long, NetherStrategyBattleMasterRow>? battleById,
         IReadOnlySet<long> ambiguousBattleIds,
+        NetherStrategySemanticTierLookup semanticTiers,
         ICollection<NetherEffect> effects,
         out string error
     )
@@ -981,15 +996,32 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 error = "event-battle-master-row-unavailable:" + parameter.ToString(CultureInfo.InvariantCulture);
                 return false;
             }
-            NetherEventBattleEvidence battleEvidence = NetherEventBattleEvidence.Unknown(
-                battle.Id,
-                "event-battle-semantic-tier-unavailable-for-raw-type:" + battle.BattleType
-            ) with
+            NetherEventBattleEvidence battleEvidence;
+            if (semanticTiers.TryGetEventBattleTier(
+                    battle.Id,
+                    out NetherEventBattleTier semanticTier
+                ))
             {
-                BattleStageId = battle.BattleStageId,
-                BattleType = battle.BattleType,
-                CodeDropRatio = battle.CodeDropRatio,
-            };
+                battleEvidence = new NetherEventBattleEvidence(
+                    battle.Id,
+                    battle.BattleStageId,
+                    battle.BattleType,
+                    battle.CodeDropRatio,
+                    semanticTier
+                );
+            }
+            else
+            {
+                battleEvidence = NetherEventBattleEvidence.Unknown(
+                    battle.Id,
+                    "event-battle-semantic-tier-unavailable-for-raw-type:" + battle.BattleType
+                ) with
+                {
+                    BattleStageId = battle.BattleStageId,
+                    BattleType = battle.BattleType,
+                    CodeDropRatio = battle.CodeDropRatio,
+                };
+            }
             effects.Add(new NetherEffect(kind, mappedAmount)
             {
                 IsOptionalBattle = true,
@@ -1006,6 +1038,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         NetherFloorEventPartMasterRow part,
         IReadOnlyDictionary<long, NetherStrategyItemMasterRow>? itemById,
         IReadOnlySet<long> ambiguousItemIds,
+        NetherStrategySemanticTierLookup semanticTiers,
         out NetherEventRewardEvidence? rewardEvidence
     )
     {
@@ -1016,8 +1049,12 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             || !itemById.TryGetValue(part.ContentId, out NetherStrategyItemMasterRow item)
             || !item.HasRequiredFields
             || item.Id <= 0
-            || !NetherEventNativeMapping.TryMapItemType(item.ItemType, out int itemType)
-            || !NetherEventNativeMapping.TryMapRewardRarity(item.Rarity, out NetherRewardRarity rarity)
+            || !semanticTiers.TryGetCanonicalRewardEvidence(
+                item.Id,
+                out NetherCanonicalRewardTier _,
+                out int itemType,
+                out NetherRewardRarity rarity
+            )
             || part.Amount is < 0 or > int.MaxValue)
         {
             return false;

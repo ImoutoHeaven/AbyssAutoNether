@@ -278,6 +278,8 @@ internal sealed class NetherRouteOwnedEventProcurementProducer
                 && row.IsKnown
                 && row.UsesNetherGold
                 && IsPermittedGoldProcurement(row)
+                && (NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopRow(row)
+                    || NetherCanonicalRewardTierProvider.IsAuthoritativeShopKeyRow(row))
                 && row.Cost > 0
                 && projectedGold >= row.Cost
                 && row.NodeId != eventNodeId
@@ -471,6 +473,12 @@ internal sealed record NetherRuntimeRouteSafetyData
     /// non-materialized inventory remains an unknown source.
     /// </summary>
     public NetherStrategyVisibleMapEvidence? VisibleMap { get; init; }
+    /// <summary>
+    /// Exact research completion state, when a typed strategy provider has proved both configured
+    /// families. Null is intentional: current native settlement data cannot prove completion
+    /// before the result response, so the route vector must not invent the direct-offer order.
+    /// </summary>
+    public bool? ResearchIncomplete { get; init; }
     /// <summary>
     /// Complete Recovery transform eligibility captured by Controller from the held-code policy
     /// seam. It is copied into each branch proof before that proof is rebound to native capture.
@@ -669,6 +677,13 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 .Select(decision => decision.Objective.ObjectiveNodeId)
                 .Where(nodeId => nodeId > 0)
                 .ToHashSet(),
+            StrategyMode = settings.StrategyMode,
+            PrimaryResearchFamily = settings.ResearchPrimaryFamily,
+            ResearchIncomplete = runtime.ResearchIncomplete,
+            StrategySettings = settings,
+            EventProcurementCommitments = runtime.EventProcurementCommitments,
+            VisibleMap = runtime.VisibleMap,
+            InteractivePreEntry = interactivePreEntry,
         };
         NetherRoutePlan route = _routePlanner.Plan(snapshot, context);
         NetherRankFiveKeyProcurementDecision rankFiveProcurement = EvaluateRankFiveSelectedRoute(

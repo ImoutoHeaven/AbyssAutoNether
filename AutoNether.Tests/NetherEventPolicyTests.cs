@@ -220,13 +220,16 @@ public class NetherEventPolicyTests
     public void EquipmentBags_requires_type_91_gold_or_better_and_nether_gold_cost()
     {
         NetherShopDecision decision = EventPolicy().DecideShop(
-            Snapshot(gold: 100),
+            Snapshot(gold: 300, floorLevel: 91),
             [
                 new NetherShopContent(1, 1, 90, NetherRewardRarity.UniqueWeapon, 1, usesNetherGold: true),
                 new NetherShopContent(2, 2, 91, NetherRewardRarity.Purple, 1, usesNetherGold: true),
                 new NetherShopContent(3, 3, 91, NetherRewardRarity.Gold, 1, usesNetherGold: false),
-                new NetherShopContent(4, 4, 91, NetherRewardRarity.Gold, 101, usesNetherGold: true),
-                new NetherShopContent(5, 5, 91, NetherRewardRarity.Gold, 40, usesNetherGold: true),
+                new NetherShopContent(4, 4, 91, NetherRewardRarity.Gold, 301, usesNetherGold: true),
+                new NetherShopContent(5, 5, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true)
+                {
+                    CanonicalRewardTier = NetherCanonicalRewardTier.GoldRankFive,
+                },
             ],
             Settings(shopMode: NetherShopMode.EquipmentBags)
         );
@@ -234,6 +237,190 @@ public class NetherEventPolicyTests
         Assert.Equal(NetherShopDecisionKind.Buy, decision.Kind);
         Assert.Equal(5, decision.ContentId);
         Assert.Equal(1, decision.Amount);
+    }
+
+    [Fact]
+    public void Late_shop_requires_floor_strictly_above_90_and_at_least_300_gold()
+    {
+        NetherShopContent bag = new(5, 5005, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true)
+        {
+            CanonicalRewardTier = NetherCanonicalRewardTier.GoldRankFive,
+        };
+
+        Assert.Equal(
+            NetherShopDecisionKind.Leave,
+            EventPolicy().DecideShop(
+                Snapshot(gold: 500, floorLevel: 90),
+                [bag],
+                Settings(shopMode: NetherShopMode.EquipmentBags)
+            ).Kind
+        );
+        Assert.Equal(
+            NetherShopDecisionKind.Leave,
+            EventPolicy().DecideShop(
+                Snapshot(gold: 299, floorLevel: 91),
+                [bag],
+                Settings(shopMode: NetherShopMode.EquipmentBags)
+            ).Kind
+        );
+        Assert.Equal(
+            NetherShopDecisionKind.Buy,
+            EventPolicy().DecideShop(
+                Snapshot(gold: 300, floorLevel: 91),
+                [bag],
+                Settings(shopMode: NetherShopMode.EquipmentBags)
+            ).Kind
+        );
+    }
+
+    [Fact]
+    public void Late_shop_accepts_only_one_exact_gold_rank_bag_and_never_infers_red_or_unknown_value()
+    {
+        NetherShopContent redBag = new(6, 6006, 91, NetherRewardRarity.Red, 300, usesNetherGold: true);
+        NetherShopContent unknown = new(7, 7007, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true, known: false);
+
+        NetherShopDecision redDecision = EventPolicy().DecideShop(
+            Snapshot(gold: 500, floorLevel: 91),
+            [redBag],
+            Settings(shopMode: NetherShopMode.EquipmentBags)
+        );
+        NetherShopDecision unknownDecision = EventPolicy().DecideShop(
+            Snapshot(gold: 500, floorLevel: 91),
+            [unknown],
+            Settings(shopMode: NetherShopMode.EquipmentBags)
+        );
+
+        Assert.Equal(NetherShopDecisionKind.Leave, redDecision.Kind);
+        Assert.NotEqual(NetherShopDecisionKind.Buy, unknownDecision.Kind);
+    }
+
+    [Fact]
+    public void Raw_gold_shop_without_provider_is_transit_only_while_typed_gold_is_buyable()
+    {
+        NetherShopContent rawGold = new(70, 7001, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true);
+        NetherShopContent typedGold = new NetherShopContent(71, 7001, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true)
+        {
+            CanonicalRewardTier = NetherCanonicalRewardTier.GoldRankFive,
+        };
+
+        NetherSnapshot snapshot = Snapshot(gold: 300, floorLevel: 91);
+        Assert.Equal(
+            NetherShopDecisionKind.Leave,
+            EventPolicy().DecideShop(snapshot, [rawGold], Settings(shopMode: NetherShopMode.EquipmentBags)).Kind
+        );
+        Assert.Equal(
+            NetherShopDecisionKind.Buy,
+            EventPolicy().DecideShop(snapshot, [typedGold], Settings(shopMode: NetherShopMode.EquipmentBags)).Kind
+        );
+    }
+
+    [Fact]
+    public void Committed_rank_five_shop_orders_key_then_skips_bag_until_500_gold()
+    {
+        NetherShopProcurementCommitment commitment = new()
+        {
+            IsKnown = true,
+            RequiresRankFiveKey = true,
+            Objective = new NetherRankFiveTreasureIdentity(4, 401, 4011),
+            KeyContentId = 2001,
+            KeyCost = 200,
+            RequiresRankFiveBag = true,
+            BagContentId = 3001,
+            BagCost = 300,
+        };
+        NetherShopContent key = new(2001, 0, 0, NetherRewardRarity.NoEffect, 200, usesNetherGold: true)
+        {
+            IsTreasureKey = true,
+        };
+        NetherShopContent bag = new(3001, 9001, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true)
+        {
+            CanonicalRewardTier = NetherCanonicalRewardTier.GoldRankFive,
+        };
+
+        NetherShopDecision keyDecision = EventPolicy().DecideShop(
+            Snapshot(gold: 300, keys: 0, floorLevel: 91),
+            [key, bag],
+            Settings(shopMode: NetherShopMode.EquipmentBags),
+            commitment
+        );
+        NetherShopDecision skipBagDecision = EventPolicy().DecideShop(
+            Snapshot(gold: 299, keys: 1, floorLevel: 91),
+            [key, bag],
+            Settings(shopMode: NetherShopMode.EquipmentBags),
+            commitment
+        );
+        NetherShopDecision bagDecision = EventPolicy().DecideShop(
+            Snapshot(gold: 500, keys: 1, floorLevel: 91),
+            [key, bag],
+            Settings(shopMode: NetherShopMode.EquipmentBags),
+            commitment
+        );
+
+        Assert.Equal(NetherShopDecisionKind.Buy, keyDecision.Kind);
+        Assert.Equal(2001, keyDecision.ContentId);
+        Assert.Equal(NetherShopDecisionKind.Leave, skipBagDecision.Kind);
+        Assert.Equal(NetherShopDecisionKind.Buy, bagDecision.Kind);
+        Assert.Equal(3001, bagDecision.ContentId);
+    }
+
+    [Fact]
+    public void Committed_shop_key_is_allowed_before_late_bag_boundary_but_unknown_key_is_not()
+    {
+        NetherShopProcurementCommitment commitment = new()
+        {
+            IsKnown = true,
+            RequiresRankFiveKey = true,
+            Objective = new NetherRankFiveTreasureIdentity(4, 401, 4011),
+            KeyContentId = 2001,
+            KeyCost = 200,
+            RequiresRankFiveBag = true,
+            BagContentId = 3001,
+            BagCost = 300,
+        };
+        NetherShopContent key = new(2001, 0, 0, NetherRewardRarity.NoEffect, 200, usesNetherGold: true)
+        {
+            IsTreasureKey = true,
+        };
+        NetherShopContent bag = new(3001, 9001, 91, NetherRewardRarity.Gold, 300, usesNetherGold: true)
+        {
+            CanonicalRewardTier = NetherCanonicalRewardTier.GoldRankFive,
+        };
+
+        NetherShopDecision floorZeroKey = EventPolicy().DecideShop(
+            Snapshot(gold: 200, floorLevel: 0),
+            [key, bag],
+            Settings(shopMode: NetherShopMode.EquipmentBags),
+            commitment
+        );
+        NetherShopDecision floorNinetyKey = EventPolicy().DecideShop(
+            Snapshot(gold: 299, floorLevel: 90),
+            [key, bag],
+            Settings(shopMode: NetherShopMode.EquipmentBags),
+            commitment
+        );
+        NetherShopDecision unaffordableKey = EventPolicy().DecideShop(
+            Snapshot(gold: 199, floorLevel: 91),
+            [key, bag],
+            Settings(shopMode: NetherShopMode.EquipmentBags),
+            commitment
+        );
+        NetherShopContent unknownKey = new(2001, 0, 0, NetherRewardRarity.NoEffect, 200, usesNetherGold: true, known: false)
+        {
+            IsTreasureKey = true,
+        };
+        NetherShopDecision malformedKey = EventPolicy().DecideShop(
+            Snapshot(gold: 299, floorLevel: 90),
+            [unknownKey, bag],
+            Settings(shopMode: NetherShopMode.EquipmentBags),
+            commitment
+        );
+
+        Assert.Equal(NetherShopDecisionKind.Buy, floorZeroKey.Kind);
+        Assert.Equal(2001, floorZeroKey.ContentId);
+        Assert.Equal(NetherShopDecisionKind.Buy, floorNinetyKey.Kind);
+        Assert.Equal(2001, floorNinetyKey.ContentId);
+        Assert.Equal(NetherShopDecisionKind.Leave, unaffordableKey.Kind);
+        Assert.NotEqual(NetherShopDecisionKind.Buy, malformedKey.Kind);
     }
 
     [Fact]
@@ -552,11 +739,18 @@ public class NetherEventPolicyTests
         ShopMode = shopMode,
     };
 
-    private static NetherSnapshot Snapshot(int erosion = 20, int hp = 500, int keys = 0, int gold = 0) => new()
+    private static NetherSnapshot Snapshot(
+        int erosion = 20,
+        int hp = 500,
+        int keys = 0,
+        int gold = 0,
+        int floorLevel = 0
+    ) => new()
     {
         ErosionPoint = erosion,
         TreasureKeyCount = keys,
         NetherGold = gold,
+        FloorLevel = floorLevel,
         Characters = [new NetherCharacterState(1, hp)],
     };
 

@@ -12,7 +12,8 @@
 - [ ] Incomplete pre-90 Research uses the approved order with Direct Code Offer before Normal Battle.
 - [ ] Equipment and completed pre-90 Research place Normal Battle before Direct Code Offer.
 - [ ] Late Equipment uses the approved Red Treasure, Gold Treasure/eligible Shop, nonterminal combat, Offer, Event, and Recovery order.
-- [ ] Exact Event Boss, MiniBoss, Normal Battle, direct Offer, and ordinary reward occupy their semantic tiers rather than a generic Event tier.
+- [ ] Exact Event Boss, MiniBoss, and Normal Battle occupy semantic tiers only when an authoritative typed battle provider supplies `NetherEventBattleTier`; raw battle `type` and `code_drop_ratio` never create a tier.
+- [ ] Route-vector classification reuses the actual Event option policy and counts only its selected Event part; an unknown battle tier invalidates only that part while a proven ordinary/direct-Code/reward sibling remains eligible.
 - [ ] Known rank-5 Treasure and its mandatory key objective outrank nonterminal combat in both modes.
 - [ ] A direct Gold rank-5 Treasure/eligible-Shop tie favors Treasure.
 - [ ] Branches compare semantic tiers and like-tier counts before fewer Recovery nodes.

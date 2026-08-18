@@ -116,6 +116,32 @@ public sealed class NetherStrategyModes1012Tests
     }
 
     [Fact]
+    public void Rank_five_procurement_rejects_raw_unique_weapon_without_typed_canonical_provider()
+    {
+        NetherRankFiveKeyProcurementDecision decision = new NetherRankFiveKeyProcurementPolicy().Evaluate(
+            new NetherRankFiveKeyProcurementInput(
+                CurrentNetherGold: 250,
+                CurrentTreasureKeys: 0,
+                ActiveHpPermille: [500],
+                SelectedPathNodeIds: [1, 2, 3, 4, 5],
+                HardSafeNodeIds: new HashSet<long> { 1, 2, 3, 4, 5 },
+                Floors: Floors(),
+                ContentRows:
+                [
+                    EventSource(2, 2001, 2002),
+                    ShopSource(3, 3001),
+                    Treasure(4, 4001, 4002),
+                    RankFiveItem(4, 4002, NetherCanonicalRewardTier.Unknown),
+                ]
+            )
+        );
+
+        Assert.True(decision.IsKnown, decision.Detail);
+        Assert.False(decision.HasMandatoryObjective);
+        Assert.Equal("no-known-rank-five-treasure-on-selected-branch", decision.Detail);
+    }
+
+    [Fact]
     public void Route_planner_prefers_a_safe_path_with_rank_five_objective_over_ordinary_safe_path()
     {
         NetherFloorNode current = Floor(1, NetherFloorNodeType.Recovery);
@@ -269,7 +295,11 @@ public sealed class NetherStrategyModes1012Tests
             EventId = eventId,
         };
 
-    private static NetherStrategyVisibleContentRow RankFiveItem(long nodeId, long partId) =>
+    private static NetherStrategyVisibleContentRow RankFiveItem(
+        long nodeId,
+        long partId,
+        NetherCanonicalRewardTier canonicalTier = NetherCanonicalRewardTier.GoldRankFive
+    ) =>
         new(NetherStrategyVisibleContentKind.Item, nodeId, partId, partId)
         {
             IsKnown = true,
@@ -278,6 +308,7 @@ public sealed class NetherStrategyModes1012Tests
             ItemType = 91,
             ItemRarity = 5,
             Amount = 1,
+            CanonicalRewardTier = canonicalTier,
         };
 
     private static NetherFloorNode[] Floors() =>
@@ -298,6 +329,7 @@ public sealed class NetherStrategyModes1012Tests
 
     private static NetherRouteSafetyContext SafeContext() => new()
     {
+        AllowLegacyComparatorCompatibility = true,
         MinimumWorstCaseErosionToTerminal = new Dictionary<long, int> { [2] = 1, [3] = 1 },
         HpSafeByFloorId = new Dictionary<long, bool> { [2] = true, [3] = true },
         KnownNodeByFloorId = new Dictionary<long, bool> { [2] = true, [3] = true, [4] = true },
