@@ -31,3 +31,5 @@ GAME_SHA256=Project.dll:53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500
 NATIVE_ARTIFACT_SHA256=MNetherFloorEventParts.cs:5ad97670122ba462fb0c9d4f9197fa7e934d988b148f70b307478b86da44e128; MNetherFloorBattles.cs:7034adf207379ef2f42aa6eb8aa3155252928d08cfd1c4643635c61368cbd720; MNetherFloorShopContents.cs:177e045addd3348a68ba51fa44f0fb228c2c380144d2a14206df5e41468429c9; MItems.cs:e69e8310aa256e60e356e84e857e1b7f92f056a952c03b96f9182e865cfd0d27; NetherApiDataStore.cs:b970836a0c0457174405d227b3e100a41dcf3a7a3b7a8a6abe1d6fe036a18071
 
 NATIVE_ANCHORS=j-p09mxv: EventParts raw target_type_1/select_parameter_1/content_type/content_id source lines 13/15/25/27; Battles raw type/stage/drop source lines 7-15; Shop consume_content_type source line 11 and content fields lines 13-22; MItems raw type/rarity source lines 7-19; NetherApiDataStore RequestNetherUpdateEventAsync floorLevel/floorIndex/selectedNumber/changeTargetMNetherCodeId source lines 287-288
+
+NOTE_AUDIT=j-xq4d0a: ONE_TASK_COMMIT=1; NOTE_FINAL_PIN=1; WORKTREE_CLEAN=1
