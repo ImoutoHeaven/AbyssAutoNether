@@ -6,7 +6,7 @@ TREE=f8dc483eab4ebaf9777aaab132ba8e04f3149507
 
 FIXED_POINT=5f3de38572d5526e73e8576ffe505669c1c8dbc3
 
-NATIVE_AUDIT=j-ard4dj/output.log:1-80; CPP2IL_EXIT=0; DIFFABLE_EXIT=0; GAME_READONLY=1
+NATIVE_AUDIT=j-oj850f/output.log:1-59; CPP2IL_EXIT=0; DIFFABLE_EXIT=0; GAME_READONLY=1
 
 RED=foreground Docker route tests before fix: 2 failed, 0 passed, 2 total
 
