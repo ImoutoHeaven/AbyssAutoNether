@@ -1,0 +1,24 @@
+FINAL_TASK_GROUP_AUDIT
+HEAD=247a2d7b704ef5c3f6ead59e0b13a73d55e288b1
+PARENT=5f3de38572d5526e73e8576ffe505669c1c8dbc3
+TREE=b09972400f01e478978bf689cf511bd1b82924e6
+PREVIOUS_AMENDED_HEAD=ffa3ef96ba7862456e668195fdea6207b69543a5
+NATIVE_PRE_FIX=j-bghfub/output.log (CPP2IL_EXIT=0, DIFFABLE_EXIT=0)
+NATIVE_POST_FIX=j-5l2ncz/output.log (CPP2IL_EXIT=0, DIFFABLE_EXIT=0)
+NATIVE_POST_AMEND=j-ajhpyq/output.log (CPP2IL_EXIT=0, DIFFABLE_EXIT=0)
+GAME_HASHES=Project.dll:53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300;GameAssembly.dll:573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb;global-metadata.dat:ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5
+DECOMP_HASHES=MItems.cs:e69e8310aa256e60e356e84e857e1b7f92f056a952c03b96f9182e865cfd0d27;MNetherFloorEventParts.cs:5ad97670122ba462fb0c9d4f9197fa7e934d988b148f70b307478b86da44e128
+NATIVE_ANCHORS=MItems.cs:4-19/source11 raw long type; MNetherFloorEventParts.cs:4-29/source13-29 raw target/parameter/content; no narrower item-type domain proven
+RED=j-lzlkcg (1 failed/0 passed/1 total, positive ItemType 2147483648 OverflowException)
+GREEN=j-ofgd9w (1/1)
+FOCUSED_PRE_AMEND=j-8dph58 (207/207)
+EXPANDED_PRE_AMEND=j-ie7n3h (477/477)
+FULL_PRE_AMEND=j-1y9bfs (1209/1209)
+RELEASE_PRE_AMEND=j-gwj93w (0 warnings/0 errors, release/isolation/diff PASS)
+FOCUSED_POST_AMEND=j-bywjjc (207/207)
+EXPANDED_POST_AMEND=j-9b53jr (477/477)
+FULL_POST_AMEND=j-hb7wmz (1209/1209)
+RELEASE_POST_AMEND=j-tro2jz (0 warnings/0 errors; release audit PASS; product isolation PASS; DIFF_CHECK_EXIT=0)
+RELEASE_ARTIFACT_SHA=bc28f735f6b6ccddd5f6230a32d35a6591ce8e9c1cfe7e6e376f631c36fd09f9
+GAME_MOUNT=readonly
+NO_PUSH=1
