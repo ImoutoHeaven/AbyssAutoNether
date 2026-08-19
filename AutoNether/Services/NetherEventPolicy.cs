@@ -345,6 +345,69 @@ internal enum NetherEventDecisionKind
     Pause,
 }
 
+internal enum NetherEventOptionHardGate
+{
+    None = 0,
+    CandidateIdentity,
+    Binding,
+    NativeMasterData,
+    NativeEffect,
+    RouteSafety,
+    BattleRouteSafety,
+    Resource,
+    HpSafety,
+    ErosionSafety,
+    Procurement,
+    RecoveryBranchSafety,
+    TreasurePaymentShape,
+    Configuration,
+}
+
+internal enum NetherEventOptionSelectionTier
+{
+    None = 0,
+    Recovery,
+    TreasureKey,
+    TreasureHpPayment,
+    BossBattle,
+    MiniBossBattle,
+    NormalBattle,
+    RedRankFiveReward,
+    GoldRankFiveReward,
+    Reward,
+    DirectCodeOffer,
+    Gold,
+    NeutralSafeOption,
+}
+
+/// <summary>
+/// One immutable record for every option passed to Event/Recovery/Treasure policy evaluation.
+/// A rejected option remains observable with its first typed hard gate; a selected option carries
+/// the tier and comparison rationale which made it win.
+/// </summary>
+internal sealed record NetherEventOptionAudit
+{
+    public long EventId { get; init; }
+    public long EventPartId { get; init; }
+    public long FloorId { get; init; }
+    public long NodeId { get; init; }
+    public int OptionNumber { get; init; }
+    public bool ParticipatesInSelection { get; init; } = true;
+    public bool IsKnown { get; init; }
+    public bool IsSelected { get; init; }
+    public NetherEventOptionHardGate FirstFailingHardGate { get; init; }
+    public NetherEventOptionSelectionTier SelectionTier { get; init; }
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+    public int ErosionDelta { get; init; }
+    public int HpDelta { get; init; }
+    public int ProjectedNetherGold { get; init; }
+    public int ProjectedTreasureKeys { get; init; }
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
+    public string Detail { get; init; } = string.Empty;
+    public string ComparisonRationale { get; init; } = string.Empty;
+}
+
 internal sealed record NetherEventDecision
 {
     public NetherEventDecisionKind Kind { get; init; }
@@ -378,6 +441,8 @@ internal sealed record NetherEventDecision
     public NetherInteractivePartialDeathEligibility? PartialDeathEligibility { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
+    public IReadOnlyList<NetherEventOptionAudit> OptionAudits { get; init; } =
+        Array.Empty<NetherEventOptionAudit>();
 }
 
 internal readonly record struct NetherShopContent(
@@ -426,6 +491,43 @@ internal enum NetherShopDecisionKind
     Pause,
 }
 
+internal enum NetherShopOptionHardGate
+{
+    None = 0,
+    NativeInventory,
+    Procurement,
+    FloorEligibility,
+    Affordability,
+    CandidateIdentity,
+    Configuration,
+}
+
+internal enum NetherShopOptionSelectionTier
+{
+    None = 0,
+    CommittedKey,
+    CommittedRankFiveBag,
+    LateRankFiveBag,
+}
+
+/// <summary>One typed audit for every native Shop content row considered by policy.</summary>
+internal sealed record NetherShopOptionAudit
+{
+    public long ContentId { get; init; }
+    public long ItemId { get; init; }
+    public int ItemType { get; init; }
+    public int Price { get; init; }
+    public int Amount { get; init; }
+    public bool IsKnown { get; init; }
+    public bool ParticipatesInSelection { get; init; } = true;
+    public bool IsSelected { get; init; }
+    public NetherShopOptionHardGate FirstFailingHardGate { get; init; }
+    public NetherShopOptionSelectionTier SelectionTier { get; init; }
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+    public string Detail { get; init; } = string.Empty;
+    public string ComparisonRationale { get; init; } = string.Empty;
+}
+
 internal sealed record NetherShopDecision
 {
     public NetherShopDecisionKind Kind { get; init; }
@@ -437,6 +539,8 @@ internal sealed record NetherShopDecision
     public NetherShopProcurementCommitment? ProcurementCommitment { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
+    public IReadOnlyList<NetherShopOptionAudit> OptionAudits { get; init; } =
+        Array.Empty<NetherShopOptionAudit>();
 }
 
 /// <summary>Exact branch-local Shop child order for a proven rank-five Treasure objective.</summary>
@@ -580,7 +684,10 @@ internal sealed class NetherEventPolicy
                 out NetherEventDecision? branchDecision
             ))
         {
-            return branchDecision!;
+            return branchDecision! with
+            {
+                OptionAudits = FinalizeRecoveryBranchAudits(options, branchDecision!),
+            };
         }
 
         if (requireCompleteBranchEvidence)
@@ -588,7 +695,17 @@ internal sealed class NetherEventPolicy
             return Pause(
                 NetherPauseReason.UnknownMasterData,
                 "recovery-complete-visible-branch-unavailable"
-            );
+            ) with
+            {
+                OptionAudits = options.Select(option => CreateRejectedOptionAudit(
+                    option,
+                    Pause(
+                        NetherPauseReason.UnknownMasterData,
+                        "recovery-complete-visible-branch-unavailable"
+                    ),
+                    NetherEventOptionHardGate.RecoveryBranchSafety
+                )).ToArray(),
+            };
         }
 
         return Decide(
@@ -617,10 +734,20 @@ internal sealed class NetherEventPolicy
     {
         ValidateInputs(snapshot, options, settings);
         if (settings.TreasureMode != NetherTreasureMode.KeyOnly)
-            return Pause(NetherPauseReason.NoSafeRoute, "treasure-mode-off");
+        {
+            return Pause(NetherPauseReason.NoSafeRoute, "treasure-mode-off") with
+            {
+                OptionAudits = options.Select(option => CreateExcludedOptionAudit(
+                    option,
+                    "treasure-mode-off",
+                    NetherEventOptionHardGate.Configuration
+                )).ToArray(),
+            };
+        }
 
         var keyCandidates = new List<EventCandidate>();
         var hpCandidates = new List<EventCandidate>();
+        var optionAudits = new List<NetherEventOptionAudit>();
         foreach (NetherEventOption option in options)
         {
             bool isExactHpPayment = IsExactTreasureHpPayment(option);
@@ -640,18 +767,33 @@ internal sealed class NetherEventPolicy
                     },
                     strategyEvidence: null,
                     out EventCandidate candidate,
-                    out _
+                    out NetherEventDecision rejection
                 ))
             {
+                optionAudits.Add(CreateRejectedOptionAudit(option, rejection));
                 continue;
             }
             int exactKeyCosts = option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount == 1);
             bool hasOnlySafePayments = option.Effects.All(effect => effect.Kind is not NetherEffectKind.Damage and not NetherEffectKind.Erosion);
             bool hasNoOtherKeyCost = option.Effects.All(effect => effect.Kind != NetherEffectKind.TreasureKeyUsed || effect.Amount == 1);
             if (exactKeyCosts == 1 && hasNoOtherKeyCost && hasOnlySafePayments && snapshot.TreasureKeyCount >= 1)
+            {
                 keyCandidates.Add(candidate);
+                optionAudits.Add(CreateCandidateOptionAudit(candidate, isRecovery: false));
+            }
             else if (snapshot.TreasureKeyCount < 1 && isStrategicallyEligibleHpPayment)
+            {
                 hpCandidates.Add(candidate);
+                optionAudits.Add(CreateCandidateOptionAudit(candidate, isRecovery: false));
+            }
+            else
+            {
+                optionAudits.Add(CreateExcludedOptionAudit(
+                    option,
+                    "treasure-option-not-in-key-or-authorized-hp-panel",
+                    NetherEventOptionHardGate.TreasurePaymentShape
+                ));
+            }
         }
 
         // The live popup exposes distinct Key/Hp/Abyss panels.  A verified one-key option is
@@ -659,7 +801,12 @@ internal sealed class NetherEventPolicy
         // held; the Erosion/Abyss panel is never promoted to a substitute.
         List<EventCandidate> candidates = keyCandidates.Count > 0 ? keyCandidates : hpCandidates;
         if (candidates.Count == 0)
-            return Pause(NetherPauseReason.NoSafeRoute, "no-key-only-treasure-option");
+        {
+            return Pause(NetherPauseReason.NoSafeRoute, "no-key-only-treasure-option") with
+            {
+                OptionAudits = optionAudits,
+            };
+        }
 
         EventCandidate selected = candidates
             .OrderByDescending(candidate => candidate.Benefit)
@@ -669,7 +816,16 @@ internal sealed class NetherEventPolicy
             .ThenBy(candidate => candidate.Option.FloorId)
             .ThenBy(candidate => candidate.Option.NodeId)
             .First();
-        return Select(selected);
+        return Select(selected) with
+        {
+            OptionAudits = FinalizeOptionAudits(
+                optionAudits,
+                candidates,
+                selected,
+                isRecovery: false,
+                isTreasure: true
+            ),
+        };
     }
 
     public NetherShopDecision DecideShop(
@@ -691,26 +847,30 @@ internal sealed class NetherEventPolicy
             throw new ArgumentNullException(nameof(contents));
         if (settings == null)
             throw new ArgumentNullException(nameof(settings));
+        NetherShopDecision Finish(NetherShopDecision decision) => decision with
+        {
+            OptionAudits = BuildShopOptionAudits(snapshot, contents, settings, commitment, decision),
+        };
         if (settings.ShopMode == NetherShopMode.Off)
-            return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+            return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Leave });
         // The native shop mixes MItems with valid ID-less products (keys, code effects, etc.).
         // EquipmentBags ignores those known non-item rows; ItemId is required only for an
         // actual equipment candidate, never as a blanket validity condition for the popup.
         if (contents.Any(content => !content.Known || content.ContentId <= 0 || content.Amount <= 0 || content.Price < 0))
-            return new NetherShopDecision { Kind = NetherShopDecisionKind.Pause, PauseReason = NetherPauseReason.UnknownMasterData, Detail = "invalid-shop-content" };
+            return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Pause, PauseReason = NetherPauseReason.UnknownMasterData, Detail = "invalid-shop-content" });
 
         if (commitment is { IsKnown: true })
         {
             if (!commitment.IsValid)
             {
-                return new NetherShopDecision
+                return Finish(new NetherShopDecision
                 {
                     Kind = NetherShopDecisionKind.Pause,
                     PauseReason = NetherPauseReason.UnknownMasterData,
                     Detail = string.IsNullOrWhiteSpace(commitment.UnknownReason)
                         ? "invalid-shop-procurement-commitment"
                         : commitment.UnknownReason,
-                };
+                });
             }
 
             // A committed key is always the first child. Once the authoritative snapshot shows
@@ -726,18 +886,18 @@ internal sealed class NetherEventPolicy
                 if (exactKeys.Length == 1 && exactKeys[0].Price <= snapshot.NetherGold)
                 {
                     NetherShopContent key = exactKeys[0];
-                    return new NetherShopDecision
+                    return Finish(new NetherShopDecision
                     {
                         Kind = NetherShopDecisionKind.Buy,
                         ContentId = key.ContentId,
                         Amount = key.Amount,
                         GoldCost = key.Price,
                         ProcurementCommitment = commitment,
-                    };
+                    });
                 }
                 // Missing/ambiguous/unaffordable key evidence is not permission to buy a bag or
                 // reinterpret another raw content type as a key.
-                return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+                return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Leave });
             }
 
             if (commitment.RequiresRankFiveBag)
@@ -745,43 +905,42 @@ internal sealed class NetherEventPolicy
                 // The native key child is independently actionable at 200 Gold. Only the
                 // optional late rank-five bag is subject to the floor>90/300-Gold boundary.
                 if (snapshot.FloorLevel <= 90 || snapshot.NetherGold < 300)
-                    return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+                    return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Leave });
                 NetherShopContent[] exactBags = FindExactLateShopBags(contents, commitment);
                 if (exactBags.Length == 1 && exactBags[0].Price <= snapshot.NetherGold)
                 {
                     NetherShopContent bag = exactBags[0];
-                    return new NetherShopDecision
+                    return Finish(new NetherShopDecision
                     {
                         Kind = NetherShopDecisionKind.Buy,
                         ContentId = bag.ContentId,
                         Amount = bag.Amount,
                         GoldCost = bag.Price,
                         ProcurementCommitment = commitment,
-                    };
+                    });
                 }
-                return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+                return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Leave });
             }
         }
 
         // An uncommitted purchase is only the optional late rank-five bag. An ineligible Shop
         // remains legal transit, so leaving is safer than pausing or inferring value.
         if (snapshot.FloorLevel <= 90 || snapshot.NetherGold < 300)
-            return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+            return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Leave });
         NetherShopContent[] exactLateBags = contents
             .Where(NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopContent)
-            .Take(2)
             .ToArray();
         if (exactLateBags.Length != 1)
-            return new NetherShopDecision { Kind = NetherShopDecisionKind.Leave };
+            return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Leave });
         NetherShopContent selected = exactLateBags[0];
 
-        return new NetherShopDecision
+        return Finish(new NetherShopDecision
         {
             Kind = NetherShopDecisionKind.Buy,
             ContentId = selected.ContentId,
             Amount = selected.Amount,
             GoldCost = selected.Price,
-        };
+        });
     }
 
     private static NetherShopContent[] FindExactLateShopBags(
@@ -791,8 +950,149 @@ internal sealed class NetherEventPolicy
         .Where(content => NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopContent(content)
             && content.Price == commitment.BagCost
             && (commitment.BagContentId <= 0 || content.ContentId == commitment.BagContentId))
-        .Take(2)
         .ToArray();
+
+    private static IReadOnlyList<NetherShopOptionAudit> BuildShopOptionAudits(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherShopContent> contents,
+        NetherAutoClimbSettings settings,
+        NetherShopProcurementCommitment? commitment,
+        NetherShopDecision decision
+    )
+    {
+        NetherShopContent[] exactLateBags = contents
+            .Where(NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopContent)
+            .ToArray();
+        bool invalidCommitment = commitment is { IsKnown: true, IsValid: false };
+        var audits = new List<NetherShopOptionAudit>(contents.Count);
+        foreach (NetherShopContent content in contents)
+        {
+            bool valid = content.Known
+                && content.ContentId > 0
+                && content.Amount > 0
+                && content.Price >= 0;
+            NetherShopOptionAudit audit = new()
+            {
+                ContentId = content.ContentId,
+                ItemId = content.ItemId,
+                ItemType = content.ItemType,
+                Price = content.Price,
+                Amount = content.Amount,
+                IsKnown = valid,
+                ParticipatesInSelection = true,
+                UnknownReasonCode = valid
+                    ? NetherStrategyUnknownReasonCode.None
+                    : NetherStrategyUnknownReasonCode.InventoryEvidenceUnavailable,
+                FirstFailingHardGate = valid
+                    ? NetherShopOptionHardGate.None
+                    : NetherShopOptionHardGate.NativeInventory,
+                Detail = valid ? string.Empty : "shop-inventory-row-unavailable",
+                ComparisonRationale = valid
+                    ? "eligible-check-pending"
+                    : "excluded:first-failing-gate=NativeInventory",
+            };
+
+            if (!valid)
+            {
+                audits.Add(audit);
+                continue;
+            }
+
+            if (decision.Kind == NetherShopDecisionKind.Buy
+                && decision.ContentId == content.ContentId)
+            {
+                bool committedKey = commitment?.RequiresRankFiveKey == true
+                    && snapshot.TreasureKeyCount == 0;
+                bool committedBag = commitment?.RequiresRankFiveBag == true;
+                audits.Add(audit with
+                {
+                    IsSelected = true,
+                    SelectionTier = committedKey
+                        ? NetherShopOptionSelectionTier.CommittedKey
+                        : committedBag
+                            ? NetherShopOptionSelectionTier.CommittedRankFiveBag
+                            : NetherShopOptionSelectionTier.LateRankFiveBag,
+                    ComparisonRationale = "selected-by-exact-shop-identity-and-commitment-order",
+                });
+                continue;
+            }
+
+            NetherShopOptionHardGate gate = NetherShopOptionHardGate.CandidateIdentity;
+            string detail = "not-selected-shop-alternative";
+            NetherStrategyUnknownReasonCode unknownReasonCode = NetherStrategyUnknownReasonCode.None;
+            if (settings.ShopMode == NetherShopMode.Off)
+            {
+                gate = NetherShopOptionHardGate.Configuration;
+                detail = "shop-mode-off";
+            }
+            else if (invalidCommitment)
+            {
+                gate = NetherShopOptionHardGate.Procurement;
+                detail = string.IsNullOrWhiteSpace(commitment!.UnknownReason)
+                    ? "invalid-shop-procurement-commitment"
+                    : commitment.UnknownReason;
+                unknownReasonCode = NetherStrategyUnknownReasonCode.TransactionEvidenceUnavailable;
+            }
+            else if (commitment is { IsKnown: true, RequiresRankFiveKey: true }
+                && snapshot.TreasureKeyCount == 0)
+            {
+                gate = content.IsTreasureKey
+                    ? content.Price > snapshot.NetherGold
+                        ? NetherShopOptionHardGate.Affordability
+                        : NetherShopOptionHardGate.Procurement
+                    : NetherShopOptionHardGate.Procurement;
+                detail = content.IsTreasureKey
+                    ? content.Price > snapshot.NetherGold
+                        ? "committed-key-unaffordable"
+                        : "not-exact-committed-key"
+                    : "not-committed-key-content";
+            }
+            else if (commitment is { IsKnown: true, RequiresRankFiveBag: true })
+            {
+                gate = snapshot.FloorLevel <= 90
+                    ? NetherShopOptionHardGate.FloorEligibility
+                    : snapshot.NetherGold < 300
+                        ? NetherShopOptionHardGate.Affordability
+                        : NetherCanonicalRewardTierProvider.IsCanonicalGoldRankFiveShopContent(content)
+                            ? NetherShopOptionHardGate.Procurement
+                            : NetherShopOptionHardGate.CandidateIdentity;
+                detail = gate == NetherShopOptionHardGate.FloorEligibility
+                    ? "late-shop-floor-boundary"
+                    : gate == NetherShopOptionHardGate.Affordability
+                        ? "late-shop-gold-unavailable"
+                        : "not-exact-committed-bag";
+            }
+            else if (snapshot.FloorLevel <= 90)
+            {
+                gate = NetherShopOptionHardGate.FloorEligibility;
+                detail = "late-shop-floor-boundary";
+            }
+            else if (snapshot.NetherGold < 300)
+            {
+                gate = NetherShopOptionHardGate.Affordability;
+                detail = "late-shop-gold-unavailable";
+            }
+            else if (exactLateBags.Length != 1)
+            {
+                gate = NetherShopOptionHardGate.CandidateIdentity;
+                detail = "late-rank-five-shop-candidate-not-unique";
+            }
+            else
+            {
+                gate = NetherShopOptionHardGate.CandidateIdentity;
+                detail = "not-canonical-rank-five-shop-content";
+            }
+
+            audits.Add(audit with
+            {
+                FirstFailingHardGate = gate,
+                UnknownReasonCode = unknownReasonCode,
+                Detail = detail,
+                ComparisonRationale = "excluded:first-failing-gate=" + gate,
+            });
+        }
+        return audits;
+    }
 
     private bool TryDecideRecoveryFromCompleteBranchEvidence(
         NetherSnapshot snapshot,
@@ -918,6 +1218,7 @@ internal sealed class NetherEventPolicy
                 hardExclusions
             );
         var candidates = new List<EventCandidate>();
+        var optionAudits = new List<NetherEventOptionAudit>();
         NetherPauseReason firstRejection = NetherPauseReason.NoSafeRoute;
         string firstDetail = "no-safe-event-option";
         foreach (NetherEventOption option in options)
@@ -930,6 +1231,10 @@ internal sealed class NetherEventPolicy
             {
                 firstRejection = NetherPauseReason.NoSafeRoute;
                 firstDetail = "hp-paid-key-damage-must-equal-eighty";
+                optionAudits.Add(CreateRejectedOptionAudit(
+                    option,
+                    Pause(firstRejection, firstDetail)
+                ));
                 continue;
             }
             bool hasAuthorizedHpPaidKeyProof = option.PartialDeathEligibility?.AllowsHpPaidEventKey == true;
@@ -942,6 +1247,10 @@ internal sealed class NetherEventPolicy
             {
                 firstRejection = NetherPauseReason.NoSafeRoute;
                 firstDetail = "hp-paid-key-objective-proof-unavailable";
+                optionAudits.Add(CreateRejectedOptionAudit(
+                    option,
+                    Pause(firstRejection, firstDetail)
+                ));
                 continue;
             }
             if (!TryValidateOption(
@@ -956,6 +1265,7 @@ internal sealed class NetherEventPolicy
                     out NetherEventDecision rejection
                 ))
             {
+                optionAudits.Add(CreateRejectedOptionAudit(option, rejection));
                 if (firstRejection == NetherPauseReason.NoSafeRoute)
                 {
                     firstRejection = rejection.PauseReason;
@@ -968,13 +1278,23 @@ internal sealed class NetherEventPolicy
             {
                 firstRejection = NetherPauseReason.NoSafeRoute;
                 firstDetail = "no-positive-recovery-effect";
+                optionAudits.Add(CreateRejectedOptionAudit(
+                    option,
+                    Pause(firstRejection, firstDetail)
+                ));
                 continue;
             }
             candidates.Add(candidate);
+            optionAudits.Add(CreateCandidateOptionAudit(candidate, isRecovery));
         }
 
         if (candidates.Count == 0)
-            return Pause(firstRejection, firstDetail);
+        {
+            return Pause(firstRejection, firstDetail) with
+            {
+                OptionAudits = optionAudits,
+            };
+        }
 
         bool belowHpSoftLimit = snapshot.Characters.Any(character => character.IsActive && character.HpPermille < settings.MinimumCharacterHpPermille);
         EventCandidate selected = candidates
@@ -996,7 +1316,10 @@ internal sealed class NetherEventPolicy
             .ThenBy(candidate => candidate.Option.FloorId)
             .ThenBy(candidate => candidate.Option.NodeId)
             .First();
-        return Select(selected);
+        return Select(selected) with
+        {
+            OptionAudits = FinalizeOptionAudits(optionAudits, candidates, selected, isRecovery),
+        };
     }
 
     private bool TryValidateOption(
@@ -1381,6 +1704,242 @@ internal sealed class NetherEventPolicy
         && option.Effects.Count == 2
         && option.Effects.Count(effect => effect.Kind == NetherEffectKind.Damage && effect.Amount == 80) == 1
         && option.Effects.Count(effect => effect.Kind == NetherEffectKind.TreasureKeyGain && effect.Amount == 1) == 1;
+
+    private static NetherEventOptionAudit CreateRejectedOptionAudit(
+        NetherEventOption option,
+        NetherEventDecision rejection,
+        NetherEventOptionHardGate? gateOverride = null
+    )
+    {
+        string detail = string.IsNullOrWhiteSpace(rejection.Detail)
+            ? "event-option-rejected"
+            : rejection.Detail;
+        bool unknown = rejection.PauseReason is NetherPauseReason.UnknownMasterData
+            or NetherPauseReason.UnknownEffect
+            or NetherPauseReason.BindingUnavailable
+            or NetherPauseReason.InvalidConfiguration;
+        NetherEventOptionHardGate gate = gateOverride ?? MapOptionHardGate(rejection.PauseReason, detail);
+        return new NetherEventOptionAudit
+        {
+            EventId = option?.EventId ?? 0,
+            EventPartId = option?.EventPartId ?? 0,
+            FloorId = option?.FloorId ?? 0,
+            NodeId = option?.NodeId ?? 0,
+            OptionNumber = option?.OptionNumber ?? 0,
+            ParticipatesInSelection = true,
+            IsKnown = !unknown,
+            FirstFailingHardGate = gate,
+            UnknownReasonCode = unknown
+                ? NetherStrategyUnknownReasonCodes.FromDetail(
+                    string.IsNullOrWhiteSpace(option?.UnknownReason)
+                        ? detail
+                        : option.UnknownReason
+                )
+                : NetherStrategyUnknownReasonCode.None,
+            Detail = detail,
+            ComparisonRationale = "excluded:first-failing-gate=" + gate,
+        };
+    }
+
+    private static NetherEventOptionAudit CreateExcludedOptionAudit(
+        NetherEventOption option,
+        string detail,
+        NetherEventOptionHardGate gate
+    ) => CreateRejectedOptionAudit(
+        option,
+        Pause(NetherPauseReason.NoSafeRoute, detail),
+        gate
+    );
+
+    private static NetherEventOptionAudit CreateCandidateOptionAudit(
+        EventCandidate candidate,
+        bool isRecovery
+    ) => new()
+    {
+        EventId = candidate.Option.EventId,
+        EventPartId = candidate.Option.EventPartId,
+        FloorId = candidate.Option.FloorId,
+        NodeId = candidate.Option.NodeId,
+        OptionNumber = candidate.Option.OptionNumber,
+        ParticipatesInSelection = true,
+        IsKnown = true,
+        SelectionTier = InferOptionTier(candidate.Option, candidate.Battle, candidate.Reward, isRecovery, false),
+        ErosionDelta = candidate.ErosionDelta,
+        HpDelta = candidate.HpDelta,
+        ProjectedNetherGold = candidate.ProjectedNetherGold,
+        ProjectedTreasureKeys = candidate.ProjectedTreasureKeys,
+        CommittedGoldMinimum = candidate.Option.CommittedGoldMinimum,
+        CommittedKeyMinimum = candidate.Option.CommittedKeyMinimum,
+        ComparisonRationale = "eligible-for-comparison",
+    };
+
+    private static IReadOnlyList<NetherEventOptionAudit> FinalizeOptionAudits(
+        IReadOnlyList<NetherEventOptionAudit> audits,
+        IReadOnlyList<EventCandidate> candidates,
+        EventCandidate selected,
+        bool isRecovery,
+        bool isTreasure = false
+    )
+    {
+        var finalized = new List<NetherEventOptionAudit>(audits.Count);
+        foreach (NetherEventOptionAudit audit in audits)
+        {
+            EventCandidate candidate = candidates.FirstOrDefault(item =>
+                item.Option.EventId == audit.EventId
+                && item.Option.EventPartId == audit.EventPartId
+                && item.Option.OptionNumber == audit.OptionNumber
+            );
+            if (candidate.Option == null)
+            {
+                finalized.Add(audit);
+                continue;
+            }
+            bool isSelected = candidate.Option.EventId == selected.Option.EventId
+                && candidate.Option.EventPartId == selected.Option.EventPartId
+                && candidate.Option.OptionNumber == selected.Option.OptionNumber;
+            finalized.Add(audit with
+            {
+                IsKnown = true,
+                IsSelected = isSelected,
+                SelectionTier = InferOptionTier(
+                    candidate.Option,
+                    candidate.Battle,
+                    candidate.Reward,
+                    isRecovery,
+                    isTreasure
+                ),
+                ComparisonRationale = isSelected
+                    ? "selected-by-deterministic-comparison"
+                    : "eligible-but-not-selected-by-deterministic-comparison",
+            });
+        }
+        return finalized;
+    }
+
+    private static IReadOnlyList<NetherEventOptionAudit> FinalizeRecoveryBranchAudits(
+        IReadOnlyList<NetherEventOption> options,
+        NetherEventDecision decision
+    )
+    {
+        if (decision.Kind != NetherEventDecisionKind.Select)
+        {
+            return options.Select(option => CreateRejectedOptionAudit(
+                option,
+                decision,
+                NetherEventOptionHardGate.RecoveryBranchSafety
+            )).ToArray();
+        }
+
+        return options.Select(option =>
+        {
+            bool selected = option.EventId == decision.EventId
+                && option.EventPartId == decision.EventPartId
+                && option.OptionNumber == decision.OptionNumber;
+            if (!selected)
+            {
+                return CreateRejectedOptionAudit(
+                    option,
+                    Pause(
+                        NetherPauseReason.NoSafeRoute,
+                        "recovery-option-not-selected-by-complete-branch-proof"
+                    ),
+                    NetherEventOptionHardGate.RecoveryBranchSafety
+                );
+            }
+            return CreateSelectedOptionAudit(decision, NetherEventOptionSelectionTier.Recovery);
+        }).ToArray();
+    }
+
+    private static NetherEventOptionAudit CreateSelectedOptionAudit(
+        NetherEventDecision decision,
+        NetherEventOptionSelectionTier tier
+    ) => new()
+    {
+        EventId = decision.EventId,
+        EventPartId = decision.EventPartId,
+        FloorId = decision.FloorId,
+        NodeId = decision.NodeId,
+        OptionNumber = decision.OptionNumber,
+        ParticipatesInSelection = true,
+        IsKnown = true,
+        IsSelected = true,
+        SelectionTier = tier,
+        ErosionDelta = decision.ExpectedErosionDelta,
+        HpDelta = decision.HpDelta,
+        ProjectedNetherGold = decision.ProjectedNetherGold,
+        ProjectedTreasureKeys = decision.ProjectedTreasureKeys,
+        CommittedGoldMinimum = decision.CommittedGoldMinimum,
+        CommittedKeyMinimum = decision.CommittedKeyMinimum,
+        ComparisonRationale = "selected-by-complete-branch-proof",
+    };
+
+    private static NetherEventOptionHardGate MapOptionHardGate(
+        NetherPauseReason pauseReason,
+        string detail
+    )
+    {
+        if (detail.Contains("battle-route", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.BattleRouteSafety;
+        if (detail.Contains("recovery", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.RecoveryBranchSafety;
+        if (detail.Contains("procurement", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("committed", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.Procurement;
+        if (detail.Contains("resource", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.Resource;
+        return pauseReason switch
+        {
+            NetherPauseReason.BindingUnavailable => NetherEventOptionHardGate.Binding,
+            NetherPauseReason.UnknownEffect => NetherEventOptionHardGate.NativeEffect,
+            NetherPauseReason.UnknownMasterData => NetherEventOptionHardGate.NativeMasterData,
+            NetherPauseReason.UnsafeHp => NetherEventOptionHardGate.HpSafety,
+            NetherPauseReason.UnsafeErosion => NetherEventOptionHardGate.ErosionSafety,
+            NetherPauseReason.NoSafeRoute => NetherEventOptionHardGate.RouteSafety,
+            _ => NetherEventOptionHardGate.NativeMasterData,
+        };
+    }
+
+    private static NetherEventOptionSelectionTier InferOptionTier(
+        NetherEventOption option,
+        NetherEventBattleEvidence? battle,
+        NetherEventRewardEvidence? reward,
+        bool isRecovery,
+        bool isTreasure
+    )
+    {
+        if (isRecovery)
+            return NetherEventOptionSelectionTier.Recovery;
+        if (isTreasure)
+        {
+            return option.Effects.Any(effect => effect.Kind == NetherEffectKind.TreasureKeyUsed)
+                ? NetherEventOptionSelectionTier.TreasureKey
+                : NetherEventOptionSelectionTier.TreasureHpPayment;
+        }
+        if (battle?.IsKnown == true)
+        {
+            return battle.SemanticTier switch
+            {
+                NetherEventBattleTier.Boss => NetherEventOptionSelectionTier.BossBattle,
+                NetherEventBattleTier.MiniBoss => NetherEventOptionSelectionTier.MiniBossBattle,
+                _ => NetherEventOptionSelectionTier.NormalBattle,
+            };
+        }
+        if (reward?.IsKnown == true)
+        {
+            return reward.Rarity switch
+            {
+                NetherRewardRarity.Red => NetherEventOptionSelectionTier.RedRankFiveReward,
+                NetherRewardRarity.Gold => NetherEventOptionSelectionTier.GoldRankFiveReward,
+                _ => NetherEventOptionSelectionTier.Reward,
+            };
+        }
+        if (option.Effects.Any(effect => effect.Kind is NetherEffectKind.AbyssCodeOffer
+            or NetherEffectKind.AbyssCodeTransform))
+            return NetherEventOptionSelectionTier.DirectCodeOffer;
+        if (option.Effects.Any(effect => effect.Kind == NetherEffectKind.NetherGoldGain))
+            return NetherEventOptionSelectionTier.Gold;
+        return NetherEventOptionSelectionTier.NeutralSafeOption;
+    }
 
     private static int ComputeSemanticPriority(
         NetherEventOption option,

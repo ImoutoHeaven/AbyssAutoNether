@@ -11,6 +11,7 @@ Each ticket is a context-sized vertical slice under `issues/`. A ticket becomes 
 - `01`–`03` — complete; two-axis review passed (Spec PASS; Standards PASS, independent 39/39)
 - `04`–`06` — complete; two-axis review passed (Spec PASS; Standards PASS; staged full suite 1084/1084)
 - `07`–`09` — complete as one implementation group; current repair RED 3/3, GREEN 3/3, focused 123/123, expanded 189/189, full 1208/1208, Release build 0 warnings/0 errors; procurement snapshot invalidation, permitted-source filtering, selected-horizon identity, and native-first fail-closed behavior are recorded in [`docs/agents/evidence-backed-strategy-modes-07-09-evidence.md`](../../docs/agents/evidence-backed-strategy-modes-07-09-evidence.md). Pre-amend `HEAD` is `b837c5ce1822b3b05990ff34df62ad75a974877e`; post-amend exact identity will be in `refs/notes/logic-overhaul-evidence`.
+- `16`–`17` — complete; second Spec-axis repair focused 29/29, clean full 1319/1319, Release build 0 warnings/0 errors, and verified DLL metadata are recorded in [`docs/agents/evidence-backed-strategy-modes-16-17-evidence.md`](../../docs/agents/evidence-backed-strategy-modes-16-17-evidence.md). Persistent dual-reviewer convergence is Standards PASS and Spec PASS; no remote issue or label state was touched.
 
 ## Dependency order
 

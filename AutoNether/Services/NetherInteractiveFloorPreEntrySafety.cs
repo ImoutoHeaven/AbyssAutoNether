@@ -195,6 +195,64 @@ internal sealed record NetherInteractiveOptionProjection(
     public bool HasCommittedProcurementEvidence { get; init; }
     public int CommittedGoldMinimum { get; init; }
     public int CommittedKeyMinimum { get; init; }
+    public bool ParticipatesInSelection { get; init; } = true;
+    public bool IsSelected { get; init; }
+    public NetherInteractiveOptionHardGate FirstFailingHardGate { get; init; }
+    public NetherInteractiveOptionSelectionTier SelectionTier { get; init; }
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+    public string ComparisonRationale { get; init; } = string.Empty;
+}
+
+internal enum NetherInteractiveOptionHardGate
+{
+    None = 0,
+    CandidateIdentity,
+    NativeMasterData,
+    NativeEffect,
+    Binding,
+    RecoveryBranchSafety,
+    RouteSafety,
+    BattleRouteSafety,
+    HpSafety,
+    ErosionSafety,
+    Resource,
+    Procurement,
+}
+
+internal enum NetherInteractiveOptionSelectionTier
+{
+    None = 0,
+    Recovery,
+    TreasureKey,
+    TreasureHpPayment,
+    Battle,
+    Reward,
+    DirectCodeOffer,
+    NeutralSafeOption,
+}
+
+/// <summary>
+/// Typed public audit seam for each exact Event/Recovery/Treasure option projection, including
+/// options rejected while a sibling remains selectable.
+/// </summary>
+internal sealed record NetherInteractiveOptionAudit
+{
+    public NetherInteractiveEventOptionKey Key { get; init; }
+    public int OptionNumber => Key.OptionNumber;
+    public long FloorId { get; init; }
+    public long NodeId { get; init; }
+    public bool ParticipatesInSelection { get; init; } = true;
+    public bool IsKnown { get; init; }
+    public bool IsSelected { get; init; }
+    public NetherInteractiveOptionHardGate FirstFailingHardGate { get; init; }
+    public NetherInteractiveOptionSelectionTier SelectionTier { get; init; }
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+    public int ErosionDelta { get; init; }
+    public int HpDelta { get; init; }
+    public int CommittedGoldMinimum { get; init; }
+    public int CommittedKeyMinimum { get; init; }
+    public string Detail { get; init; } = string.Empty;
+    public string ComparisonRationale { get; init; } = string.Empty;
 }
 
 internal readonly record struct NetherInteractiveEventOptionKey(
@@ -225,13 +283,16 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyResult
         new Dictionary<long, NetherInteractiveOptionProjection>();
     public IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection> OptionProjectionByKey { get; init; } =
         new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>();
+    public IReadOnlyList<NetherInteractiveOptionAudit> OptionAudits { get; init; } =
+        Array.Empty<NetherInteractiveOptionAudit>();
     public NetherInteractiveWorstCaseProjection? WorstCaseProjection { get; init; }
 
     public static NetherInteractiveFloorPreEntrySafetyResult Safe(
         IReadOnlyDictionary<long, int>? safeOptions = null,
         IReadOnlyDictionary<long, NetherInteractiveOptionProjection>? projections = null,
         NetherInteractiveWorstCaseProjection? worstCase = null,
-        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? optionProjections = null
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? optionProjections = null,
+        IReadOnlyList<NetherInteractiveOptionAudit>? optionAudits = null
     ) => new()
     {
         IsSafe = true,
@@ -240,6 +301,8 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyResult
         SafeOptionProjectionByEventId = projections ?? new Dictionary<long, NetherInteractiveOptionProjection>(),
         OptionProjectionByKey = optionProjections
             ?? new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>(),
+        OptionAudits = optionAudits
+            ?? CreateOptionAudits(optionProjections),
         WorstCaseProjection = worstCase,
     };
 
@@ -250,12 +313,46 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyResult
         WorstCaseProjection = new NetherInteractiveWorstCaseProjection(ErosionDelta: 0, HpDelta: 0),
     };
 
-    public static NetherInteractiveFloorPreEntrySafetyResult Pause(NetherPauseReason reason, string detail) => new()
+    public static NetherInteractiveFloorPreEntrySafetyResult Pause(
+        NetherPauseReason reason,
+        string detail,
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? optionProjections = null,
+        IReadOnlyList<NetherInteractiveOptionAudit>? optionAudits = null
+    ) => new()
     {
         IsSafe = false,
         PauseReason = reason,
         Detail = detail,
+        OptionProjectionByKey = optionProjections
+            ?? new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>(),
+        OptionAudits = optionAudits ?? CreateOptionAudits(optionProjections),
     };
+
+    private static IReadOnlyList<NetherInteractiveOptionAudit> CreateOptionAudits(
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>? projections
+    ) => (projections ?? new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>())
+        .OrderBy(entry => entry.Key.EventId)
+        .ThenBy(entry => entry.Key.EventPartId)
+        .ThenBy(entry => entry.Key.OptionNumber)
+        .Select(entry => new NetherInteractiveOptionAudit
+        {
+            Key = entry.Key,
+            FloorId = entry.Value.FloorId,
+            NodeId = entry.Value.NodeId,
+            ParticipatesInSelection = entry.Value.ParticipatesInSelection,
+            IsKnown = entry.Value.IsKnown,
+            IsSelected = entry.Value.IsSelected,
+            FirstFailingHardGate = entry.Value.FirstFailingHardGate,
+            SelectionTier = entry.Value.SelectionTier,
+            UnknownReasonCode = entry.Value.UnknownReasonCode,
+            ErosionDelta = entry.Value.ErosionDelta,
+            HpDelta = entry.Value.HpDelta,
+            CommittedGoldMinimum = entry.Value.CommittedGoldMinimum,
+            CommittedKeyMinimum = entry.Value.CommittedKeyMinimum,
+            Detail = entry.Value.UnknownReason,
+            ComparisonRationale = entry.Value.ComparisonRationale,
+        })
+        .ToArray();
 }
 
 /// <summary>
@@ -428,9 +525,15 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     out string rejectionDetail
                 ))
             {
+                foreach (var optionProjection in rowProjections!
+                    ?? new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>())
+                {
+                    optionProjections[optionProjection.Key] = optionProjection.Value;
+                }
                 return NetherInteractiveFloorPreEntrySafetyResult.Pause(
                     rejection,
-                    "event-row-" + row.EventId.ToString(CultureInfo.InvariantCulture) + ":" + rejectionDetail
+                    "event-row-" + row.EventId.ToString(CultureInfo.InvariantCulture) + ":" + rejectionDetail,
+                    optionProjections
                 );
             }
             safeOptions.Add(row.EventId, optionNumber);
@@ -1119,7 +1222,9 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                         option,
                         floorId,
                         nodeId,
-                        detail
+                        detail,
+                        NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+                        NetherStrategyUnknownReasonCodes.FromDetail(detail)
                     );
                 }
                 return false;
@@ -1133,6 +1238,17 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             {
                 rejection = NetherPauseReason.UnknownMasterData;
                 detail = "recovery-selected-branch-option-identity-unavailable";
+                foreach (NetherEventOption option in options)
+                {
+                    optionProjections[OptionKey(option)] = UnknownProjection(
+                        option,
+                        floorId,
+                        nodeId,
+                        detail,
+                        NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+                        NetherStrategyUnknownReasonCode.AmbiguousCandidateIdentity
+                    );
+                }
                 return false;
             }
 
@@ -1143,6 +1259,17 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 detail = selectedProof?.UnknownReason.Length > 0
                     ? selectedProof.UnknownReason
                     : "recovery-selected-branch-proof-unavailable";
+                foreach (NetherEventOption option in options)
+                {
+                    optionProjections[OptionKey(option)] = UnknownProjection(
+                        option,
+                        floorId,
+                        nodeId,
+                        detail,
+                        NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+                        NetherStrategyUnknownReasonCodes.FromDetail(detail)
+                    );
+                }
                 return false;
             }
             if (!selectedProof.IsNextVisibleBranchSafe)
@@ -1151,6 +1278,17 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 detail = string.IsNullOrWhiteSpace(selectedProof.UnknownReason)
                     ? "recovery-selected-branch-unsafe-through-visible-suffix"
                     : selectedProof.UnknownReason;
+                foreach (NetherEventOption option in options)
+                {
+                    optionProjections[OptionKey(option)] = UnknownProjection(
+                        option,
+                        floorId,
+                        nodeId,
+                        detail,
+                        NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+                        NetherStrategyUnknownReasonCode.None
+                    );
+                }
                 return false;
             }
 
@@ -1161,7 +1299,10 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 isKnown: true,
                 hasRouteSafetyEvidence: true,
                 routeSafetyAllowed: selectedProof.IsNextVisibleBranchSafe,
-                routeSafetyUnknownReason: selectedProof.UnknownReason
+                routeSafetyUnknownReason: selectedProof.UnknownReason,
+                selectionTier: NetherInteractiveOptionSelectionTier.Recovery,
+                isSelected: true,
+                comparisonRationale: "selected-by-complete-branch-proof"
             );
             optionProjections[OptionKey(selectedOption)] = projection;
             foreach (NetherEventOption option in options)
@@ -1172,7 +1313,10 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     option,
                     floorId,
                     nodeId,
-                    "recovery-option-not-selected-by-complete-branch-proof"
+                    "recovery-option-not-selected-by-complete-branch-proof",
+                    NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+                    NetherStrategyUnknownReasonCode.None,
+                    "excluded:first-failing-gate=RecoveryBranchSafety"
                 );
             }
             selectedOptionNumber = completeBranchDecision.OptionNumber;
@@ -1195,7 +1339,8 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     option,
                     floorId,
                     nodeId,
-                    decision.Detail.Length == 0 ? "event-option-rejected" : decision.Detail
+                    decision.Detail.Length == 0 ? "event-option-rejected" : decision.Detail,
+                    isKnown: IsKnownDecision(decision)
                 );
                 CaptureMoreSpecificRejection(decision, ref rejection, ref detail);
                 continue;
@@ -1211,8 +1356,14 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     isKnown: true,
                     hasRouteSafetyEvidence: true,
                     routeSafetyAllowed: false,
-                    routeSafetyUnknownReason: "event-battle-route-requires-post-selection-proof"
-                );
+                    routeSafetyUnknownReason: "event-battle-route-requires-post-selection-proof",
+                    firstFailingHardGate: NetherInteractiveOptionHardGate.BattleRouteSafety,
+                    unknownReasonCode: NetherStrategyUnknownReasonCode.NativeBattleRouteSafetyUnknown,
+                    comparisonRationale: "excluded:first-failing-gate=BattleRouteSafety"
+                ) with
+                {
+                    IsSelected = false,
+                };
                 continue;
             }
             NetherRouteHpRule hpRule = MapOptionHpRule(floorKind, decision);
@@ -1232,8 +1383,13 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                     isKnown: true,
                     hasRouteSafetyEvidence: true,
                     routeSafetyAllowed: false,
-                    routeSafetyUnknownReason: detail
-                );
+                    routeSafetyUnknownReason: detail,
+                    firstFailingHardGate: NetherInteractiveOptionHardGate.HpSafety,
+                    comparisonRationale: "excluded:first-failing-gate=HpSafety"
+                ) with
+                {
+                    IsSelected = false,
+                };
                 continue;
             }
             optionProjections[OptionKey(option)] = CreateProjection(
@@ -1244,7 +1400,11 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 hasRouteSafetyEvidence: true,
                 routeSafetyAllowed: true,
                 routeSafetyUnknownReason: string.Empty
-            );
+            ) with
+            {
+                IsSelected = false,
+                ComparisonRationale = "eligible-for-comparison",
+            };
             safeOptions.Add(option);
         }
 
@@ -1276,6 +1436,21 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             detail = "event-option-projection-overflow";
             return false;
         }
+        foreach (NetherInteractiveEventOptionKey key in optionProjections.Keys.ToArray())
+        {
+            NetherInteractiveOptionProjection projection = optionProjections[key];
+            bool selectedOption = key == selectedKey;
+            optionProjections[key] = projection with
+            {
+                IsSelected = selectedOption,
+                ComparisonRationale = selectedOption
+                    ? "selected-by-deterministic-comparison"
+                    : projection.IsKnown && projection.RouteSafetyAllowed
+                        ? "eligible-but-not-selected-by-deterministic-comparison"
+                        : projection.ComparisonRationale,
+            };
+        }
+        selectedProjection = optionProjections[selectedKey];
         return true;
     }
 
@@ -1317,8 +1492,34 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         bool isKnown,
         bool hasRouteSafetyEvidence,
         bool routeSafetyAllowed,
-        string routeSafetyUnknownReason
-    ) => new(
+        string routeSafetyUnknownReason,
+        NetherInteractiveOptionHardGate firstFailingHardGate = NetherInteractiveOptionHardGate.None,
+        NetherInteractiveOptionSelectionTier selectionTier = NetherInteractiveOptionSelectionTier.None,
+        NetherStrategyUnknownReasonCode unknownReasonCode = NetherStrategyUnknownReasonCode.None,
+        bool isSelected = false,
+        string comparisonRationale = ""
+    )
+    {
+        NetherEventOptionAudit? policyAudit = decision.OptionAudits.FirstOrDefault(audit =>
+            audit.OptionNumber == decision.OptionNumber
+            && (audit.EventPartId <= 0 || audit.EventPartId == decision.EventPartId)
+        );
+        NetherInteractiveOptionHardGate gate = firstFailingHardGate != NetherInteractiveOptionHardGate.None
+            ? firstFailingHardGate
+            : policyAudit == null
+                ? NetherInteractiveOptionHardGate.None
+                : MapInteractiveHardGate(policyAudit.FirstFailingHardGate);
+        NetherInteractiveOptionSelectionTier tier = selectionTier != NetherInteractiveOptionSelectionTier.None
+            ? selectionTier
+            : MapInteractiveSelectionTier(policyAudit?.SelectionTier ?? NetherEventOptionSelectionTier.None);
+        NetherStrategyUnknownReasonCode code = unknownReasonCode != NetherStrategyUnknownReasonCode.None
+            ? unknownReasonCode
+            : policyAudit?.UnknownReasonCode ?? NetherStrategyUnknownReasonCode.None;
+        bool selected = isSelected || policyAudit?.IsSelected == true;
+        string rationale = string.IsNullOrWhiteSpace(comparisonRationale)
+            ? policyAudit?.ComparisonRationale ?? (isKnown ? "eligible-for-comparison" : "excluded")
+            : comparisonRationale;
+        return new(
         decision.OptionNumber,
         decision.ExpectedErosionDelta,
         decision.HpDelta,
@@ -1348,14 +1549,37 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             || decision.RankFiveTreasureObjective.HasValue,
         RankFiveKeyProcurementCommitment = decision.RankFiveKeyProcurementCommitment,
         RankFiveTreasureObjective = decision.RankFiveTreasureObjective,
+        ParticipatesInSelection = true,
+        IsSelected = selected,
+        FirstFailingHardGate = gate,
+        SelectionTier = tier,
+        UnknownReasonCode = code,
+        ComparisonRationale = rationale,
     };
+    }
 
     private static NetherInteractiveOptionProjection UnknownProjection(
         NetherEventOption option,
         long floorId,
         long nodeId,
-        string rejectionDetail
-    ) => new(
+        string rejectionDetail,
+        NetherInteractiveOptionHardGate? firstFailingHardGate = null,
+        NetherStrategyUnknownReasonCode unknownReasonCode = NetherStrategyUnknownReasonCode.None,
+        string comparisonRationale = "",
+        bool isKnown = false
+    )
+    {
+        NetherInteractiveOptionHardGate gate = firstFailingHardGate
+            ?? MapInteractiveHardGate(
+                InferEventOptionHardGate(option, rejectionDetail)
+            );
+        bool isUnknown = !isKnown && !string.IsNullOrWhiteSpace(option.UnknownReason);
+        NetherStrategyUnknownReasonCode code = unknownReasonCode != NetherStrategyUnknownReasonCode.None
+            ? unknownReasonCode
+            : isUnknown
+                ? NetherStrategyUnknownReasonCodes.FromDetail(option.UnknownReason)
+                : NetherStrategyUnknownReasonCode.None;
+        return new(
         option.OptionNumber,
         0,
         0,
@@ -1366,13 +1590,93 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         EventPartId = option.EventPartId,
         FloorId = floorId,
         NodeId = nodeId,
-        IsKnown = false,
-        UnknownReason = string.IsNullOrWhiteSpace(option.UnknownReason)
-            ? rejectionDetail
-            : option.UnknownReason,
+        IsKnown = isKnown && !isUnknown,
+        UnknownReason = isKnown
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(option.UnknownReason)
+                ? rejectionDetail
+                : option.UnknownReason,
         HasRouteSafetyEvidence = false,
         RouteSafetyAllowed = false,
         RouteSafetyUnknownReason = rejectionDetail,
+        ParticipatesInSelection = true,
+        IsSelected = false,
+        FirstFailingHardGate = gate,
+        SelectionTier = NetherInteractiveOptionSelectionTier.None,
+        UnknownReasonCode = code,
+        ComparisonRationale = string.IsNullOrWhiteSpace(comparisonRationale)
+            ? "excluded:first-failing-gate=" + gate
+            : comparisonRationale,
+    };
+    }
+
+    private static NetherEventOptionHardGate InferEventOptionHardGate(
+        NetherEventOption option,
+        string detail
+    )
+    {
+        string combined = string.Join("|", option.UnknownReason, detail);
+        if (combined.Contains("battle-route", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.BattleRouteSafety;
+        if (combined.Contains("recovery", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.RecoveryBranchSafety;
+        if (combined.Contains("procurement", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("committed", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.Procurement;
+        if (combined.Contains("resource", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.Resource;
+        if (combined.Contains("hp", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("lethal", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.HpSafety;
+        if (combined.Contains("erosion", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.ErosionSafety;
+        if (combined.Contains("binding", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.Binding;
+        if (combined.Contains("effect", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("target", StringComparison.OrdinalIgnoreCase))
+            return NetherEventOptionHardGate.NativeEffect;
+        return NetherEventOptionHardGate.NativeMasterData;
+    }
+
+    private static bool IsKnownDecision(NetherEventDecision decision) =>
+        decision.PauseReason is not NetherPauseReason.UnknownMasterData
+            and not NetherPauseReason.UnknownEffect
+            and not NetherPauseReason.BindingUnavailable
+            and not NetherPauseReason.InvalidConfiguration;
+
+    private static NetherInteractiveOptionHardGate MapInteractiveHardGate(
+        NetherEventOptionHardGate gate
+    ) => gate switch
+    {
+        NetherEventOptionHardGate.Binding => NetherInteractiveOptionHardGate.Binding,
+        NetherEventOptionHardGate.NativeMasterData => NetherInteractiveOptionHardGate.NativeMasterData,
+        NetherEventOptionHardGate.NativeEffect => NetherInteractiveOptionHardGate.NativeEffect,
+        NetherEventOptionHardGate.RecoveryBranchSafety => NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+        NetherEventOptionHardGate.BattleRouteSafety => NetherInteractiveOptionHardGate.BattleRouteSafety,
+        NetherEventOptionHardGate.HpSafety => NetherInteractiveOptionHardGate.HpSafety,
+        NetherEventOptionHardGate.ErosionSafety => NetherInteractiveOptionHardGate.ErosionSafety,
+        NetherEventOptionHardGate.Resource => NetherInteractiveOptionHardGate.Resource,
+        NetherEventOptionHardGate.Procurement => NetherInteractiveOptionHardGate.Procurement,
+        NetherEventOptionHardGate.RouteSafety => NetherInteractiveOptionHardGate.RouteSafety,
+        NetherEventOptionHardGate.CandidateIdentity => NetherInteractiveOptionHardGate.CandidateIdentity,
+        _ => NetherInteractiveOptionHardGate.None,
+    };
+
+    private static NetherInteractiveOptionSelectionTier MapInteractiveSelectionTier(
+        NetherEventOptionSelectionTier tier
+    ) => tier switch
+    {
+        NetherEventOptionSelectionTier.Recovery => NetherInteractiveOptionSelectionTier.Recovery,
+        NetherEventOptionSelectionTier.TreasureKey => NetherInteractiveOptionSelectionTier.TreasureKey,
+        NetherEventOptionSelectionTier.TreasureHpPayment => NetherInteractiveOptionSelectionTier.TreasureHpPayment,
+        NetherEventOptionSelectionTier.BossBattle
+            or NetherEventOptionSelectionTier.MiniBossBattle
+            or NetherEventOptionSelectionTier.NormalBattle => NetherInteractiveOptionSelectionTier.Battle,
+        NetherEventOptionSelectionTier.RedRankFiveReward
+            or NetherEventOptionSelectionTier.GoldRankFiveReward
+            or NetherEventOptionSelectionTier.Reward => NetherInteractiveOptionSelectionTier.Reward,
+        NetherEventOptionSelectionTier.DirectCodeOffer => NetherInteractiveOptionSelectionTier.DirectCodeOffer,
+        _ => NetherInteractiveOptionSelectionTier.NeutralSafeOption,
     };
 
     private NetherEventDecision DecideInteractiveOption(

@@ -22,6 +22,12 @@ internal sealed record NetherRouteSafetyFloorInput(
     public string Detail { get; init; } = string.Empty;
 
     /// <summary>
+    /// Optional typed source failure supplied by the runtime evidence mapper. It is carried through
+    /// the builder without parsing or collapsing it into the diagnostic detail string.
+    /// </summary>
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+
+    /// <summary>
     /// True only when the current authoritative character snapshot, plus any preceding exact
     /// deterministic HP costs, reaches this combat without crossing an unsettled battle. Native
     /// post-battle HP is returned by NetherClearBattleResponseEntity.t_nether_characters; a later
@@ -87,7 +93,7 @@ internal sealed class NetherRouteSafetyContextBuilder
 
         var context = new MutableContext(input.MaximumFloorLevel);
         foreach ((long floorId, NetherRouteSafetyFloorInput floor) in nodes)
-            context.AddUnknown(floorId, "not-evaluated");
+            context.AddUnknown(floorId, "not-evaluated", floor.UnknownReasonCode);
 
         if (nodes.Count == 0)
             return context.ToImmutable();
@@ -137,7 +143,8 @@ internal sealed class NetherRouteSafetyContextBuilder
                         evaluation.PauseReason,
                         graphInvalid.Contains(floorId),
                         duplicateOrInvalidIds.Contains(floorId)
-                    )
+                    ),
+                    floor.UnknownReasonCode
                 );
                 states[floorId] = new FloorState(false, false, UnknownErosion);
                 continue;
@@ -638,6 +645,7 @@ internal sealed class NetherRouteSafetyContextBuilder
         private readonly Dictionary<long, int> _projectedErosion = new();
         private readonly Dictionary<long, int> _projectedHp = new();
         private readonly Dictionary<long, string> _unknownDetail = new();
+        private readonly Dictionary<long, NetherStrategyUnknownReasonCode> _unknownReasonCode = new();
         private readonly Dictionary<long, int> _peakErosion = new();
         private readonly Dictionary<long, int> _minimumActiveHp = new();
         private readonly Dictionary<long, string> _horizonRejection = new();
@@ -647,7 +655,11 @@ internal sealed class NetherRouteSafetyContextBuilder
 
         public MutableContext(int maximumFloorLevel) => _maximumFloorLevel = maximumFloorLevel;
 
-        public void AddUnknown(long floorId, string detail)
+        public void AddUnknown(
+            long floorId,
+            string detail,
+            NetherStrategyUnknownReasonCode unknownReasonCode = NetherStrategyUnknownReasonCode.None
+        )
         {
             _minimumWorstCase[floorId] = UnknownErosion;
             _hpSafe[floorId] = false;
@@ -657,6 +669,9 @@ internal sealed class NetherRouteSafetyContextBuilder
             _projectedErosion[floorId] = UnknownErosion;
             _projectedHp[floorId] = UnknownScalar;
             _unknownDetail[floorId] = detail;
+            _unknownReasonCode[floorId] = unknownReasonCode == NetherStrategyUnknownReasonCode.None
+                ? NetherStrategyUnknownReasonCodes.FromDetail(detail)
+                : unknownReasonCode;
             _peakErosion[floorId] = UnknownErosion;
             _minimumActiveHp[floorId] = UnknownScalar;
             _horizonRejection[floorId] = detail;
@@ -664,7 +679,11 @@ internal sealed class NetherRouteSafetyContextBuilder
             _horizonEvaluation.Remove(floorId);
         }
 
-        public void SetUnsafe(long floorId, string detail) => AddUnknown(floorId, detail);
+        public void SetUnsafe(
+            long floorId,
+            string detail,
+            NetherStrategyUnknownReasonCode unknownReasonCode = NetherStrategyUnknownReasonCode.None
+        ) => AddUnknown(floorId, detail, unknownReasonCode);
 
         public void SetKnown(
             long floorId,
@@ -681,6 +700,7 @@ internal sealed class NetherRouteSafetyContextBuilder
             _projectedHp[floorId] = projectedHp;
             _safeCodeOpportunity[floorId] = safeCodeOpportunity;
             _unknownDetail.Remove(floorId);
+            _unknownReasonCode.Remove(floorId);
         }
 
         public void SetTerminalCost(long floorId, int cost)
@@ -693,6 +713,11 @@ internal sealed class NetherRouteSafetyContextBuilder
         {
             _minimumWorstCase[floorId] = UnknownErosion;
             _hardSafe[floorId] = false;
+            if (!_unknownReasonCode.TryGetValue(floorId, out NetherStrategyUnknownReasonCode sourceCode)
+                || sourceCode == NetherStrategyUnknownReasonCode.None)
+            {
+                _unknownReasonCode[floorId] = NetherStrategyUnknownReasonCode.RouteSafetyContextUnavailable;
+            }
         }
 
         public void SetHorizonEligible(
@@ -709,6 +734,7 @@ internal sealed class NetherRouteSafetyContextBuilder
             _horizonRejection[floorId] = string.Empty;
             _requiresUserPause[floorId] = false;
             _horizonEvaluation[floorId] = evaluation;
+            _unknownReasonCode.Remove(floorId);
         }
 
         public void SetHorizonRejected(long floorId, NetherRouteHorizonSafetyEvaluation evaluation)
@@ -723,6 +749,16 @@ internal sealed class NetherRouteSafetyContextBuilder
                 : evaluation.RejectionDetail;
             _requiresUserPause[floorId] = evaluation.RequiresUserPause;
             _horizonEvaluation[floorId] = evaluation;
+            // Horizon rejection is a separate outcome/detail. Preserve the originating source
+            // component code from AddUnknown/SetUnsafe so party, master-data, inventory,
+            // transaction, recovery, and route distinctions survive graph finalization.
+            if (!_unknownReasonCode.TryGetValue(floorId, out NetherStrategyUnknownReasonCode sourceCode)
+                || sourceCode == NetherStrategyUnknownReasonCode.None)
+            {
+                _unknownReasonCode[floorId] = NetherStrategyUnknownReasonCodes.FromDetail(
+                    _horizonRejection[floorId]
+                );
+            }
         }
 
         public NetherRouteSafetyContext ToImmutable() => new()
@@ -736,6 +772,7 @@ internal sealed class NetherRouteSafetyContextBuilder
             ProjectedErosionDeltaByFloorId = _projectedErosion,
             ProjectedHpDeltaByFloorId = _projectedHp,
             UnknownDetailByFloorId = _unknownDetail,
+            UnknownReasonCodeByFloorId = _unknownReasonCode,
             PeakErosionByFloorId = _peakErosion,
             MinimumActiveCharacterHpPermilleByFloorId = _minimumActiveHp,
             HorizonRejectionByFloorId = _horizonRejection,

@@ -12,6 +12,8 @@ internal enum NetherDetailedAuditKind
 {
     Snapshot,
     Route,
+    Decision,
+    Transition,
     Interactive,
     Battle,
     Interop,
@@ -38,10 +40,9 @@ internal sealed class NetherDetailedAuditLogger
     // Unknown native event rows need enough room to preserve their exact target/content tuple.
     // This remains bounded so a malformed runtime object cannot create an unbounded log line.
     private const int MaximumValueLength = 192;
-    // Route diagnostics need twelve fields. Code-semantic diagnostics additionally need the
-    // native effect identity, ability level, raw parameters, and coverage provenance. Keep all
-    // sixteen while continuing to bound every value and every audit family.
-    private const int MaximumFields = 16;
+    // Strategy decision/route records carry both the bounded native proof and the mode/owner/
+    // snapshot context. Keep the expanded projection finite while preserving every field.
+    private const int MaximumFields = 32;
     private static readonly HashSet<string> SensitiveFieldNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "name",
@@ -73,17 +74,26 @@ internal sealed class NetherDetailedAuditLogger
     {
         if (!enabled)
             return false;
-        if (_entriesByKind.TryGetValue(kind, out int count) && count >= MaximumEntriesPerKind)
+        if (!IsCompleteDecisionAuditKind(kind)
+            && _entriesByKind.TryGetValue(kind, out int count)
+            && count >= MaximumEntriesPerKind)
             return false;
 
         string formatted = Format(kind, key, fields);
         if (!_emitted.Add(formatted))
             return false;
 
-        _entriesByKind[kind] = count + 1;
+        _entriesByKind[kind] = _entriesByKind.TryGetValue(kind, out int currentCount)
+            ? currentCount + 1
+            : 1;
         _sink(formatted);
         return true;
     }
+
+    private static bool IsCompleteDecisionAuditKind(NetherDetailedAuditKind kind) => kind is
+        NetherDetailedAuditKind.Route
+        or NetherDetailedAuditKind.Decision
+        or NetherDetailedAuditKind.Interactive;
 
     private static string Format(
         NetherDetailedAuditKind kind,
@@ -99,7 +109,10 @@ internal sealed class NetherDetailedAuditLogger
         };
         if (fields != null)
         {
-            foreach (NetherDetailedAuditField field in fields.Take(MaximumFields))
+            IEnumerable<NetherDetailedAuditField> selectedFields = IsCompleteDecisionAuditKind(kind)
+                ? fields
+                : fields.Take(MaximumFields);
+            foreach (NetherDetailedAuditField field in selectedFields)
             {
                 if (string.IsNullOrWhiteSpace(field.Name) || SensitiveFieldNames.Contains(field.Name))
                     continue;

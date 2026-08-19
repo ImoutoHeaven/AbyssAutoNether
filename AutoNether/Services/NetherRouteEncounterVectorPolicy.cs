@@ -14,6 +14,7 @@ internal sealed record NetherRouteEncounterVector
 {
     public bool IsKnown { get; init; } = true;
     public string UnknownReason { get; init; } = string.Empty;
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
     public int ImmediateTerminalBossCount { get; init; }
     public int RedRankFiveTreasureCount { get; init; }
     public int GoldRankFiveTreasureCount { get; init; }
@@ -27,6 +28,45 @@ internal sealed record NetherRouteEncounterVector
     public int RecoveryCount { get; init; }
     public int IneligibleShopCount { get; init; }
     public int OtherTreasureCount { get; init; }
+
+    /// <summary>
+    /// Returns the first non-empty semantic tier in the same order used by CompareTo. This is an
+    /// audit projection only; the vector counts remain the authoritative comparison input.
+    /// </summary>
+    public NetherRouteSemanticTier HighestSemanticTier(bool researchIncomplete)
+    {
+        if (ImmediateTerminalBossCount > 0)
+            return NetherRouteSemanticTier.ImmediateTerminalBoss;
+        if (RedRankFiveTreasureCount > 0)
+            return NetherRouteSemanticTier.RedRankFiveTreasure;
+        if (GoldRankFiveTreasureCount > 0 && EligibleLateShopCount > 0)
+            return NetherRouteSemanticTier.GoldObjective;
+        if (GoldRankFiveTreasureCount > 0)
+            return NetherRouteSemanticTier.GoldRankFiveTreasure;
+        if (EligibleLateShopCount > 0)
+            return NetherRouteSemanticTier.GoldObjective;
+        if (UncolouredRankFiveTreasureCount > 0)
+            return NetherRouteSemanticTier.UncolouredRankFiveTreasure;
+        if (EventBossCount > 0)
+            return NetherRouteSemanticTier.EventBoss;
+        if (EliteCount > 0)
+            return NetherRouteSemanticTier.Elite;
+        if (researchIncomplete && DirectCodeOfferCount > 0)
+            return NetherRouteSemanticTier.DirectCodeOffer;
+        if (NormalBattleCount > 0)
+            return NetherRouteSemanticTier.NormalBattle;
+        if (DirectCodeOfferCount > 0)
+            return NetherRouteSemanticTier.DirectCodeOffer;
+        if (OrdinaryEventRewardCount > 0)
+            return NetherRouteSemanticTier.OrdinaryEventReward;
+        if (IneligibleShopCount > 0)
+            return NetherRouteSemanticTier.IneligibleShop;
+        if (RecoveryCount > 0)
+            return NetherRouteSemanticTier.Recovery;
+        if (OtherTreasureCount > 0)
+            return NetherRouteSemanticTier.OtherTreasure;
+        return NetherRouteSemanticTier.None;
+    }
 
     public int CompareTo(NetherRouteEncounterVector? other, bool researchIncomplete)
     {
@@ -112,7 +152,14 @@ internal static class NetherRouteEncounterVectorPolicy
     )
     {
         if (snapshot == null || context == null || selected == null || horizon == null)
-            return new NetherRouteEncounterVector();
+        {
+            return new NetherRouteEncounterVector
+            {
+                IsKnown = false,
+                UnknownReason = "route-vector-input-unavailable",
+                UnknownReasonCode = NetherStrategyUnknownReasonCode.RouteVectorInputUnavailable,
+            };
+        }
 
         IReadOnlyList<NetherStrategyVisibleContentRow> rows = context.VisibleMap?.ContentRows
             ?? Array.Empty<NetherStrategyVisibleContentRow>();
@@ -183,6 +230,7 @@ internal static class NetherRouteEncounterVectorPolicy
                     {
                         IsKnown = false,
                         UnknownReason = "event-battle-route-safety-proof-unavailable",
+                        UnknownReasonCode = NetherStrategyUnknownReasonCode.NativeBattleRouteSafetyUnknown,
                     };
                     break;
             }

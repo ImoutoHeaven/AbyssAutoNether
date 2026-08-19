@@ -695,10 +695,8 @@ internal sealed class NetherRecoveredCodeOfferCoordinator
     {
         if (snapshot == null || snapshot.Codes.Count == 0)
             return "none";
-        const int maximumIds = 24;
         long[] ids = snapshot.Codes.Select(code => code.CodeId).OrderBy(id => id).ToArray();
-        string value = string.Join(",", ids.Take(maximumIds));
-        return ids.Length <= maximumIds ? value : value + ",+" + (ids.Length - maximumIds);
+        return string.Join(",", ids);
     }
 
     private NetherRecoveredCodeOfferStep Terminate(

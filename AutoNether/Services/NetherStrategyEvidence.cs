@@ -26,6 +26,12 @@ internal readonly record struct NetherStrategyEvidenceIdentity(
 internal sealed record NetherStrategyEvidencePackage
 {
     public NetherStrategyEvidenceIdentity Identity { get; init; }
+    /// <summary>
+    /// Immutable mapper/consumer contract version. A package from another contract is rejected
+    /// before policy sees any component, even when its generation and snapshot happen to match.
+    /// </summary>
+    public int EvidenceVersion { get; init; } = NetherStrategyEvidenceContract.CurrentVersion;
+    public NetherStrategyEvidenceAudit EvidenceAudit { get; init; } = new();
     public NetherStrategyServerEvidence? Server { get; init; }
     public NetherStrategyEvidenceComponent<NetherStrategyPartyProfile> Party { get; init; } =
         NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Unknown("party-profile-unavailable");
@@ -47,6 +53,7 @@ internal sealed record NetherStrategyEvidenceComponent<T> where T : class
     public bool IsKnown { get; init; }
     public T? Value { get; init; }
     public string UnknownReason { get; init; } = string.Empty;
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
 
     public static NetherStrategyEvidenceComponent<T> Known(T value) => new()
     {
@@ -57,6 +64,7 @@ internal sealed record NetherStrategyEvidenceComponent<T> where T : class
     public static NetherStrategyEvidenceComponent<T> Unknown(string reason) => new()
     {
         UnknownReason = string.IsNullOrWhiteSpace(reason) ? "unknown-evidence" : reason,
+        UnknownReasonCode = NetherStrategyUnknownReasonCodes.FromDetail(reason),
     };
 }
 
@@ -1247,6 +1255,10 @@ internal sealed record NetherStrategyEvidenceMapRequest(
     NetherSnapshot? Snapshot
 )
 {
+    public int EvidenceVersion { get; init; } = NetherStrategyEvidenceContract.CurrentVersion;
+    public NetherStrategyMode StrategyMode { get; init; } = NetherStrategyMode.Equipment;
+    public NetherCodeFamily ResearchPrimaryFamily { get; init; } = NetherCodeFamily.Unknown;
+    public NetherCodeFamily ResearchSecondaryFamily { get; init; } = NetherCodeFamily.Unknown;
     public IReadOnlyList<NetherStrategyPartyMember>? Party { get; init; }
     public string PartyUnknownReason { get; init; } = string.Empty;
     public NetherStrategyOwnedCodeEvidence? OwnedCodes { get; init; }
@@ -1264,13 +1276,18 @@ internal sealed record NetherStrategyEvidenceMapResult
 {
     public NetherStrategyEvidencePackage? Package { get; init; }
     public string Detail { get; init; } = string.Empty;
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
     public bool IsMapped => Package != null && Detail.Length == 0;
 
     public static NetherStrategyEvidenceMapResult Success(NetherStrategyEvidencePackage package) =>
         new() { Package = package };
 
     public static NetherStrategyEvidenceMapResult Failure(string detail) =>
-        new() { Detail = detail };
+        new()
+        {
+            Detail = detail,
+            UnknownReasonCode = NetherStrategyUnknownReasonCodes.FromDetail(detail),
+        };
 }
 
 /// <summary>
@@ -1291,6 +1308,8 @@ internal static class NetherStrategyEvidenceMapper
     {
         if (request?.Snapshot == null)
             return NetherStrategyEvidenceMapResult.Failure("authoritative-strategy-snapshot-unavailable");
+        if (request.EvidenceVersion != NetherStrategyEvidenceContract.CurrentVersion)
+            return NetherStrategyEvidenceMapResult.Failure("invalid-strategy-evidence-version");
 
         NetherSnapshot snapshot = request.Snapshot;
         NetherStrategyEvidenceIdentity identity = request.Identity;
@@ -1310,18 +1329,45 @@ internal static class NetherStrategyEvidenceMapper
             return NetherStrategyEvidenceMapResult.Failure("invalid-authoritative-strategy-snapshot");
         }
 
+        NetherStrategyEvidenceComponent<NetherStrategyPartyProfile> party = MapParty(
+            request.Party,
+            request.PartyUnknownReason
+        );
+        NetherStrategyEvidenceComponent<NetherStrategyOwnedCodeEvidence> ownedCodes = MapCodes(
+            request.OwnedCodes,
+            request.OwnedCodesUnknownReason
+        );
+        NetherStrategyEvidenceComponent<NetherStrategyResearchEvidence> research = MapResearch(
+            request.Research,
+            request.ResearchUnknownReason
+        );
+        NetherStrategyEvidenceComponent<NetherStrategyNativeMechanicsEvidence> nativeMechanics =
+            MapMechanics(
+                request.NativeMechanics,
+                request.NativeMechanicsUnknownReason
+            );
+        NetherStrategyEvidenceComponent<NetherStrategyVisibleMapEvidence> visibleMap = MapVisible(
+            request.VisibleMap,
+            request.VisibleMapUnknownReason
+        );
         var package = new NetherStrategyEvidencePackage
         {
             Identity = identity,
-            Server = CopyServer(snapshot),
-            Party = MapParty(request.Party, request.PartyUnknownReason),
-            OwnedCodes = MapCodes(request.OwnedCodes, request.OwnedCodesUnknownReason),
-            Research = MapResearch(request.Research, request.ResearchUnknownReason),
-            NativeMechanics = MapMechanics(
-                request.NativeMechanics,
-                request.NativeMechanicsUnknownReason
+            EvidenceVersion = request.EvidenceVersion,
+            EvidenceAudit = NetherStrategyEvidenceAudit.Create(
+                identity,
+                request.EvidenceVersion,
+                request.StrategyMode,
+                request.ResearchPrimaryFamily,
+                request.ResearchSecondaryFamily,
+                research
             ),
-            VisibleMap = MapVisible(request.VisibleMap, request.VisibleMapUnknownReason),
+            Server = CopyServer(snapshot),
+            Party = party,
+            OwnedCodes = ownedCodes,
+            Research = research,
+            NativeMechanics = nativeMechanics,
+            VisibleMap = visibleMap,
             DisplayDiagnostics = CopyDiagnostics(request.DisplayDiagnostics),
         };
         return NetherStrategyEvidenceMapResult.Success(package);
@@ -1894,7 +1940,10 @@ internal static class NetherStrategyEvidenceMapper
 internal readonly record struct NetherStrategyEvidenceAcceptanceDecision(
     bool IsAccepted,
     string Detail
-);
+)
+{
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+}
 
 /// <summary>Pure controller-acceptance seam; it performs no reflection or native action.</summary>
 internal static class NetherStrategyEvidenceAcceptance
@@ -1909,6 +1958,11 @@ internal static class NetherStrategyEvidenceAcceptance
     {
         if (package == null)
             return Reject("strategy-evidence-package-unavailable");
+        if (package.EvidenceVersion != NetherStrategyEvidenceContract.CurrentVersion
+            || package.EvidenceAudit.EvidenceVersion != NetherStrategyEvidenceContract.CurrentVersion)
+        {
+            return Reject("strategy-evidence-version-mismatch");
+        }
 
         NetherStrategyEvidenceIdentity identity = package.Identity;
         if (identity.RuntimeGeneration <= 0
@@ -1933,5 +1987,8 @@ internal static class NetherStrategyEvidenceAcceptance
     }
 
     private static NetherStrategyEvidenceAcceptanceDecision Reject(string detail) =>
-        new(false, detail);
+        new(false, detail)
+        {
+            UnknownReasonCode = NetherStrategyUnknownReasonCodes.FromDetail(detail),
+        };
 }

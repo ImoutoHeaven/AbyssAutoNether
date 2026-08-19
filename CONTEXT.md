@@ -514,3 +514,59 @@ and order without treating Research null/true as a Research signal. Rank-five Tr
 canonical rank-five predicate or an authoritative typed provider; raw Gold/Red plus display Rank is
 not a fallback. A materialized Shop with an unknown or malformed sibling is not an eligible late
 Shop, even when another sibling is an exact 300-Gold row.
+
+## Fresh native design boundary (2026-08-19 tickets 16–17)
+
+The implementation cycle reran Cpp2IL diffable and ISIL in Docker with the game
+directory mounted read-only at `/game`. The final fresh run
+`task16-17-fresh-20260819-j` and the preceding immutable reruns `a`–`i` all
+matched Project.dll SHA-256
+`53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300`,
+GameAssembly.dll SHA-256
+`573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb`, and
+global-metadata.dat SHA-256
+`ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5`. The
+Cpp2IL artifact hashes and anchors are recorded in
+`docs/agents/evidence-backed-strategy-modes-16-17-evidence.md`; every run
+reported `GAME_WRITE_CHECK=readonly`, `CPP2IL_DIFFABLE_EXIT=0`, and
+`CPP2IL_ISIL_EXIT=0`.
+
+Native design remains authoritative: `NetherApiDataStore.RequestNetherUpdateEventAsync`
+has only `(floorLevel, floorIndex, selectedNumber, changeTargetMNetherCodeId,
+CancellationToken)`; `NetherCharacterEntity.current_hp_ratio` is an explicit
+native field; `MNetherFloorBattles` exposes raw `type`, stage, and Code-drop
+fields without a proven local Boss/MiniBoss/Normal mapping; Event parts expose
+raw target/parameter/content tuples; and the Event, Recovery, and Treasure
+popup controllers expose their exact initialize/execute/confirm seams. The
+strategy implementation therefore keeps semantic route vectors and battle
+tiers typed, rejects missing native proof locally, and retains the existing
+controller transaction boundary instead of adding a parallel controller.
+
+Ticket 16's evidence contract version is a plugin-side immutable contract
+version (`CurrentVersion = 1`), separate from the native binary hash. Mode,
+Research primary/secondary/active target, owner generations, snapshot
+fingerprint, candidate/option first gates, retained Code IDs, strict
+improvement, route semantic/safety projection, commitment count, tie-break, and
+typed unknown reason codes are all carried through the existing mapper,
+planner, policy, and complete decision-audit seams. Ticket 17's acceptance and
+regression results, RCA, and final Release DLL audit are in the evidence ledger;
+the clean final Docker audit passed 1319/1319 tests and a 0-warning/0-error
+Release build with source/product isolation and unchanged game hashes.
+
+## Spec-axis re-review repair boundary (2026-08-19)
+
+The second Spec-axis repair preserves native-first semantics and the existing
+controller transaction boundary. Production decision audits no longer cap
+candidate, branch, option, Code, predecessor, pre-entry-floor, or unknown
+route-bound serialization; bounded deduplicated logging remains only for
+non-decision diagnostic families. An unknown route-frontier node is a local
+typed rejection, so known legal siblings are evaluated and automation pauses
+only when no proven legal choice remains. Safety-context finalization retains
+the originating typed party, master-data, inventory, transaction, recovery, or
+route source code while recording rejection detail separately. Configuration,
+trigger, and buff-strategy unknowns retain distinct public reason codes, and
+Recovery/Treasure emit deterministic typed audits for every option. Fresh
+native evidence showed no boundary requiring a semantic deviation. The final
+Docker gates passed the 29/29 focused set, 1319/1319 clean full suite, and
+zero-warning/zero-error Release build. Both persistent reviewers converged
+PASS on Standards and Spec axes.

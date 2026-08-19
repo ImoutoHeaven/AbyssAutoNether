@@ -32,7 +32,6 @@ internal readonly record struct NetherCodeMasterAudit(
 
 internal static class NetherCodeDiagnosticAudit
 {
-    internal const int MaximumEntries = 8;
     private const int MaximumIdentifierLength = 96;
 
     public static string? Format(bool detailedLogging, IEnumerable<NetherCodeMasterAudit> audits)
@@ -40,10 +39,7 @@ internal static class NetherCodeDiagnosticAudit
         if (!detailedLogging || audits == null)
             return null;
 
-        string[] entries = audits
-            .Take(MaximumEntries)
-            .Select(FormatOne)
-            .ToArray();
+        string[] entries = audits.Select(FormatOne).ToArray();
         return entries.Length == 0
             ? null
             : "code-master-audit=" + string.Join(";", entries);

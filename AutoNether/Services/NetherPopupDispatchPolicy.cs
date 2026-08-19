@@ -175,6 +175,10 @@ internal sealed record NetherPopupDispatchDecision
     public bool AllowsPartialActiveDeaths { get; init; }
     public NetherPauseReason PauseReason { get; init; }
     public string Detail { get; init; } = string.Empty;
+    public IReadOnlyList<NetherEventOptionAudit> EventOptionAudits { get; init; } =
+        Array.Empty<NetherEventOptionAudit>();
+    public IReadOnlyList<NetherShopOptionAudit> ShopOptionAudits { get; init; } =
+        Array.Empty<NetherShopOptionAudit>();
 }
 
 /// <summary>
@@ -452,8 +456,9 @@ internal static class NetherPopupDispatchPolicy
             HpDelta = decision.HpDelta,
             AllowsPartialActiveDeaths = decision.AllowsPartialActiveDeaths,
             Detail = "popup-event:" + decision.OptionNumber,
+            EventOptionAudits = decision.OptionAudits,
         },
-        _ => Pause(decision.PauseReason, decision.Detail),
+        _ => Pause(decision.PauseReason, decision.Detail, decision.OptionAudits),
     };
     }
 
@@ -464,6 +469,7 @@ internal static class NetherPopupDispatchPolicy
             Kind = NetherPopupDispatchKind.NativeAction,
             Action = new NetherPlannedAction(NetherActionKind.LeaveShop),
             Detail = "popup-shop-leave",
+            ShopOptionAudits = decision.OptionAudits,
         },
         NetherShopDecisionKind.Buy => new NetherPopupDispatchDecision
         {
@@ -476,14 +482,22 @@ internal static class NetherPopupDispatchPolicy
                 ShopProcurementCommitment = decision.ProcurementCommitment,
             },
             Detail = "popup-shop-buy:" + decision.ContentId + ":" + decision.Amount + ":" + decision.GoldCost,
+            ShopOptionAudits = decision.OptionAudits,
         },
-        _ => Pause(decision.PauseReason, decision.Detail),
+        _ => Pause(decision.PauseReason, decision.Detail, shopOptionAudits: decision.OptionAudits),
     };
 
-    private static NetherPopupDispatchDecision Pause(NetherPauseReason reason, string detail) => new()
+    private static NetherPopupDispatchDecision Pause(
+        NetherPauseReason reason,
+        string detail,
+        IReadOnlyList<NetherEventOptionAudit>? eventOptionAudits = null,
+        IReadOnlyList<NetherShopOptionAudit>? shopOptionAudits = null
+    ) => new()
     {
         Kind = NetherPopupDispatchKind.Pause,
         PauseReason = reason,
         Detail = detail,
+        EventOptionAudits = eventOptionAudits ?? Array.Empty<NetherEventOptionAudit>(),
+        ShopOptionAudits = shopOptionAudits ?? Array.Empty<NetherShopOptionAudit>(),
     };
 }

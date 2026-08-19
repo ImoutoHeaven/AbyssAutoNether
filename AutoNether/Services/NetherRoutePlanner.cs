@@ -18,6 +18,13 @@ internal sealed record NetherRouteSafetyContext
     public IReadOnlyDictionary<long, int> ProjectedErosionDeltaByFloorId { get; init; } = new Dictionary<long, int>();
     public IReadOnlyDictionary<long, int> ProjectedHpDeltaByFloorId { get; init; } = new Dictionary<long, int>();
     public IReadOnlyDictionary<long, string> UnknownDetailByFloorId { get; init; } = new Dictionary<long, string>();
+    /// <summary>
+    /// Component-level unknown identity for each route node. The detail string remains diagnostic
+    /// text; route policy consumes this typed value so party, master-data, inventory, and
+    /// transaction failures cannot collapse into one generic UnknownEvidence bucket.
+    /// </summary>
+    public IReadOnlyDictionary<long, NetherStrategyUnknownReasonCode> UnknownReasonCodeByFloorId { get; init; } =
+        new Dictionary<long, NetherStrategyUnknownReasonCode>();
     public IReadOnlyDictionary<long, int> PeakErosionByFloorId { get; init; } = new Dictionary<long, int>();
     public IReadOnlyDictionary<long, int> MinimumActiveCharacterHpPermilleByFloorId { get; init; } = new Dictionary<long, int>();
     public IReadOnlyDictionary<long, string> HorizonRejectionByFloorId { get; init; } = new Dictionary<long, string>();
@@ -74,6 +81,10 @@ internal sealed record NetherRouteSafetyContext
     public string UnknownDetail(long floorId) => UnknownDetailByFloorId.TryGetValue(floorId, out string? value)
         ? value
         : "missing-context-entry";
+    public NetherStrategyUnknownReasonCode UnknownReasonCode(long floorId) =>
+        UnknownReasonCodeByFloorId.TryGetValue(floorId, out NetherStrategyUnknownReasonCode code)
+            ? code
+            : NetherStrategyUnknownReasonCodes.FromDetail(UnknownDetail(floorId));
     public int PeakErosion(long floorId) => PeakErosionByFloorId.TryGetValue(floorId, out int value)
         ? value
         : int.MaxValue;
@@ -112,7 +123,24 @@ internal sealed record NetherRouteSafetyContext
 
 internal readonly record struct NetherRouteCandidateAudit(long FloorId, string Reason)
 {
+    public bool IsCandidate { get; init; } = true;
+    public bool IsSelected { get; init; }
     public string Detail { get; init; } = string.Empty;
+    public NetherRouteCandidateHardGate FirstFailingHardGate { get; init; }
+    public NetherRouteSemanticTier SemanticTier { get; init; }
+    public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+    public NetherRouteEncounterVector? SemanticVector { get; init; }
+    public bool SemanticVectorKnown { get; init; }
+    public string SemanticVectorUnknownReason { get; init; } = string.Empty;
+    public bool SafetyProjectionKnown { get; init; }
+    public bool HardSafe { get; init; }
+    public bool HpSafe { get; init; }
+    public int TerminalWorstCaseErosion { get; init; }
+    public int ProjectedErosionDelta { get; init; }
+    public int ProjectedHpDelta { get; init; }
+    public int ProcurementCommitmentCount { get; init; }
+    public string TieBreakOrder { get; init; } = string.Empty;
+    public string ComparisonRationale { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -160,6 +188,7 @@ internal sealed record NetherRoutePlan
     public NetherPauseReason PauseReason { get; init; }
     public string PauseDetail { get; init; } = string.Empty;
     public IReadOnlyList<NetherRouteCandidateAudit> Audit { get; init; } = Array.Empty<NetherRouteCandidateAudit>();
+    public NetherRouteSelectionEvidence? SelectionEvidence { get; init; }
     public bool HasSelection => SelectedNode != null;
 }
 
@@ -191,18 +220,54 @@ internal sealed class NetherRoutePlanner
         if (candidates.Count == 0)
             return Pause(NetherPauseReason.NoSafeRoute, "no-current-frontier", audit);
 
+        // Create one stable audit slot before any hard gate can short-circuit the frontier. This
+        // is intentionally candidate-local: an unknown sibling must not erase the records for
+        // candidates which were never reached by the selection loop.
+        foreach (NetherFloorNode candidate in candidates)
+            audit.Add(CreateCandidateAudit(candidate, context, useVisibleBranchVector: true));
+
         foreach (NetherFloorNode candidate in candidates)
         {
             if (candidate.NodeType is NetherFloorNodeType.Unknown or NetherFloorNodeType.Default)
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-floor"));
-                return Pause(NetherPauseReason.UnknownFloor, "unknown-frontier-floor", audit);
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unknown-floor",
+                    NetherRouteCandidateHardGate.NativeNodeSemantics,
+                    "unknown-frontier-floor",
+                    context.UnknownReasonCode(candidate.NodeId)
+                ));
+                // The unknown node is a local branch rejection. Continue evaluating every sibling
+                // whose native node identity is known; only the no-safe-frontier result below may
+                // pause the controller.
+                continue;
             }
         }
 
         bool useVisibleBranchVector = HasUsableVisibleBranchVector(snapshot, context.VisibleMap);
+        foreach (NetherFloorNode candidate in candidates)
+        {
+            UpdateCandidateAudit(audit, new NetherRouteCandidateAudit(candidate.NodeId, string.Empty)
+            {
+                IsCandidate = true,
+                SemanticVectorUnknownReason = useVisibleBranchVector
+                    ? "visible-route-vector-not-yet-evaluated"
+                    : "legacy-comparator-vector-not-captured",
+                TieBreakOrder = TieBreakOrder(useVisibleBranchVector),
+            });
+        }
         if (!useVisibleBranchVector && !context.AllowLegacyComparatorCompatibility)
         {
+            foreach (NetherFloorNode candidate in candidates)
+            {
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unknown-node",
+                    NetherRouteCandidateHardGate.VisibleSemanticVector,
+                    "visible-route-vector-unavailable-for-production",
+                    NetherStrategyUnknownReasonCode.RouteVectorInputUnavailable
+                ));
+            }
             return Pause(
                 NetherPauseReason.UnknownMasterData,
                 "visible-route-vector-unavailable-for-production",
@@ -213,60 +278,96 @@ internal sealed class NetherRoutePlanner
         var safeCandidates = new List<Candidate>();
         foreach (NetherFloorNode candidate in candidates)
         {
+            if (candidate.NodeType is NetherFloorNodeType.Unknown or NetherFloorNodeType.Default)
+                continue;
             if (candidate.FloorLevel > context.MaximumFloorLevel)
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "above-target-depth"));
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "above-target-depth",
+                    NetherRouteCandidateHardGate.TargetDepth
+                ));
                 continue;
             }
             if (!candidate.IsUnlocked)
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "locked"));
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "locked",
+                    NetherRouteCandidateHardGate.Locked
+                ));
                 continue;
             }
             if (!terminalReachable.Contains(candidate.NodeId))
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "dead-end"));
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "dead-end",
+                    NetherRouteCandidateHardGate.TerminalReachability
+                ));
                 continue;
             }
             if (!context.IsKnown(candidate.NodeId))
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-node")
-                {
-                    Detail = context.UnknownDetail(candidate.NodeId),
-                });
+                string detail = context.UnknownDetail(candidate.NodeId);
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unknown-node",
+                    NetherRouteCandidateHardGate.NativeNodeSemantics,
+                    detail,
+                    context.UnknownReasonCode(candidate.NodeId)
+                ));
                 continue;
             }
             if (!context.IsHardSafe(candidate.NodeId))
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unsafe"));
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unsafe",
+                    NetherRouteCandidateHardGate.HardSafety
+                ));
                 continue;
             }
             if (!context.IsHpSafe(candidate.NodeId))
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unsafe-hp"));
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unsafe-hp",
+                    NetherRouteCandidateHardGate.HpSafety
+                ));
                 continue;
             }
             if (!IsBelowHardErosionLimit(snapshot.ErosionPoint, context.MinimumWorstCaseErosion(candidate.NodeId)))
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "terminal-erosion-100"));
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "terminal-erosion-100",
+                    NetherRouteCandidateHardGate.TerminalErosion
+                ));
                 continue;
             }
 
             NetherRouteHorizonSafetyEvaluation? horizon = context.HorizonEvaluation(candidate.NodeId);
             if (useVisibleBranchVector && horizon == null)
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-node")
-                {
-                    Detail = "visible-route-horizon-unavailable",
-                });
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unknown-node",
+                    NetherRouteCandidateHardGate.VisibleHorizon,
+                    "visible-route-horizon-unavailable",
+                    NetherStrategyUnknownReasonCode.ErosionHorizonUnavailable
+                ));
                 continue;
             }
             if (useVisibleBranchVector && !HasCompleteVisibleHorizon(candidate.NodeId, horizon))
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-node")
-                {
-                    Detail = "visible-route-vector-unavailable",
-                });
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unknown-node",
+                    NetherRouteCandidateHardGate.VisibleHorizon,
+                    "visible-route-vector-unavailable",
+                    NetherStrategyUnknownReasonCode.RouteVectorUnknown
+                ));
                 continue;
             }
 
@@ -275,14 +376,28 @@ internal sealed class NetherRoutePlanner
                 : null;
             if (useVisibleBranchVector && vector is not { IsKnown: true })
             {
-                audit.Add(new NetherRouteCandidateAudit(candidate.NodeId, "unknown-node")
-                {
-                    Detail = string.IsNullOrWhiteSpace(vector?.UnknownReason)
-                        ? "visible-route-vector-unknown"
-                        : vector.UnknownReason,
-                });
+                string detail = string.IsNullOrWhiteSpace(vector?.UnknownReason)
+                    ? "visible-route-vector-unknown"
+                    : vector.UnknownReason;
+                UpdateCandidateAudit(audit, Reject(
+                    candidate.NodeId,
+                    "unknown-node",
+                    NetherRouteCandidateHardGate.VisibleSemanticVector,
+                    detail,
+                    vector?.UnknownReasonCode is NetherStrategyUnknownReasonCode code
+                        && code != NetherStrategyUnknownReasonCode.None
+                        ? code
+                        : NetherStrategyUnknownReasonCodes.FromDetail(detail)
+                ));
                 continue;
             }
+            UpdateCandidateAudit(audit, CreateEligibleCandidateAudit(
+                candidate,
+                context,
+                horizon,
+                vector,
+                useVisibleBranchVector
+            ));
             safeCandidates.Add(new Candidate(
                 candidate,
                 true,
@@ -297,7 +412,9 @@ internal sealed class NetherRoutePlanner
 
         if (safeCandidates.Count == 0)
         {
-            NetherPauseReason reason = audit.Any(item => item.Reason == "terminal-erosion-100")
+            NetherPauseReason reason = audit.Any(item => item.Reason == "unknown-floor")
+                ? NetherPauseReason.UnknownFloor
+                : audit.Any(item => item.Reason == "terminal-erosion-100")
                 ? NetherPauseReason.UnsafeErosion
                 : audit.Any(item => item.Reason == "unsafe-hp")
                     ? NetherPauseReason.UnsafeHp
@@ -319,7 +436,10 @@ internal sealed class NetherRoutePlanner
                 "research-completion-unknown"
             )
             {
+                IsCandidate = false,
                 Detail = "native-settlement-does-not-prove-pre-settlement-research-completion",
+                FirstFailingHardGate = NetherRouteCandidateHardGate.ResearchCompletion,
+                UnknownReasonCode = NetherStrategyUnknownReasonCode.ResearchCompletionUnknown,
             });
             return Pause(
                 NetherPauseReason.UnknownMasterData,
@@ -335,11 +455,72 @@ internal sealed class NetherRoutePlanner
         for (int index = 1; index < safeCandidates.Count; index++)
         {
             Candidate contender = safeCandidates[index];
-            if (CompareCandidates(contender, selected, context, modeResearchIncomplete) > 0)
+            int comparison = CompareCandidates(
+                contender,
+                selected,
+                context,
+                modeResearchIncomplete,
+                out string comparisonRationale
+            );
+            if (comparison > 0)
+            {
+                AddComparisonRationale(
+                    audit,
+                    selected.Node.NodeId,
+                    "lost-to:" + contender.Node.NodeId + ":" + comparisonRationale
+                );
+                AddComparisonRationale(
+                    audit,
+                    contender.Node.NodeId,
+                    "won-over:" + selected.Node.NodeId + ":" + comparisonRationale
+                );
                 selected = contender;
+            }
+            else
+            {
+                AddComparisonRationale(
+                    audit,
+                    contender.Node.NodeId,
+                    "lost-to:" + selected.Node.NodeId + ":" + comparisonRationale
+                );
+                AddComparisonRationale(
+                    audit,
+                    selected.Node.NodeId,
+                    "retained-over:" + contender.Node.NodeId + ":" + comparisonRationale
+                );
+            }
         }
 
-        audit.Add(new NetherRouteCandidateAudit(selected.Node.NodeId, "selected"));
+        foreach (Candidate candidate in safeCandidates)
+        {
+            NetherRouteSemanticTier tier = candidate.EncounterVector?.HighestSemanticTier(
+                modeResearchIncomplete == true
+            ) ?? NetherRouteSemanticTier.None;
+            UpdateCandidateAudit(audit, new NetherRouteCandidateAudit(
+                candidate.Node.NodeId,
+                candidate.Node.NodeId == selected.Node.NodeId ? "selected" : "excluded"
+            )
+            {
+                SemanticVector = candidate.EncounterVector,
+                SemanticVectorKnown = candidate.EncounterVector?.IsKnown == true,
+                SemanticVectorUnknownReason = candidate.EncounterVector?.IsKnown == true
+                    ? string.Empty
+                    : candidate.EncounterVector?.UnknownReason ?? "legacy-comparator-vector-not-captured",
+                SemanticTier = tier,
+                SafetyProjectionKnown = candidate.Horizon != null,
+                HardSafe = candidate.HardSafe,
+                HpSafe = context.IsHpSafe(candidate.Node.NodeId),
+                TerminalWorstCaseErosion = context.MinimumWorstCaseErosion(candidate.Node.NodeId),
+                ProjectedErosionDelta = candidate.ProjectedErosionDelta,
+                ProjectedHpDelta = candidate.ProjectedHpDelta,
+                ProcurementCommitmentCount = context.EventProcurementCommitments.Count,
+                TieBreakOrder = TieBreakOrder(candidate.EncounterVector != null),
+                IsSelected = candidate.Node.NodeId == selected.Node.NodeId,
+                ComparisonRationale = candidate.Node.NodeId == selected.Node.NodeId
+                    ? "selected-after-comparison"
+                    : "eligible-but-not-selected",
+            });
+        }
         IReadOnlyList<long> selectedPathNodeIds = CreateSelectedPathNodeIds(
             currentNodeId,
             selected.Node,
@@ -361,6 +542,26 @@ internal sealed class NetherRoutePlanner
             SelectedPathNodeIds = selectedPathNodeIds,
             BranchIdentity = branchIdentity,
             Audit = audit,
+            SelectionEvidence = new NetherRouteSelectionEvidence
+            {
+                SemanticVector = selected.EncounterVector,
+                SemanticVectorKnown = selected.EncounterVector?.IsKnown == true,
+                SemanticVectorUnknownReason = selected.EncounterVector?.UnknownReason ?? string.Empty,
+                SelectedSemanticTier = selected.EncounterVector?.HighestSemanticTier(
+                    modeResearchIncomplete == true
+                ) ?? NetherRouteSemanticTier.None,
+                SafetyProjectionKnown = selected.Horizon != null,
+                HardSafe = selected.HardSafe,
+                HpSafe = context.IsHpSafe(selected.Node.NodeId),
+                TerminalWorstCaseErosion = context.MinimumWorstCaseErosion(selected.Node.NodeId),
+                ProjectedErosionDelta = selected.ProjectedErosionDelta,
+                ProjectedHpDelta = selected.ProjectedHpDelta,
+                ProcurementCommitmentCount = context.EventProcurementCommitments.Count,
+                TieBreakOrder = useVisibleBranchVector
+                    ? "semantic-vector>peak-erosion>active-hp>coordinates"
+                    : "legacy-safety>objective>erosion>hp>coordinates",
+                CandidateAudits = audit.Where(item => item.IsCandidate).ToArray(),
+            },
         };
     }
 
@@ -561,6 +762,144 @@ internal sealed class NetherRoutePlanner
         Audit = audit,
     };
 
+    private static NetherRouteCandidateAudit Reject(
+        long floorId,
+        string reason,
+        NetherRouteCandidateHardGate gate,
+        string detail = "",
+        NetherStrategyUnknownReasonCode unknownReasonCode = NetherStrategyUnknownReasonCode.None
+    ) => new(floorId, reason)
+    {
+        IsCandidate = true,
+        FirstFailingHardGate = gate,
+        Detail = detail,
+        UnknownReasonCode = unknownReasonCode,
+        ComparisonRationale = "excluded:first-failing-gate=" + gate,
+    };
+
+    private static NetherRouteCandidateAudit CreateCandidateAudit(
+        NetherFloorNode candidate,
+        NetherRouteSafetyContext context,
+        bool useVisibleBranchVector
+    ) => new(candidate.NodeId, "candidate")
+    {
+        IsCandidate = true,
+        SemanticVectorUnknownReason = useVisibleBranchVector
+            ? "visible-route-vector-not-yet-evaluated"
+            : "legacy-comparator-vector-not-captured",
+        SafetyProjectionKnown = context.HorizonEvaluation(candidate.NodeId) != null,
+        HardSafe = context.IsHardSafe(candidate.NodeId),
+        HpSafe = context.IsHpSafe(candidate.NodeId),
+        TerminalWorstCaseErosion = context.MinimumWorstCaseErosion(candidate.NodeId),
+        ProjectedErosionDelta = context.ProjectedErosionDelta(candidate.NodeId),
+        ProjectedHpDelta = context.ProjectedHpDelta(candidate.NodeId),
+        ProcurementCommitmentCount = context.EventProcurementCommitments.Count,
+        TieBreakOrder = TieBreakOrder(useVisibleBranchVector),
+        ComparisonRationale = "awaiting-selection",
+    };
+
+    private static NetherRouteCandidateAudit CreateEligibleCandidateAudit(
+        NetherFloorNode candidate,
+        NetherRouteSafetyContext context,
+        NetherRouteHorizonSafetyEvaluation? horizon,
+        NetherRouteEncounterVector? vector,
+        bool useVisibleBranchVector
+    ) => new(candidate.NodeId, "eligible")
+    {
+        IsCandidate = true,
+        SemanticVector = vector,
+        SemanticVectorKnown = vector?.IsKnown == true,
+        SemanticVectorUnknownReason = vector?.IsKnown == true
+            ? string.Empty
+            : vector?.UnknownReason ?? (useVisibleBranchVector
+                ? "visible-route-vector-not-evaluated"
+                : "legacy-comparator-vector-not-captured"),
+        SafetyProjectionKnown = horizon != null,
+        HardSafe = context.IsHardSafe(candidate.NodeId),
+        HpSafe = context.IsHpSafe(candidate.NodeId),
+        TerminalWorstCaseErosion = context.MinimumWorstCaseErosion(candidate.NodeId),
+        ProjectedErosionDelta = context.ProjectedErosionDelta(candidate.NodeId),
+        ProjectedHpDelta = context.ProjectedHpDelta(candidate.NodeId),
+        ProcurementCommitmentCount = context.EventProcurementCommitments.Count,
+        TieBreakOrder = TieBreakOrder(useVisibleBranchVector),
+    };
+
+    private static string TieBreakOrder(bool useVisibleBranchVector) => useVisibleBranchVector
+        ? "semantic-vector>peak-erosion>active-hp>coordinates"
+        : "legacy-safety>objective>erosion>hp>coordinates";
+
+    private static void AddComparisonRationale(
+        List<NetherRouteCandidateAudit> audit,
+        long floorId,
+        string rationale
+    ) => UpdateCandidateAudit(audit, new NetherRouteCandidateAudit(floorId, string.Empty)
+    {
+        IsCandidate = true,
+        ComparisonRationale = rationale,
+    });
+
+    private static void UpdateCandidateAudit(
+        List<NetherRouteCandidateAudit> audit,
+        NetherRouteCandidateAudit incoming
+    )
+    {
+        int index = audit.FindIndex(item => item.IsCandidate && item.FloorId == incoming.FloorId);
+        if (index < 0)
+        {
+            audit.Add(incoming);
+            return;
+        }
+
+        NetherRouteCandidateAudit existing = audit[index];
+        NetherRouteCandidateAudit merged = existing with
+        {
+            IsSelected = existing.IsSelected || incoming.IsSelected,
+            Reason = string.IsNullOrEmpty(incoming.Reason) || incoming.Reason == "candidate"
+                ? existing.Reason
+                : incoming.Reason,
+            Detail = string.IsNullOrEmpty(incoming.Detail) ? existing.Detail : incoming.Detail,
+            FirstFailingHardGate = incoming.FirstFailingHardGate == NetherRouteCandidateHardGate.None
+                ? existing.FirstFailingHardGate
+                : incoming.FirstFailingHardGate,
+            UnknownReasonCode = incoming.UnknownReasonCode == NetherStrategyUnknownReasonCode.None
+                ? existing.UnknownReasonCode
+                : incoming.UnknownReasonCode,
+            SemanticVector = incoming.SemanticVector ?? existing.SemanticVector,
+            SemanticVectorKnown = existing.SemanticVectorKnown || incoming.SemanticVectorKnown,
+            SemanticVectorUnknownReason = string.IsNullOrEmpty(incoming.SemanticVectorUnknownReason)
+                ? existing.SemanticVectorUnknownReason
+                : incoming.SemanticVectorUnknownReason,
+            ComparisonRationale = string.IsNullOrEmpty(incoming.ComparisonRationale)
+                ? existing.ComparisonRationale
+                : string.IsNullOrEmpty(existing.ComparisonRationale)
+                    ? incoming.ComparisonRationale
+                    : existing.ComparisonRationale + "|" + incoming.ComparisonRationale,
+        };
+
+        bool incomingCarriesSafetyFacts = incoming.SafetyProjectionKnown
+            || incoming.HardSafe
+            || incoming.HpSafe
+            || incoming.TerminalWorstCaseErosion != 0
+            || incoming.ProjectedErosionDelta != 0
+            || incoming.ProjectedHpDelta != 0
+            || incoming.ProcurementCommitmentCount != 0;
+        if (!string.IsNullOrEmpty(incoming.TieBreakOrder) && incomingCarriesSafetyFacts)
+        {
+            merged = merged with
+            {
+                SafetyProjectionKnown = incoming.SafetyProjectionKnown,
+                HardSafe = incoming.HardSafe,
+                HpSafe = incoming.HpSafe,
+                TerminalWorstCaseErosion = incoming.TerminalWorstCaseErosion,
+                ProjectedErosionDelta = incoming.ProjectedErosionDelta,
+                ProjectedHpDelta = incoming.ProjectedHpDelta,
+                ProcurementCommitmentCount = incoming.ProcurementCommitmentCount,
+                TieBreakOrder = incoming.TieBreakOrder,
+            };
+        }
+        audit[index] = merged;
+    }
+
     private readonly record struct Candidate(
         NetherFloorNode Node,
         bool HardSafe,
@@ -576,21 +915,30 @@ internal sealed class NetherRoutePlanner
         Candidate left,
         Candidate right,
         NetherRouteSafetyContext context,
-        bool? researchIncomplete
+        bool? researchIncomplete,
+        out string rationale
     )
     {
+        rationale = "all-comparison-keys-equal";
         if (left.EncounterVector != null || right.EncounterVector != null)
         {
             if (researchIncomplete is not bool knownResearchIncomplete)
+            {
+                rationale = "research-completion-unknown";
                 return 0;
+            }
             if (left.EncounterVector is not { IsKnown: true } leftVector
                 || right.EncounterVector is not { IsKnown: true } rightVector)
             {
+                rationale = "semantic-vector-unknown";
                 return 0;
             }
             int semantic = leftVector.CompareTo(rightVector, knownResearchIncomplete);
             if (semantic != 0)
+            {
+                rationale = "semantic-vector";
                 return semantic;
+            }
 
             // These are true route-vector tie breaks only. Safety was already filtered above.
             int peak = right.Horizon?.PeakErosion is int rightPeak
@@ -598,13 +946,20 @@ internal sealed class NetherRoutePlanner
                     ? rightPeak.CompareTo(leftPeak)
                     : 0;
             if (peak != 0)
+            {
+                rationale = "peak-erosion";
                 return peak;
+            }
             int hp = left.Horizon?.MinimumActiveCharacterHpPermille is int leftHp
                 && right.Horizon?.MinimumActiveCharacterHpPermille is int rightHp
                     ? leftHp.CompareTo(rightHp)
                     : 0;
             if (hp != 0)
+            {
+                rationale = "active-hp";
                 return hp;
+            }
+            rationale = "coordinates";
             return CompareCoordinates(left.Node, right.Node);
         }
 
@@ -613,33 +968,61 @@ internal sealed class NetherRoutePlanner
         // the complete visible vector above.
         int result = left.HardSafe.CompareTo(right.HardSafe);
         if (result != 0)
+        {
+            rationale = "legacy-safety";
             return result;
+        }
         result = left.TerminalReachable.CompareTo(right.TerminalReachable);
         if (result != 0)
+        {
+            rationale = "terminal-reachability";
             return result;
+        }
         result = (left.Node.NodeType == NetherFloorNodeType.Boss)
             .CompareTo(right.Node.NodeType == NetherFloorNodeType.Boss);
         if (result != 0)
+        {
+            rationale = "boss-objective";
             return result;
+        }
         result = context.HasMandatoryRankFiveKeyObjective(left.Node.NodeId)
             .CompareTo(context.HasMandatoryRankFiveKeyObjective(right.Node.NodeId));
         if (result != 0)
+        {
+            rationale = "rank-five-objective";
             return result;
+        }
         result = right.ProjectedErosionDelta.CompareTo(left.ProjectedErosionDelta);
         if (result != 0)
+        {
+            rationale = "projected-erosion";
             return result;
+        }
         result = left.ProjectedHpDelta.CompareTo(right.ProjectedHpDelta);
         if (result != 0)
+        {
+            rationale = "projected-hp";
             return result;
+        }
         result = left.SafeCodeOpportunity.CompareTo(right.SafeCodeOpportunity);
         if (result != 0)
+        {
+            rationale = "safe-code-opportunity";
             return result;
+        }
         result = left.Node.RewardTier.CompareTo(right.Node.RewardTier);
         if (result != 0)
+        {
+            rationale = "reward-tier";
             return result;
+        }
         result = right.Node.OptionalCombatCount.CompareTo(left.Node.OptionalCombatCount);
         if (result != 0)
+        {
+            rationale = "optional-combat-count";
             return result;
+        }
+        rationale = "coordinates";
         return CompareCoordinates(left.Node, right.Node);
     }
 

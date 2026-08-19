@@ -214,6 +214,34 @@ public class NetherRouteSafetyContextBuilderTests
         Assert.Equal(int.MaxValue, context.MinimumWorstCaseErosionToTerminal[2]);
     }
 
+    [Fact]
+    public void Typed_source_unknown_survives_graph_and_horizon_rejection_finalization()
+    {
+        NetherRouteSafetyFloorInput[] floors =
+        [
+            Floor(1, 1, NetherFloorNodeType.Recovery),
+            Floor(2, 2, NetherFloorNodeType.Battle, previous: new long[] { 1 }) with
+            {
+                UnknownReasonCode = NetherStrategyUnknownReasonCode.PartyEvidenceUnavailable,
+                Detail = "party:active-party-hp-unavailable",
+            },
+            Floor(3, 3, NetherFloorNodeType.Boss, previous: new long[] { 2 }),
+        ];
+
+        NetherRouteSafetyContext context = Build(
+            floors,
+            terminals: new HashSet<long> { 3 },
+            exits: new Dictionary<long, bool> { [1] = true, [2] = false, [3] = true }
+        );
+
+        Assert.Equal(
+            NetherStrategyUnknownReasonCode.PartyEvidenceUnavailable,
+            context.UnknownReasonCodeByFloorId[2]
+        );
+        Assert.Contains("party:active-party-hp-unavailable", context.DiagnosticDetail(2));
+        Assert.NotEmpty(context.HorizonRejection(2));
+    }
+
     private static NetherRouteSafetyContext Build(
         IReadOnlyList<NetherRouteSafetyFloorInput> floors,
         IReadOnlySet<long>? terminals = null,

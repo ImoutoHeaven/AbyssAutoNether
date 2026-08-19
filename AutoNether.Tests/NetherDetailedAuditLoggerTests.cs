@@ -57,7 +57,7 @@ public class NetherDetailedAuditLoggerTests
     }
 
     [Fact]
-    public void Repeated_poll_event_is_deduplicated_and_each_kind_has_a_hard_bound()
+    public void Repeated_poll_event_is_deduplicated_while_decision_audits_keep_all_records()
     {
         var entries = new List<string>();
         var logger = new NetherDetailedAuditLogger(entries.Add);
@@ -81,12 +81,31 @@ public class NetherDetailedAuditLoggerTests
             );
         }
 
-        Assert.Equal(1 + NetherDetailedAuditLogger.MaximumEntriesPerKind, entries.Count);
+        Assert.Equal(1 + NetherDetailedAuditLogger.MaximumEntriesPerKind + 5, entries.Count);
         Assert.Single(entries.FindAll(entry => entry.Contains("audit=task")));
         Assert.Equal(
-            NetherDetailedAuditLogger.MaximumEntriesPerKind,
+            NetherDetailedAuditLogger.MaximumEntriesPerKind + 5,
             entries.FindAll(entry => entry.Contains("audit=route")).Count
         );
+
+        for (int index = 0; index < NetherDetailedAuditLogger.MaximumEntriesPerKind + 5; index++)
+        {
+            logger.Emit(
+                enabled: true,
+                NetherDetailedAuditKind.Decision,
+                "decision:" + index,
+                new NetherDetailedAuditField("candidate", index.ToString())
+            );
+            logger.Emit(
+                enabled: true,
+                NetherDetailedAuditKind.Interactive,
+                "option:" + index,
+                new NetherDetailedAuditField("option", index.ToString())
+            );
+        }
+
+        Assert.Equal(NetherDetailedAuditLogger.MaximumEntriesPerKind + 5, entries.FindAll(entry => entry.Contains("audit=decision")).Count);
+        Assert.Equal(NetherDetailedAuditLogger.MaximumEntriesPerKind + 5, entries.FindAll(entry => entry.Contains("audit=interactive")).Count);
     }
 
     [Fact]
@@ -117,6 +136,8 @@ public class NetherDetailedAuditLoggerTests
         {
             NetherDetailedAuditKind.Snapshot,
             NetherDetailedAuditKind.Route,
+            NetherDetailedAuditKind.Decision,
+            NetherDetailedAuditKind.Transition,
             NetherDetailedAuditKind.Interactive,
             NetherDetailedAuditKind.Battle,
             NetherDetailedAuditKind.Interop,

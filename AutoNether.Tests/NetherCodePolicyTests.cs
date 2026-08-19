@@ -128,6 +128,19 @@ public class NetherCodePolicyTests
         Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
         Assert.Equal(impactOffer.CodeId, decision.SelectedCodeId);
         Assert.Equal(rush.CodeId, decision.RemoveCodeId);
+        Assert.Equal(new[] { impactOffer.CodeId }, decision.RetainedCodeIds);
+        Assert.True(decision.StrictImprovementProven);
+        Assert.Equal(
+            NetherCodeDecisionTier.RetainedPortfolioStrictImprovement,
+            decision.DecisionTier
+        );
+        Assert.Equal(NetherEquipmentMutationValueKind.StrictQuantifiedImprovement, decision.MutationValueKind);
+        Assert.False(decision.DisplayPowerUsedForDecision);
+        NetherCodeCandidateAudit selectedAudit = Assert.Single(
+            decision.CandidateAudits,
+            audit => audit.CodeId == impactOffer.CodeId
+        );
+        Assert.Equal(NetherCodeDecisionTier.RetainedPortfolioStrictImprovement, selectedAudit.SelectionTier);
     }
 
     [Fact]

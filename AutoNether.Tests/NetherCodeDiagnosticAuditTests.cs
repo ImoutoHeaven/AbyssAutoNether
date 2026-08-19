@@ -17,7 +17,7 @@ public class NetherCodeDiagnosticAuditTests
     }
 
     [Fact]
-    public void Detailed_code_audit_is_bounded_and_contains_only_mapping_identifiers()
+    public void Detailed_code_audit_keeps_all_mapping_identifiers_without_sensitive_fields()
     {
         var rows = new NetherCodeMasterAudit[10];
         for (int index = 0; index < rows.Length; index++)
@@ -50,7 +50,8 @@ public class NetherCodeDiagnosticAuditTests
         Assert.Contains("p1=300", audit);
         Assert.Contains("abilityId=700", audit);
         Assert.Contains("situations=Battle", audit);
-        Assert.DoesNotContain("id=10008", audit);
+        Assert.Contains("id=10008", audit);
+        Assert.Contains("id=10009", audit);
         Assert.DoesNotContain("name=", audit);
         Assert.DoesNotContain("description=", audit);
     }

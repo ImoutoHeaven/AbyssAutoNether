@@ -1513,13 +1513,13 @@ public class NetherAutoClimbControllerEndToEndTests
             Assert.NotEqual(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
             Assert.Contains(NetherActionKind.SelectCode, bridge.Invocations);
             Assert.Contains(Logger.Messages, message =>
-                message.Contains("audit=interactive")
+                message.Contains("audit=decision")
                 && message.Contains("key=code-policy:direct:")
                 && message.Contains("decision=Select")
                 && message.Contains("selectedCodeId=51001")
                 && message.Contains("lane=Auto"));
             string candidateAudit = Logger.Messages.Single(message =>
-                message.Contains("audit=interactive")
+                message.Contains("audit=decision")
                 && message.Contains("key=code-candidate:direct:51001:"));
             Assert.Contains("category=Rush", candidateAudit);
             Assert.Contains("family=Rush", candidateAudit);

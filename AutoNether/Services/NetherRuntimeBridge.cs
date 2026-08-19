@@ -2379,6 +2379,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 snapshot
             )
             {
+                EvidenceVersion = NetherStrategyEvidenceContract.CurrentVersion,
+                StrategyMode = settings.StrategyMode,
+                ResearchPrimaryFamily = settings.ResearchPrimaryFamily,
+                ResearchSecondaryFamily = settings.ResearchSecondaryFamily,
                 Party = party,
                 PartyUnknownReason = partyError,
                 OwnedCodes = codes,
@@ -2520,7 +2524,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         new NetherCodePolicyBattleStageRow(row.id, row.time_limit)
                     ).ToArray()
                 );
-            return NetherCodePolicyEvidenceAssembler.Assemble(
+            NetherRuntimeCodePolicyEvidenceResult assembled = NetherCodePolicyEvidenceAssembler.Assemble(
                 strategy.Package!,
                 snapshot,
                 candidates.Candidates,
@@ -2528,6 +2532,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 settings,
                 routeEvidence
             );
+            return assembled.IsSuccess
+                ? assembled with { StrategyAudit = strategy.Package!.EvidenceAudit }
+                : assembled;
         }
         catch (Exception ex)
         {
@@ -10566,7 +10573,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             Project.AbilityAssetDataStore? commonAbilityStore = Engine.Get<Project.AbilityAssetDataStore>();
             NetherCodeMasterAudit[] audits = rows
                 .OrderBy(row => row.id)
-                .Take(NetherCodeDiagnosticAudit.MaximumEntries)
                 .Select(row => CreateCodeMasterAudit(row, abilityStore, commonAbilityStore))
                 .ToArray();
             string? audit = NetherCodeDiagnosticAudit.Format(detailedLogging, audits);
@@ -10615,7 +10621,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 situationTypes = string.Join(
                     "|",
                     Enumerate(ability.Situations)
-                        .Take(8)
                         .Select(RuntimeTypeIdentifier)
                 );
                 if (string.IsNullOrEmpty(situationTypes))

@@ -944,6 +944,7 @@ internal static class NetherAutoClimbController
             _bridge.TryCaptureActiveCodeErosionProjection(),
             transformHardExclusions
         );
+        AuditPopupOptionAudits(snapshot, popup, decision);
         if (decision.Kind == NetherPopupDispatchKind.Code)
             return DispatchOwnedCodePopup(ownerParent, settlement, popup, snapshot, settings);
         if (decision.Kind == NetherPopupDispatchKind.AwaitNativeFlow)
@@ -1043,7 +1044,13 @@ internal static class NetherAutoClimbController
             settings,
             evidence.Evidence!
         );
-        AuditCodeDecision(snapshot, candidates.Candidates, decision, "owned");
+        AuditCodeDecision(
+            snapshot,
+            candidates.Candidates,
+            decision,
+            "owned",
+            evidence.StrategyAudit
+        );
         if (decision.Kind == NetherCodeDecisionKind.Pause)
             return NetherNativeActionResult.BindingUnavailable("owned-code-policy:" + decision.PauseReason + ":" + decision.Detail);
 
@@ -1864,7 +1871,12 @@ internal static class NetherAutoClimbController
         if (!EnsureBattleSettingsLifecycleReady("stable-route-boundary"))
             return;
 
-        PlanCheckpointBoundary(snapshot, settings, "stable");
+        PlanCheckpointBoundary(
+            snapshot,
+            settings,
+            "stable",
+            strategyAudit: strategyEvidence.Package!.EvidenceAudit
+        );
     }
 
     private static bool TryCaptureReadyFloorSceneSnapshot(
@@ -1928,7 +1940,8 @@ internal static class NetherAutoClimbController
         NetherSnapshot snapshot,
         NetherAutoClimbSettings settings,
         string boundary,
-        bool existingCheckpointHandoffPrepared = false
+        bool existingCheckpointHandoffPrepared = false,
+        NetherStrategyEvidenceAudit? strategyAudit = null
     )
     {
         NetherCheckpointDecision checkpoint = CheckpointPolicy.Decide(snapshot, settings);
@@ -2040,7 +2053,7 @@ internal static class NetherAutoClimbController
                 FailClosed(checkpoint.PauseReason, checkpoint.Detail);
                 return;
             }
-            PlanRoute(snapshot, settings, checkpoint.EffectiveMaxDepth);
+            PlanRoute(snapshot, settings, checkpoint.EffectiveMaxDepth, strategyAudit);
             return;
         }
 
@@ -2130,6 +2143,7 @@ internal static class NetherAutoClimbController
             _bridge.TryCaptureActiveCodeErosionProjection(),
             CaptureCodeTransformHardExclusions(snapshot, settings, popup.Kind)
         );
+        AuditPopupOptionAudits(snapshot, popup, decision);
         switch (decision.Kind)
         {
             case NetherPopupDispatchKind.Code:
@@ -2378,7 +2392,13 @@ internal static class NetherAutoClimbController
             settings,
             evidence.Evidence!
         );
-        AuditCodeDecision(snapshot, candidates.Candidates, decision, "direct");
+        AuditCodeDecision(
+            snapshot,
+            candidates.Candidates,
+            decision,
+            "direct",
+            evidence.StrategyAudit
+        );
         if (decision.Kind == NetherCodeDecisionKind.Pause)
         {
             FailClosed(decision.PauseReason, decision.Detail);
@@ -2408,7 +2428,8 @@ internal static class NetherAutoClimbController
     private static void PlanRoute(
         NetherSnapshot snapshot,
         NetherAutoClimbSettings settings,
-        int effectiveMaxDepth
+        int effectiveMaxDepth,
+        NetherStrategyEvidenceAudit? strategyAudit
     )
     {
         _bridge.BeginRouteReplan(snapshot.Fingerprint);
@@ -2540,13 +2561,15 @@ internal static class NetherAutoClimbController
             );
         }
         NetherRoutePlan route = routeDecision.Route;
-        AuditRoute(snapshot, route, routeDecision.Context);
+        AuditRoute(snapshot, route, routeDecision.Context, strategyAudit);
         if (!route.HasSelection)
         {
             LogAction(
                 "route-rejected",
                 snapshot,
-                string.Join(",", route.Audit.Take(16).Select(FormatRouteCandidateAudit))
+                string.Join(",", route.Audit
+                    .Where(candidate => candidate.IsCandidate)
+                    .Select(FormatRouteCandidateAudit))
             );
             FailClosed(route.PauseReason, "route:" + route.PauseDetail);
             return;
@@ -2568,7 +2591,9 @@ internal static class NetherAutoClimbController
         LogAction(
             "route-selected",
             snapshot,
-            string.Join(",", route.Audit.Take(16).Select(FormatRouteCandidateAudit))
+            string.Join(",", route.Audit
+                .Where(candidate => candidate.IsCandidate)
+                .Select(FormatRouteCandidateAudit))
         );
         ExecuteNativeAction(snapshot, action, "route");
     }
@@ -3296,7 +3321,7 @@ internal static class NetherAutoClimbController
         Audit(
             transition.StartsWith("LEASE ", StringComparison.Ordinal)
                 ? NetherDetailedAuditKind.Lease
-                : NetherDetailedAuditKind.Task,
+                : NetherDetailedAuditKind.Transition,
             "transition:" + transition,
             new NetherDetailedAuditField("transition", transition)
         );
@@ -3360,23 +3385,44 @@ internal static class NetherAutoClimbController
         NetherSnapshot snapshot,
         IReadOnlyList<NetherCodeCandidate> candidates,
         NetherCodeDecision decision,
-        string boundary
+        string boundary,
+        NetherStrategyEvidenceAudit? strategyAudit
     )
     {
+        NetherDetailedAuditField[] strategyContext = NetherStrategyAuditFormatting.Context(
+            strategyAudit,
+            snapshot.Fingerprint
+        );
         Audit(
-            NetherDetailedAuditKind.Interactive,
+            NetherDetailedAuditKind.Decision,
             "code-policy:" + boundary + ":" + snapshot.Fingerprint + ":" + decision.Kind,
-            new NetherDetailedAuditField("decision", decision.Kind.ToString()),
-            new NetherDetailedAuditField("selectedCodeId", decision.SelectedCodeId.ToString()),
-            new NetherDetailedAuditField("removeCodeId", decision.RemoveCodeId.ToString()),
-            new NetherDetailedAuditField("lane", decision.LockedLane.ToString()),
-            new NetherDetailedAuditField("reloadCount", snapshot.CodeReloadCount.ToString()),
-            new NetherDetailedAuditField("capacity", snapshot.CodeCapacity.ToString()),
-            new NetherDetailedAuditField("removable", string.Join("|", decision.RemovableCodeIds.Take(8))),
-            new NetherDetailedAuditField("detail", decision.Detail)
+            strategyContext
+                .Concat(new[]
+                {
+                    new NetherDetailedAuditField("decision", decision.Kind.ToString()),
+                    new NetherDetailedAuditField("selectedCodeId", decision.SelectedCodeId.ToString()),
+                    new NetherDetailedAuditField("removeCodeId", decision.RemoveCodeId.ToString()),
+                    new NetherDetailedAuditField("lane", decision.LockedLane.ToString()),
+                    new NetherDetailedAuditField("reloadCount", snapshot.CodeReloadCount.ToString()),
+                    new NetherDetailedAuditField("capacity", snapshot.CodeCapacity.ToString()),
+                    new NetherDetailedAuditField("currentCodeAuditCount", snapshot.Codes.Count.ToString()),
+                    new NetherDetailedAuditField("currentCodeAuditComplete", "true"),
+                    new NetherDetailedAuditField("candidateAuditCount", candidates.Count.ToString()),
+                    new NetherDetailedAuditField("candidateAuditComplete", "true"),
+                    new NetherDetailedAuditField("removable", string.Join("|", decision.RemovableCodeIds)),
+                    new NetherDetailedAuditField("retained", string.Join("|", decision.RetainedCodeIds)),
+                    new NetherDetailedAuditField("firstFailingGate", decision.FirstFailingHardGate.ToString()),
+                    new NetherDetailedAuditField("decisionTier", decision.DecisionTier.ToString()),
+                    new NetherDetailedAuditField("unknownReasonCode", decision.UnknownReasonCode.ToString()),
+                    new NetherDetailedAuditField("mutationValueKind", decision.MutationValueKind.ToString()),
+                    new NetherDetailedAuditField("strictImprovement", decision.StrictImprovementProven.ToString()),
+                    new NetherDetailedAuditField("displayPowerUsed", decision.DisplayPowerUsedForDecision.ToString()),
+                    new NetherDetailedAuditField("detail", decision.Detail),
+                })
+                .ToArray()
         );
 
-        foreach (NetherCodeState current in snapshot.Codes.Take(8))
+        foreach (NetherCodeState current in snapshot.Codes)
         {
             Audit(
                 NetherDetailedAuditKind.Interactive,
@@ -3399,10 +3445,12 @@ internal static class NetherAutoClimbController
             );
         }
 
-        foreach (NetherCodeCandidate candidate in candidates.Take(8))
+        foreach (NetherCodeCandidate candidate in candidates)
         {
+            NetherCodeCandidateAudit candidateAudit = decision.CandidateAudits
+                .FirstOrDefault(audit => audit.CodeId == candidate.CodeId);
             Audit(
-                NetherDetailedAuditKind.Interactive,
+                NetherDetailedAuditKind.Decision,
                 "code-candidate:" + boundary + ":" + candidate.CodeId + ":" + snapshot.Fingerprint,
                 new NetherDetailedAuditField("codeId", candidate.CodeId.ToString()),
                 new NetherDetailedAuditField("known", candidate.IsKnown.ToString()),
@@ -3417,7 +3465,11 @@ internal static class NetherAutoClimbController
                 new NetherDetailedAuditField("abilityAssetId", candidate.AbilityAssetId.ToString()),
                 new NetherDetailedAuditField("abilityLevel", candidate.AbilityLevel.ToString()),
                 new NetherDetailedAuditField("coverageKnown", candidate.PartyCoverageKnown.ToString()),
-                new NetherDetailedAuditField("coverage", candidate.PartyCoverage.ToString())
+                new NetherDetailedAuditField("coverage", candidate.PartyCoverage.ToString()),
+                new NetherDetailedAuditField("firstFailingGate", candidateAudit.FirstFailingHardGate.ToString()),
+                new NetherDetailedAuditField("selectionTier", candidateAudit.SelectionTier.ToString()),
+                new NetherDetailedAuditField("unknownReasonCode", candidateAudit.UnknownReasonCode.ToString()),
+                new NetherDetailedAuditField("gateDetail", candidateAudit.Detail)
             );
         }
     }
@@ -3450,35 +3502,58 @@ internal static class NetherAutoClimbController
     private static void AuditRoute(
         NetherSnapshot snapshot,
         NetherRoutePlan route,
-        NetherRouteSafetyContext context
+        NetherRouteSafetyContext context,
+        NetherStrategyEvidenceAudit? strategyAudit
     )
     {
         long selectedFloorId = route.SelectedNode?.FloorId ?? 0;
         long selectedNodeId = route.SelectedNode?.NodeId ?? 0;
+        NetherRouteCandidateAudit[] candidateAudits = route.Audit
+            .Where(candidate => candidate.IsCandidate)
+            .ToArray();
         string candidates = string.Join(
             "|",
-            route.Audit
-                .Take(8)
-                .Select(FormatRouteCandidateAudit)
+            candidateAudits.Select(FormatRouteCandidateAudit)
         );
         int terminalWorstCase = selectedNodeId > 0
             ? context.MinimumWorstCaseErosion(selectedNodeId)
             : -1;
+        NetherRouteSelectionEvidence? selection = route.SelectionEvidence;
+        NetherDetailedAuditField[] strategyContext = NetherStrategyAuditFormatting.Context(
+            strategyAudit,
+            snapshot.Fingerprint
+        );
         Audit(
             NetherDetailedAuditKind.Route,
             "route:" + snapshot.MapId + ":" + snapshot.CurrentFloorId + ":" + selectedFloorId + ":" + route.PauseReason,
-            new NetherDetailedAuditField("selectedFloorId", selectedFloorId.ToString()),
-            new NetherDetailedAuditField("selectedNodeId", selectedNodeId.ToString()),
-            new NetherDetailedAuditField("pauseReason", route.PauseReason.ToString()),
-            new NetherDetailedAuditField("pauseDetail", route.PauseDetail),
-            new NetherDetailedAuditField("candidates", candidates),
-            new NetherDetailedAuditField("reverseWorst", terminalWorstCase.ToString()),
-            new NetherDetailedAuditField("maxDepth", context.MaximumFloorLevel.ToString()),
-            new NetherDetailedAuditField("mapId", snapshot.MapId.ToString())
+            strategyContext
+                .Concat(new[]
+                {
+                    new NetherDetailedAuditField("selectedFloorId", selectedFloorId.ToString()),
+                    new NetherDetailedAuditField("selectedNodeId", selectedNodeId.ToString()),
+                    new NetherDetailedAuditField("pauseReason", route.PauseReason.ToString()),
+                    new NetherDetailedAuditField("pauseDetail", route.PauseDetail),
+                    new NetherDetailedAuditField("candidateAuditCount", candidateAudits.Length.ToString()),
+                    new NetherDetailedAuditField("candidateAuditComplete", "true"),
+                    new NetherDetailedAuditField("candidates", candidates),
+                    new NetherDetailedAuditField("reverseWorst", terminalWorstCase.ToString()),
+                    new NetherDetailedAuditField("maxDepth", context.MaximumFloorLevel.ToString()),
+                    new NetherDetailedAuditField("mapId", snapshot.MapId.ToString()),
+                    new NetherDetailedAuditField("semanticTier", selection?.SelectedSemanticTier.ToString() ?? "none"),
+                    new NetherDetailedAuditField("semanticVectorKnown", selection?.SemanticVectorKnown.ToString() ?? "false"),
+                    new NetherDetailedAuditField(
+                        "semanticVector",
+                        NetherStrategyAuditFormatting.SemanticVector(selection?.SemanticVector)
+                    ),
+                    new NetherDetailedAuditField("safetyProjectionKnown", selection?.SafetyProjectionKnown.ToString() ?? "false"),
+                    new NetherDetailedAuditField("commitments", selection?.ProcurementCommitmentCount.ToString() ?? "0"),
+                    new NetherDetailedAuditField("tieBreak", selection?.TieBreakOrder ?? "none"),
+                })
+                .ToArray()
         );
 
         IReadOnlyList<NetherFloorNode> floors = snapshot.Floors ?? Array.Empty<NetherFloorNode>();
-        foreach (NetherRouteCandidateAudit candidate in route.Audit.Take(8))
+        foreach (NetherRouteCandidateAudit candidate in candidateAudits)
         {
             NetherFloorNode? node = floors.FirstOrDefault(floor => floor.NodeId == candidate.FloorId);
             long nodeId = node?.NodeId ?? candidate.FloorId;
@@ -3495,17 +3570,33 @@ internal static class NetherAutoClimbController
                 new NetherDetailedAuditField("apiFloorIndex", (node?.ApiFloorIndex ?? -1).ToString()),
                 new NetherDetailedAuditField("reason", candidate.Reason),
                 new NetherDetailedAuditField("detail", detail),
+                new NetherDetailedAuditField("firstFailingGate", candidate.FirstFailingHardGate.ToString()),
+                new NetherDetailedAuditField("semanticTier", candidate.SemanticTier.ToString()),
+                new NetherDetailedAuditField("unknownReasonCode", candidate.UnknownReasonCode.ToString()),
+                new NetherDetailedAuditField("isCandidate", candidate.IsCandidate.ToString()),
+                new NetherDetailedAuditField("isSelected", candidate.IsSelected.ToString()),
                 new NetherDetailedAuditField("known", context.IsKnown(nodeId).ToString()),
                 new NetherDetailedAuditField("hardSafe", context.IsHardSafe(nodeId).ToString()),
                 new NetherDetailedAuditField("hpSafe", context.IsHpSafe(nodeId).ToString()),
+                new NetherDetailedAuditField("semanticVectorKnown", candidate.SemanticVectorKnown.ToString()),
+                new NetherDetailedAuditField("semanticVectorUnknownReason", candidate.SemanticVectorUnknownReason),
+                new NetherDetailedAuditField(
+                    "semanticVector",
+                    NetherStrategyAuditFormatting.SemanticVector(candidate.SemanticVector)
+                ),
+                new NetherDetailedAuditField("safetyProjectionKnown", candidate.SafetyProjectionKnown.ToString()),
                 new NetherDetailedAuditField(
                     "projectedErosionDelta",
-                    context.IsKnown(nodeId) ? context.ProjectedErosionDelta(nodeId).ToString() : "unknown"
+                    candidate.ProjectedErosionDelta.ToString()
                 ),
                 new NetherDetailedAuditField(
                     "terminalWorstCase",
-                    context.IsHardSafe(nodeId) ? context.MinimumWorstCaseErosion(nodeId).ToString() : "unknown"
-                )
+                    candidate.TerminalWorstCaseErosion.ToString()
+                ),
+                new NetherDetailedAuditField("projectedHpDelta", candidate.ProjectedHpDelta.ToString()),
+                new NetherDetailedAuditField("procurementCommitmentCount", candidate.ProcurementCommitmentCount.ToString()),
+                new NetherDetailedAuditField("tieBreakOrder", candidate.TieBreakOrder),
+                new NetherDetailedAuditField("comparisonRationale", candidate.ComparisonRationale)
             );
         }
 
@@ -3519,7 +3610,7 @@ internal static class NetherAutoClimbController
             {
                 string previous = node.PreviousFloorIds == null
                     ? "null"
-                    : string.Join("|", node.PreviousFloorIds.Take(8));
+                    : string.Join("|", node.PreviousFloorIds);
                 Audit(
                     NetherDetailedAuditKind.Route,
                     "route-node:" + node.NodeId + ":" + snapshot.Fingerprint,
@@ -3552,7 +3643,7 @@ internal static class NetherAutoClimbController
     )
     {
         foreach (KeyValuePair<long, NetherRuntimeInteractivePreEntryCaptureResult> entry in
-            runtime.ByFloorNodeId.OrderBy(pair => pair.Key).Take(16))
+            runtime.ByFloorNodeId.OrderBy(pair => pair.Key))
         {
             long nodeId = entry.Key;
             NetherRuntimeInteractivePreEntryCaptureResult capture = entry.Value;
@@ -3574,6 +3665,34 @@ internal static class NetherAutoClimbController
                 new NetherDetailedAuditField("partRows", (input?.EventPartRows?.Count ?? 0).ToString())
             );
 
+            foreach (NetherInteractiveOptionAudit option in safety.OptionAudits
+                .OrderBy(option => option.Key.EventId)
+                .ThenBy(option => option.Key.EventPartId)
+                .ThenBy(option => option.Key.OptionNumber))
+            {
+                Audit(
+                    NetherDetailedAuditKind.Interactive,
+                    "preentry-option:" + nodeId + ":" + option.Key.EventId + ":"
+                        + option.Key.EventPartId + ":" + option.Key.OptionNumber + ":" + snapshot.Fingerprint,
+                    new NetherDetailedAuditField("nodeId", nodeId.ToString()),
+                    new NetherDetailedAuditField("eventId", option.Key.EventId.ToString()),
+                    new NetherDetailedAuditField("eventPartId", option.Key.EventPartId.ToString()),
+                    new NetherDetailedAuditField("option", option.Key.OptionNumber.ToString()),
+                    new NetherDetailedAuditField("participates", option.ParticipatesInSelection.ToString()),
+                    new NetherDetailedAuditField("known", option.IsKnown.ToString()),
+                    new NetherDetailedAuditField("selected", option.IsSelected.ToString()),
+                    new NetherDetailedAuditField("firstFailingGate", option.FirstFailingHardGate.ToString()),
+                    new NetherDetailedAuditField("selectionTier", option.SelectionTier.ToString()),
+                    new NetherDetailedAuditField("unknownReasonCode", option.UnknownReasonCode.ToString()),
+                    new NetherDetailedAuditField("erosionDelta", option.ErosionDelta.ToString()),
+                    new NetherDetailedAuditField("hpDelta", option.HpDelta.ToString()),
+                    new NetherDetailedAuditField("committedGoldMinimum", option.CommittedGoldMinimum.ToString()),
+                    new NetherDetailedAuditField("committedKeyMinimum", option.CommittedKeyMinimum.ToString()),
+                    new NetherDetailedAuditField("detail", option.Detail),
+                    new NetherDetailedAuditField("comparisonRationale", option.ComparisonRationale)
+                );
+            }
+
             if (input == null
                 || input.FloorKind is not (NetherFloorNodeType.Event or NetherFloorNodeType.Recovery)
                 || input.EventRows == null)
@@ -3585,7 +3704,6 @@ internal static class NetherAutoClimbController
                 .Where(row => input.FloorExtendId > 0
                     ? row.EventId == input.FloorExtendId
                     : row.MapFloorMasterId == input.FloorMasterId)
-                .Take(4)
                 .ToArray();
             for (int rowIndex = 0; rowIndex < resolverMatches.Length; rowIndex++)
             {
@@ -3616,7 +3734,6 @@ internal static class NetherAutoClimbController
                     NetherFloorEventPartMasterRow[] partMatches = (input.EventPartRows
                             ?? Array.Empty<NetherFloorEventPartMasterRow>())
                         .Where(part => part.PartId == partId)
-                        .Take(4)
                         .ToArray();
                     if (partMatches.Length == 0)
                     {
@@ -3673,27 +3790,18 @@ internal static class NetherAutoClimbController
             && bounds.TryGetValue(floor.NodeId, out NetherFloorMasterBounds mapped)
             && mapped.IsKnown
         );
-        string unknownBounds = string.Join(
-            "|",
-            floors
-                .Where(floor => floor.NodeId > 0
-                    && (!bounds.TryGetValue(floor.NodeId, out NetherFloorMasterBounds mapped) || !mapped.IsKnown))
-                .Take(8)
-                .Select(floor =>
-                {
-                    string detail = bounds.TryGetValue(floor.NodeId, out NetherFloorMasterBounds mapped)
-                        ? mapped.Detail
-                        : "missing-runtime-node";
-                    return floor.NodeId + "/" + floor.FloorId + ":" + detail;
-                })
-        );
+        NetherFloorNode[] unknownBoundFloors = floors
+            .Where(floor => floor.NodeId > 0
+                && (!bounds.TryGetValue(floor.NodeId, out NetherFloorMasterBounds mapped) || !mapped.IsKnown))
+            .ToArray();
         NetherActiveCodeErosionProjection? codes = runtime.ActiveCodeErosion;
         Audit(
             NetherDetailedAuditKind.Route,
             "route-inputs:" + snapshot.MapId + ":" + snapshot.CurrentNodeId + ":" + snapshot.Fingerprint,
             new NetherDetailedAuditField("runtimeDetail", runtime.Detail),
             new NetherDetailedAuditField("boundsKnown", knownBounds + "/" + floors.Count),
-            new NetherDetailedAuditField("boundsUnknown", unknownBounds),
+            new NetherDetailedAuditField("boundsUnknownCount", unknownBoundFloors.Length.ToString()),
+            new NetherDetailedAuditField("boundsUnknownAuditComplete", "true"),
             new NetherDetailedAuditField("hpKnown", runtime.ActivePartyHp.IsKnown.ToString()),
             new NetherDetailedAuditField("hpMin", runtime.ActivePartyHp.MinimumHpPermille?.ToString() ?? "none"),
             new NetherDetailedAuditField("hpDetail", runtime.ActivePartyHp.Detail),
@@ -3702,10 +3810,106 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("codeCount", (codes?.Entries?.Count ?? 0).ToString()),
             new NetherDetailedAuditField("codesDetail", codes?.Detail ?? "missing-active-code-projection")
         );
+        foreach (NetherFloorNode floor in unknownBoundFloors)
+        {
+            string detail = bounds.TryGetValue(floor.NodeId, out NetherFloorMasterBounds mapped)
+                ? mapped.Detail
+                : "missing-runtime-node";
+            Audit(
+                NetherDetailedAuditKind.Route,
+                "route-input-bound:" + floor.NodeId + ":" + snapshot.Fingerprint,
+                new NetherDetailedAuditField("nodeId", floor.NodeId.ToString()),
+                new NetherDetailedAuditField("masterId", floor.FloorId.ToString()),
+                new NetherDetailedAuditField("known", "false"),
+                new NetherDetailedAuditField("detail", detail)
+            );
+        }
+    }
+
+    private static void AuditPopupOptionAudits(
+        NetherSnapshot snapshot,
+        NetherRuntimePopupContext popup,
+        NetherPopupDispatchDecision decision
+    )
+    {
+        foreach (NetherEventOptionAudit option in decision.EventOptionAudits
+            .OrderBy(option => option.EventId)
+            .ThenBy(option => option.EventPartId)
+            .ThenBy(option => option.OptionNumber))
+        {
+            Audit(
+                NetherDetailedAuditKind.Interactive,
+                "popup-option:" + popup.Kind + ":" + popup.OwnerGeneration + ":" + popup.Sequence + ":"
+                    + option.EventId + ":" + option.EventPartId + ":" + option.OptionNumber + ":" + snapshot.Fingerprint,
+                new NetherDetailedAuditField("popup", popup.Kind.ToString()),
+                new NetherDetailedAuditField("eventId", option.EventId.ToString()),
+                new NetherDetailedAuditField("eventPartId", option.EventPartId.ToString()),
+                new NetherDetailedAuditField("option", option.OptionNumber.ToString()),
+                new NetherDetailedAuditField("participates", option.ParticipatesInSelection.ToString()),
+                new NetherDetailedAuditField("known", option.IsKnown.ToString()),
+                new NetherDetailedAuditField("selected", option.IsSelected.ToString()),
+                new NetherDetailedAuditField("firstFailingGate", option.FirstFailingHardGate.ToString()),
+                new NetherDetailedAuditField("selectionTier", option.SelectionTier.ToString()),
+                new NetherDetailedAuditField("unknownReasonCode", option.UnknownReasonCode.ToString()),
+                new NetherDetailedAuditField("erosionDelta", option.ErosionDelta.ToString()),
+                new NetherDetailedAuditField("hpDelta", option.HpDelta.ToString()),
+                new NetherDetailedAuditField("projectedGold", option.ProjectedNetherGold.ToString()),
+                new NetherDetailedAuditField("projectedKeys", option.ProjectedTreasureKeys.ToString()),
+                new NetherDetailedAuditField("committedGoldMinimum", option.CommittedGoldMinimum.ToString()),
+                new NetherDetailedAuditField("committedKeyMinimum", option.CommittedKeyMinimum.ToString()),
+                new NetherDetailedAuditField("detail", option.Detail),
+                new NetherDetailedAuditField("comparisonRationale", option.ComparisonRationale)
+            );
+        }
+
+        foreach (NetherShopOptionAudit option in decision.ShopOptionAudits
+            .OrderBy(option => option.ContentId)
+            .ThenBy(option => option.ItemId))
+        {
+            Audit(
+                NetherDetailedAuditKind.Interactive,
+                "popup-shop-option:" + popup.OwnerGeneration + ":" + popup.Sequence + ":"
+                    + option.ContentId + ":" + snapshot.Fingerprint,
+                new NetherDetailedAuditField("popup", popup.Kind.ToString()),
+                new NetherDetailedAuditField("contentId", option.ContentId.ToString()),
+                new NetherDetailedAuditField("itemId", option.ItemId.ToString()),
+                new NetherDetailedAuditField("itemType", option.ItemType.ToString()),
+                new NetherDetailedAuditField("price", option.Price.ToString()),
+                new NetherDetailedAuditField("amount", option.Amount.ToString()),
+                new NetherDetailedAuditField("participates", option.ParticipatesInSelection.ToString()),
+                new NetherDetailedAuditField("known", option.IsKnown.ToString()),
+                new NetherDetailedAuditField("selected", option.IsSelected.ToString()),
+                new NetherDetailedAuditField("firstFailingGate", option.FirstFailingHardGate.ToString()),
+                new NetherDetailedAuditField("selectionTier", option.SelectionTier.ToString()),
+                new NetherDetailedAuditField("unknownReasonCode", option.UnknownReasonCode.ToString()),
+                new NetherDetailedAuditField("detail", option.Detail),
+                new NetherDetailedAuditField("comparisonRationale", option.ComparisonRationale)
+            );
+        }
     }
 
     private static string FormatRouteCandidateAudit(NetherRouteCandidateAudit candidate) =>
         candidate.FloorId + ":" + candidate.Reason
+        + ":gate=" + candidate.FirstFailingHardGate
+        + ":tier=" + candidate.SemanticTier
+        + ":selected=" + candidate.IsSelected
+        + ":vectorKnown=" + candidate.SemanticVectorKnown
+        + ":vector=" + NetherStrategyAuditFormatting.SemanticVector(candidate.SemanticVector)
+        + ":safetyKnown=" + candidate.SafetyProjectionKnown
+        + ":hardSafe=" + candidate.HardSafe
+        + ":hpSafe=" + candidate.HpSafe
+        + ":terminal=" + candidate.TerminalWorstCaseErosion
+        + ":erosionDelta=" + candidate.ProjectedErosionDelta
+        + ":hpDelta=" + candidate.ProjectedHpDelta
+        + ":commitments=" + candidate.ProcurementCommitmentCount
+        + ":tieBreak=" + candidate.TieBreakOrder
+        + ":rationale=" + candidate.ComparisonRationale
+        + (candidate.UnknownReasonCode == NetherStrategyUnknownReasonCode.None
+            ? string.Empty
+            : ":unknown=" + candidate.UnknownReasonCode)
+        + (string.IsNullOrEmpty(candidate.SemanticVectorUnknownReason)
+            ? string.Empty
+            : ":vectorUnknown=" + candidate.SemanticVectorUnknownReason)
         + (string.IsNullOrEmpty(candidate.Detail) ? string.Empty : ":" + candidate.Detail);
 
     private static void LogSnapshotDiagnostic(NetherSnapshot snapshot, string boundary)
@@ -3717,7 +3921,6 @@ internal static class NetherAutoClimbController
                 .GroupBy(floor => floor.FloorId)
                 .Where(group => group.Count() > 1)
                 .OrderBy(group => group.Key)
-                .Take(12)
                 .Select(group => group.Key + "x" + group.Count())
         );
         LogDiagnostic(
