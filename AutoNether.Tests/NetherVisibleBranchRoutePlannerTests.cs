@@ -1411,12 +1411,8 @@ public class NetherVisibleBranchRoutePlannerTests
                 new NetherCanonicalRewardTierProviderEvidence(4004, NetherCanonicalRewardTier.GoldRankFive, 91),
             ],
         };
-        NetherAutoClimbController.RegisterTypedSemanticProviderFactory(_ =>
-            new NetherRuntimeTypedSemanticProviderScope(routeSnapshot.Fingerprint, provider));
-        try
-        {
-            NetherRuntimeInteractivePreEntryCaptureResult currentCapture = CaptureFloor(current, 0);
-            NetherRuntimeInteractivePreEntryCaptureResult treasureCapture = CaptureFloor(treasure, 2003);
+        NetherRuntimeInteractivePreEntryCaptureResult currentCapture = CaptureFloor(current, 0);
+        NetherRuntimeInteractivePreEntryCaptureResult treasureCapture = CaptureFloor(treasure, 2003);
         NetherRuntimeInteractivePreEntryInputsResult interactive =
             NetherRuntimeInteractivePreEntryInputsResult.Success(
                 new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
@@ -1424,9 +1420,10 @@ public class NetherVisibleBranchRoutePlannerTests
                     [current.NodeId] = currentCapture,
                     [treasure.NodeId] = treasureCapture,
                 },
-                routeSnapshot.Fingerprint
+                routeSnapshot.Fingerprint,
+                provider
             );
-            NetherStrategyVisibleEvidenceCaptureResult mapped = NetherStrategyVisibleEvidenceAssembler.Assemble(
+        NetherStrategyVisibleEvidenceCaptureResult mapped = NetherStrategyVisibleEvidenceAssembler.Assemble(
             new NetherStrategyVisibleEvidenceAssemblyRequest(
                 routeSnapshot,
                 interactive,
@@ -1462,34 +1459,42 @@ public class NetherVisibleBranchRoutePlannerTests
             }
             )
         );
-            Assert.True(mapped.IsSuccess, mapped.Detail);
-            return (floors, mapped.Evidence!);
-        }
-        finally
-        {
-            NetherAutoClimbController.RegisterTypedSemanticProviderFactory(null);
-        }
+        Assert.True(mapped.IsSuccess, mapped.Detail);
+        return (floors, mapped.Evidence!);
 
         NetherRuntimeInteractivePreEntryCaptureResult CaptureFloor(
             NetherFloorNode floor,
             long extendId
-        ) => NetherRuntimeBridge.Instance.CaptureInteractivePreEntryFloor(
-            routeSnapshot,
-            new NetherAutoClimbSettings(),
-            new RuntimeFloorFixture
-            {
-                MNetherMapFloorId = floor.FloorId,
-                ExtendId = extendId,
-                FloorType = (int)floor.NodeType,
-            },
-            mapFloorRows: null,
-            eventRows: null,
-            eventPartRows: null,
-            itemRows: null,
-            battleRows: null,
-            floorNodeId: floor.NodeId,
-            canCloseShop: false
-        );
+        )
+        {
+            NetherRuntimeInteractivePreEntryCaptureResult captured =
+                NetherRuntimeBridge.Instance.CaptureInteractivePreEntryFloor(
+                    routeSnapshot,
+                    new NetherAutoClimbSettings(),
+                    new RuntimeFloorFixture
+                    {
+                        MNetherMapFloorId = floor.FloorId,
+                        ExtendId = extendId,
+                        FloorType = (int)floor.NodeType,
+                    },
+                    mapFloorRows: null,
+                    eventRows: null,
+                    eventPartRows: null,
+                    itemRows: null,
+                    battleRows: null,
+                    floorNodeId: floor.NodeId,
+                    canCloseShop: false
+                );
+            return captured.Input is { } input
+                ? captured with
+                {
+                    // Bind the provider to this snapshot-scoped capture instead of the mutable
+                    // process-wide registration seam. The route mapper still exercises the real
+                    // bridge/assembler path, while parallel tests cannot erase its authority.
+                    Input = input with { TypedSemanticProvider = provider },
+                }
+                : captured;
+        }
     }
 
     private static NetherRouteSafetyContext Context(
