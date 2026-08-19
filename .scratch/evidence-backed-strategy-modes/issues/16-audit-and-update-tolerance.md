@@ -4,7 +4,7 @@
 
 **Blocked by:** 15 — Integrate strategy commitments with controller ownership.
 
-**Status:** complete; dual-reviewer convergence PASS (Standards PASS, Spec PASS)
+**Status:** implementation complete; post-push final-review repair in progress after the current single reviewer returned FAIL. Re-review is pending; no commit or push has been made for this repair.
 
 - [x] Audit output identifies mode, active Research target, generation/owner/snapshot identity, and authoritative evidence version.
 - [x] Every candidate and option records its first failing hard gate or its selected semantic/combat tier.
@@ -19,10 +19,12 @@
 
 Evidence: `docs/agents/evidence-backed-strategy-modes-16-17-evidence.md`.
 
-Second Spec-axis repair closed the blocking findings: decision-audit
-serialization is complete for candidates, branches, options, Codes, and
-route bounds; unknown frontier nodes reject locally; typed source unknowns
-survive safety finalization; configuration, trigger, and buff-strategy codes
-remain distinct; and Recovery/Treasure have per-option characterization
-coverage. Focused tests pass 29/29 and the clean full suite passes 1319/1319.
-Persistent dual-reviewer convergence is PASS on both Standards and Spec axes.
+The current repair addresses the final-review findings around Recovery
+Transform eligibility versus deterministic Rest/Purification tie loss, exact
+route loser characterization, durable ticket-17 traceability, and the current
+US-019/US-093/US-115 semantic story mappings. Fresh native-backed focused GREEN
+is 5/5, the valid in-repository full suite is 1325/1325, and the Release build
+is 0 warnings/0 errors; the final isolation/audit gate is recorded in the
+evidence ledger. The current single-reviewer re-review remains pending. Earlier
+dual-reviewer PASS claims are superseded and are not a re-review completion
+claim.

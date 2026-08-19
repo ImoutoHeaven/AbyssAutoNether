@@ -4,15 +4,17 @@
 
 **Blocked by:** 02 — Expand authoritative strategy evidence contracts; 12 — Procure rank-5 Treasure keys safely.
 
-**Status:** ready-for-agent
+**Status:** complete; implementation and existing evidence verified
 
-- [ ] A Shop is late-priority only strictly above floor 90, with at least 300 Nether Gold and exact selected inventory containing a 300-cost rank-5 Gold bag.
-- [ ] No current Red Shop bag is inferred from relation-level or rarity-unknown data.
-- [ ] A committed rank-5 Treasure key reserves 200 Gold ahead of a 300-Gold bag.
-- [ ] With 300–499 Gold and a committed key need, the Shop buys the key and skips the bag.
-- [ ] With at least 500 Gold and both exact commitments, the Shop buys the key first and the bag second.
-- [ ] Each sequential purchase reconciles exact inventory, content, amount, cost, and authoritative balance before the next child action.
-- [ ] Failure or mismatch of the first purchase prevents replay and prevents the second purchase.
-- [ ] An ineligible Shop ranks below Recovery but remains valid necessary transit to the terminal Boss.
-- [ ] Unknown inventory or cost rejects that Shop value without inventing a possible rank-five item.
-- [ ] Tests cover 299, 300, 499, and 500 Gold, purchase order, partial completion, missing inventory, late boundary, and transit-only Shop.
+Evidence: [`evidence-backed-strategy-modes-13-15-evidence.md`](../../../docs/agents/evidence-backed-strategy-modes-13-15-evidence.md); characterization coverage is also indexed in [`evidence-backed-strategy-modes-17-story-traceability.md`](../../../docs/agents/evidence-backed-strategy-modes-17-story-traceability.md).
+
+- [x] A Shop is late-priority only strictly above floor 90, with at least 300 Nether Gold and exact selected inventory containing a 300-cost rank-5 Gold bag.
+- [x] No current Red Shop bag is inferred from relation-level or rarity-unknown data.
+- [x] A committed rank-5 Treasure key reserves 200 Gold ahead of a 300-Gold bag.
+- [x] With 300–499 Gold and a committed key need, the Shop buys the key and skips the bag.
+- [x] With at least 500 Gold and both exact commitments, the Shop buys the key first and the bag second.
+- [x] Each sequential purchase reconciles exact inventory, content, amount, cost, and authoritative balance before the next child action.
+- [x] Failure or mismatch of the first purchase prevents replay and prevents the second purchase.
+- [x] An ineligible Shop ranks below Recovery but remains valid necessary transit to the terminal Boss.
+- [x] Unknown inventory or cost rejects that Shop value without inventing a possible rank-five item.
+- [x] Tests cover 299, 300, 499, and 500 Gold, purchase order, partial completion, missing inventory, late boundary, and transit-only Shop.

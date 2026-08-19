@@ -4,7 +4,9 @@
 
 **Blocked by:** 16 — Make strategy decisions auditable and update-tolerant.
 
-**Status:** complete; dual-reviewer convergence PASS (Standards PASS, Spec PASS)
+**Status:** implementation complete; the current semantic traceability repair is locally green after the current single reviewer returned FAIL. Re-review is pending; no commit or push has been made for this repair.
+
+Story traceability: the complete US-001–US-125 source-spec map is [`docs/agents/evidence-backed-strategy-modes-17-story-traceability.md`](../../../docs/agents/evidence-backed-strategy-modes-17-story-traceability.md). Each row names the story-specific behavior, one or more fully qualified public acceptance/characterization methods, and the exact local semantic-audit evidence section.
 
 - [x] Every approved user story in the source specification maps to at least one acceptance or characterization test.
 - [x] The full pre-existing lifecycle, popup, reconcile, route-safety, checkpoint, Code, Event, Recovery, Treasure, and Shop regression suite remains green.
@@ -21,9 +23,14 @@
 
 Evidence: `docs/agents/evidence-backed-strategy-modes-16-17-evidence.md`.
 
-Second Spec-axis repair added complete decision-audit serialization and typed
-per-option Recovery/Treasure coverage while preserving the controller
-transaction boundary. Focused tests pass 29/29, the clean full suite passes
-1319/1319, and the clean Release build passes with zero warnings and zero
-errors. Persistent dual-reviewer convergence is PASS on both Standards and
-Spec axes.
+The current repair preserves the controller transaction boundary while adding
+the typed Recovery Transform policy audit, exact equal-vector route tie-break
+characterizations for peak erosion, minimum active HP, and coordinates, and
+the semantically audited 125-row method-and-evidence traceability map. It also
+maps completed-Research Code valuation, Event erosion recovery, and low-rarity
+Treasure route/key behavior to their actual production seams. Fresh
+native-backed focused GREEN is 5/5, the valid in-repository full suite is
+1325/1325, and the Release build is 0 warnings/0 errors; the semantic audit
+and final isolation gate are recorded in the evidence ledger. Earlier
+dual-reviewer PASS claims are superseded and do not represent the pending
+re-review.

@@ -41,6 +41,84 @@ public sealed class NetherStrategyModes1012Tests
     }
 
     [Fact]
+    public void Recovery_all_safe_tie_keeps_safe_known_loser_in_audit()
+    {
+        NetherEventDecision decision = new NetherEventPolicy().DecideRecovery(
+            Snapshot(erosion: 0, hp: 1000) with
+            {
+                Codes = [new NetherCodeState(40024, NetherCodeFamily.Risk, 1) { IsKnown = true }],
+                CodeCapacity = 5,
+            },
+            [
+                RecoveryOption(1, NetherRecoveryBranchKind.Rest, new NetherEffect(NetherEffectKind.Heal, 100), safe: true),
+                RecoveryOption(2, NetherRecoveryBranchKind.Purification, new NetherEffect(NetherEffectKind.ErosionHeal, 10), safe: true),
+                RecoveryOption(
+                    3,
+                    NetherRecoveryBranchKind.Transform,
+                    new NetherEffect(NetherEffectKind.AbyssCodeTransform, 0),
+                    safe: true,
+                    transformEligibility: new NetherCodeTransformEligibilityEvidence
+                    {
+                        StrategyMode = NetherStrategyMode.Equipment,
+                        EquipmentOptInEnabled = true,
+                        IsRecovery = true,
+                        DeterministicRecoveryChoicesHaveZeroValue = false,
+                        HardExcludedCodes = [],
+                    }
+                ),
+            ],
+            Settings()
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        Assert.Equal(1, decision.OptionNumber);
+        Assert.Equal(3, decision.OptionAudits.Count);
+
+        NetherEventOptionAudit loser = Assert.Single(
+            decision.OptionAudits,
+            audit => audit.OptionNumber == 2
+        );
+        Assert.True(loser.IsKnown);
+        Assert.False(loser.IsSelected);
+        Assert.Equal(NetherEventOptionHardGate.None, loser.FirstFailingHardGate);
+        Assert.Equal(NetherEventOptionSelectionTier.Recovery, loser.SelectionTier);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, loser.UnknownReasonCode);
+        Assert.Equal(
+            "eligible-safe-but-not-selected-by-deterministic-recovery-tie-break",
+            loser.ComparisonRationale
+        );
+
+        NetherEventOptionAudit selected = Assert.Single(
+            decision.OptionAudits,
+            audit => audit.OptionNumber == 1
+        );
+        Assert.True(selected.IsKnown);
+        Assert.True(selected.IsSelected);
+        Assert.Equal(NetherEventOptionHardGate.None, selected.FirstFailingHardGate);
+        Assert.Equal(NetherEventOptionSelectionTier.Recovery, selected.SelectionTier);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, selected.UnknownReasonCode);
+        Assert.Equal("selected-by-complete-branch-proof", selected.ComparisonRationale);
+
+        NetherEventOptionAudit transform = Assert.Single(
+            decision.OptionAudits,
+            audit => audit.OptionNumber == 3
+        );
+        Assert.True(transform.IsKnown);
+        Assert.False(transform.IsSelected);
+        Assert.Equal(
+            NetherEventOptionHardGate.RecoveryTransformPolicy,
+            transform.FirstFailingHardGate
+        );
+        Assert.Equal(NetherEventOptionSelectionTier.None, transform.SelectionTier);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, transform.UnknownReasonCode);
+        Assert.Equal("deterministic-recovery-choice-has-value", transform.Detail);
+        Assert.Equal(
+            "excluded:recovery-transform-policy=deterministic-recovery-choice-has-value",
+            transform.ComparisonRationale
+        );
+    }
+
+    [Fact]
     public void Treasure_rejects_a_non_40_or_80_hp_payment_even_with_route_proof()
     {
         NetherEventDecision decision = new NetherEventPolicy().DecideTreasure(
@@ -175,7 +253,8 @@ public sealed class NetherStrategyModes1012Tests
         int optionNumber,
         NetherRecoveryBranchKind branchKind,
         NetherEffect effect,
-        bool safe
+        bool safe,
+        NetherCodeTransformEligibilityEvidence? transformEligibility = null
     ) => new(optionNumber, [effect])
     {
         FloorId = 10,
@@ -186,6 +265,7 @@ public sealed class NetherStrategyModes1012Tests
             IsKnown = true,
             IsCompleteVisibleBranch = true,
             IsNextVisibleBranchSafe = safe,
+            TransformEligibility = transformEligibility,
         },
     };
 

@@ -65,6 +65,70 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
+    public void Recovery_all_safe_tie_preserves_known_safe_loser_through_pre_entry_projection()
+    {
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Recovery,
+            events: [Event(100, 1001, 1002, 1003)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.Heal, parameter1: 100),
+                Part(1002, targetType1: (int)NetherEffectKind.ErosionHeal, parameter1: 10),
+                Part(1003, targetType1: 7, parameter1: 0),
+            ],
+            erosion: 0,
+            hp: 1000,
+            recoveryProofs: CompleteRecoveryProofs(1001, 1002, 1003),
+            requireCompleteRecoveryBranchSafety: true
+        ));
+
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(1, result.SafeOptionNumberByEventId[100]);
+        NetherInteractiveOptionAudit selected = Assert.Single(
+            result.OptionAudits,
+            audit => audit.Key.EventPartId == 1001
+        );
+        Assert.True(selected.IsKnown);
+        Assert.True(selected.IsSelected);
+        Assert.Equal(NetherInteractiveOptionHardGate.None, selected.FirstFailingHardGate);
+        Assert.Equal(NetherInteractiveOptionSelectionTier.Recovery, selected.SelectionTier);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, selected.UnknownReasonCode);
+        Assert.Equal("selected-by-complete-branch-proof", selected.ComparisonRationale);
+
+        NetherInteractiveOptionAudit loser = Assert.Single(
+            result.OptionAudits,
+            audit => audit.Key.EventPartId == 1002
+        );
+        Assert.True(loser.IsKnown);
+        Assert.False(loser.IsSelected);
+        Assert.Equal(NetherInteractiveOptionHardGate.None, loser.FirstFailingHardGate);
+        Assert.Equal(NetherInteractiveOptionSelectionTier.Recovery, loser.SelectionTier);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, loser.UnknownReasonCode);
+        Assert.Equal(
+            "eligible-safe-but-not-selected-by-deterministic-recovery-tie-break",
+            loser.ComparisonRationale
+        );
+
+        NetherInteractiveOptionAudit transform = Assert.Single(
+            result.OptionAudits,
+            audit => audit.Key.EventPartId == 1003
+        );
+        Assert.True(transform.IsKnown);
+        Assert.False(transform.IsSelected);
+        Assert.Equal(
+            NetherInteractiveOptionHardGate.RecoveryTransformPolicy,
+            transform.FirstFailingHardGate
+        );
+        Assert.Equal(NetherInteractiveOptionSelectionTier.None, transform.SelectionTier);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, transform.UnknownReasonCode);
+        Assert.Equal("deterministic-recovery-choice-has-value", transform.Detail);
+        Assert.Equal(
+            "excluded:recovery-transform-policy=deterministic-recovery-choice-has-value",
+            transform.ComparisonRationale
+        );
+    }
+
+    [Fact]
     public void Map_generation_erosion_range_is_not_an_interactive_action_cost()
     {
         NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
@@ -488,7 +552,9 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         int mapMaximumErosion = 10,
         long floorExtendId = 0,
         IReadOnlyList<NetherCodeState>? codes = null,
-        IReadOnlyList<NetherInteractivePartialDeathEligibility>? eligibility = null
+        IReadOnlyList<NetherInteractivePartialDeathEligibility>? eligibility = null,
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>? recoveryProofs = null,
+        bool requireCompleteRecoveryBranchSafety = false
     ) => new(
         FloorKind: kind,
         FloorMasterId: 900,
@@ -513,7 +579,53 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         CurrentCodes = codes ?? [Code(40024, NetherCodeFamily.Risk)],
         CodeCapacity = 5,
         PartialDeathEligibility = eligibility ?? [],
+        RecoveryBranchSafetyByPartId = recoveryProofs
+            ?? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(),
+        RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,
     };
+
+    private static IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> CompleteRecoveryProofs(
+        long restPartId,
+        long purificationPartId,
+        long transformPartId
+    )
+    {
+        NetherCodeTransformEligibilityEvidence transformEligibility = new()
+        {
+            IsKnown = true,
+            EquipmentOptInEnabled = true,
+            IsRecovery = true,
+            DeterministicRecoveryChoicesHaveZeroValue = false,
+            HardExcludedCodes = [],
+        };
+        return new Dictionary<long, NetherRecoveryBranchSafetyEvidence>
+        {
+            [restPartId] = new NetherRecoveryBranchSafetyEvidence
+            {
+                BranchKind = NetherRecoveryBranchKind.Rest,
+                IsKnown = true,
+                IsCompleteVisibleBranch = true,
+                IsNextVisibleBranchSafe = true,
+                TransformEligibility = transformEligibility,
+            },
+            [purificationPartId] = new NetherRecoveryBranchSafetyEvidence
+            {
+                BranchKind = NetherRecoveryBranchKind.Purification,
+                IsKnown = true,
+                IsCompleteVisibleBranch = true,
+                IsNextVisibleBranchSafe = true,
+                TransformEligibility = transformEligibility,
+            },
+            [transformPartId] = new NetherRecoveryBranchSafetyEvidence
+            {
+                BranchKind = NetherRecoveryBranchKind.Transform,
+                IsKnown = true,
+                IsCompleteVisibleBranch = true,
+                IsNextVisibleBranchSafe = true,
+                TransformEligibility = transformEligibility,
+            },
+        };
+    }
 
     private static NetherInteractivePartialDeathEligibility TreasureEligibility(long eventId, long partId) => new(
         NetherInteractivePartialDeathObjectiveKind.TreasureHpPayment,

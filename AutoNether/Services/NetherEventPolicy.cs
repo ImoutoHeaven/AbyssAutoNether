@@ -361,12 +361,14 @@ internal enum NetherEventOptionHardGate
     RecoveryBranchSafety,
     TreasurePaymentShape,
     Configuration,
+    RecoveryTransformPolicy,
 }
 
 internal enum NetherEventOptionSelectionTier
 {
     None = 0,
     Recovery,
+    RecoveryTransform,
     TreasureKey,
     TreasureHpPayment,
     BossBattle,
@@ -686,7 +688,7 @@ internal sealed class NetherEventPolicy
         {
             return branchDecision! with
             {
-                OptionAudits = FinalizeRecoveryBranchAudits(options, branchDecision!),
+                OptionAudits = FinalizeRecoveryBranchAudits(options, branchDecision!, snapshot),
             };
         }
 
@@ -1816,9 +1818,10 @@ internal sealed class NetherEventPolicy
         return finalized;
     }
 
-    private static IReadOnlyList<NetherEventOptionAudit> FinalizeRecoveryBranchAudits(
+    private IReadOnlyList<NetherEventOptionAudit> FinalizeRecoveryBranchAudits(
         IReadOnlyList<NetherEventOption> options,
-        NetherEventDecision decision
+        NetherEventDecision decision,
+        NetherSnapshot snapshot
     )
     {
         if (decision.Kind != NetherEventDecisionKind.Select)
@@ -1837,6 +1840,16 @@ internal sealed class NetherEventPolicy
                 && option.OptionNumber == decision.OptionNumber;
             if (!selected)
             {
+                if (option.RecoveryBranchSafety?.BranchKind == NetherRecoveryBranchKind.Transform)
+                {
+                    return CreateRecoveryTransformPolicyAudit(option, snapshot);
+                }
+                if (option.RecoveryBranchSafety is
+                    { BranchKind: NetherRecoveryBranchKind.Rest or NetherRecoveryBranchKind.Purification,
+                        IsAuthoritative: true, IsNextVisibleBranchSafe: true })
+                {
+                    return CreateSafeRecoveryTieLossAudit(option);
+                }
                 return CreateRejectedOptionAudit(
                     option,
                     Pause(
@@ -1849,6 +1862,80 @@ internal sealed class NetherEventPolicy
             return CreateSelectedOptionAudit(decision, NetherEventOptionSelectionTier.Recovery);
         }).ToArray();
     }
+
+    private NetherEventOptionAudit CreateRecoveryTransformPolicyAudit(
+        NetherEventOption option,
+        NetherSnapshot snapshot
+    )
+    {
+        NetherCodeTransformDecision transform = _transformPolicy.Decide(
+            snapshot.Codes,
+            snapshot.CodeCapacity,
+            option.RecoveryBranchSafety?.TransformEligibility
+        );
+        if (transform.CanTransform)
+        {
+            return new NetherEventOptionAudit
+            {
+                EventId = option.EventId,
+                EventPartId = option.EventPartId,
+                FloorId = option.FloorId,
+                NodeId = option.NodeId,
+                OptionNumber = option.OptionNumber,
+                ParticipatesInSelection = true,
+                IsKnown = true,
+                IsSelected = false,
+                FirstFailingHardGate = NetherEventOptionHardGate.None,
+                SelectionTier = NetherEventOptionSelectionTier.RecoveryTransform,
+                UnknownReasonCode = NetherStrategyUnknownReasonCode.None,
+                Detail = transform.Detail,
+                ComparisonRationale =
+                    "eligible-transform-not-selected-by-deterministic-rest-purification-policy",
+            };
+        }
+
+        bool unknown = transform.PauseReason is NetherPauseReason.UnknownMasterData
+            or NetherPauseReason.UnknownEffect
+            or NetherPauseReason.BindingUnavailable
+            or NetherPauseReason.InvalidConfiguration;
+        return new NetherEventOptionAudit
+        {
+            EventId = option.EventId,
+            EventPartId = option.EventPartId,
+            FloorId = option.FloorId,
+            NodeId = option.NodeId,
+            OptionNumber = option.OptionNumber,
+            ParticipatesInSelection = true,
+            IsKnown = !unknown,
+            IsSelected = false,
+            FirstFailingHardGate = NetherEventOptionHardGate.RecoveryTransformPolicy,
+            SelectionTier = NetherEventOptionSelectionTier.None,
+            UnknownReasonCode = unknown
+                ? NetherStrategyUnknownReasonCodes.FromDetail(transform.Detail)
+                : NetherStrategyUnknownReasonCode.None,
+            Detail = transform.Detail,
+            ComparisonRationale = "excluded:recovery-transform-policy=" + transform.Detail,
+        };
+    }
+
+    private static NetherEventOptionAudit CreateSafeRecoveryTieLossAudit(
+        NetherEventOption option
+    ) => new()
+    {
+        EventId = option.EventId,
+        EventPartId = option.EventPartId,
+        FloorId = option.FloorId,
+        NodeId = option.NodeId,
+        OptionNumber = option.OptionNumber,
+        ParticipatesInSelection = true,
+        IsKnown = true,
+        IsSelected = false,
+        FirstFailingHardGate = NetherEventOptionHardGate.None,
+        SelectionTier = NetherEventOptionSelectionTier.Recovery,
+        UnknownReasonCode = NetherStrategyUnknownReasonCode.None,
+        Detail = "safe-complete-visible-recovery-branch-proof",
+        ComparisonRationale = "eligible-safe-but-not-selected-by-deterministic-recovery-tie-break",
+    };
 
     private static NetherEventOptionAudit CreateSelectedOptionAudit(
         NetherEventDecision decision,
@@ -1907,6 +1994,8 @@ internal sealed class NetherEventPolicy
         bool isTreasure
     )
     {
+        if (isRecovery && IsExactTransformOption(option))
+            return NetherEventOptionSelectionTier.RecoveryTransform;
         if (isRecovery)
             return NetherEventOptionSelectionTier.Recovery;
         if (isTreasure)

@@ -101,6 +101,203 @@ public class NetherVisibleBranchRoutePlannerTests
     }
 
     [Fact]
+    public void Production_selected_candidate_audit_merges_known_semantic_vector_and_tier()
+    {
+        NetherFloorNode current = Node(1, 80, NetherFloorNodeType.Recovery);
+        NetherFloorNode directOffer = Node(2, 81, NetherFloorNodeType.Event, 1);
+        NetherFloorNode normal = Node(3, 81, NetherFloorNodeType.Battle, 1);
+        NetherFloorNode boss = Node(4, 82, NetherFloorNodeType.Boss, 2, 3);
+        NetherFloorNode[] floors = [current, directOffer, normal, boss];
+
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(
+            Snapshot(current, floors),
+            Context(
+                floors,
+                new Dictionary<long, NetherRouteHorizonSafetyEvaluation>
+                {
+                    [2] = Horizon(floors, 2, 4),
+                    [3] = Horizon(floors, 3, 4),
+                },
+                rows: [DirectCodeOffer(2)],
+                mode: NetherStrategyMode.Research,
+                researchIncomplete: true
+            )
+        );
+
+        NetherRouteCandidateAudit selected = Assert.Single(
+            plan.Audit,
+            audit => audit.FloorId == 2 && audit.IsSelected
+        );
+        NetherRouteCandidateAudit loser = Assert.Single(
+            plan.Audit,
+            audit => audit.FloorId == 3 && !audit.IsSelected
+        );
+        Assert.Equal(NetherRouteCandidateHardGate.None, selected.FirstFailingHardGate);
+        Assert.Equal(NetherRouteSemanticTier.DirectCodeOffer, selected.SemanticTier);
+        Assert.True(selected.SemanticVectorKnown);
+        Assert.Empty(selected.SemanticVectorUnknownReason);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, selected.UnknownReasonCode);
+        Assert.Contains("selected-after-comparison", selected.ComparisonRationale);
+        Assert.Contains("retained-over:3:semantic-vector", selected.ComparisonRationale);
+
+        Assert.Equal(NetherRouteCandidateHardGate.None, loser.FirstFailingHardGate);
+        Assert.Equal(NetherRouteSemanticTier.NormalBattle, loser.SemanticTier);
+        Assert.True(loser.SemanticVectorKnown);
+        Assert.Empty(loser.SemanticVectorUnknownReason);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, loser.UnknownReasonCode);
+        Assert.False(loser.IsSelected);
+        Assert.Contains("lost-to:2:semantic-vector", loser.ComparisonRationale);
+        Assert.Equal(selected.SemanticTier, plan.SelectionEvidence!.SelectedSemanticTier);
+        Assert.True(plan.SelectionEvidence.SemanticVectorKnown);
+        Assert.Empty(plan.SelectionEvidence.SemanticVectorUnknownReason);
+    }
+
+    [Fact]
+    public void Production_route_tie_break_prefers_lower_peak_erosion_for_equal_known_vectors()
+    {
+        NetherFloorNode current = Node(1, 80, NetherFloorNodeType.Recovery);
+        NetherFloorNode lowerPeak = Node(2, 81, NetherFloorNodeType.Battle, 1);
+        NetherFloorNode higherPeak = Node(3, 81, NetherFloorNodeType.Battle, 1);
+        NetherFloorNode boss = Node(4, 82, NetherFloorNodeType.Boss, 2, 3);
+        NetherFloorNode[] floors = [current, lowerPeak, higherPeak, boss];
+
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(
+            Snapshot(current, floors),
+            Context(
+                floors,
+                new Dictionary<long, NetherRouteHorizonSafetyEvaluation>
+                {
+                    [2] = Horizon(floors, 2, 4) with
+                    {
+                        PeakErosion = 20,
+                        MinimumActiveCharacterHpPermille = 800,
+                    },
+                    [3] = Horizon(floors, 3, 4) with
+                    {
+                        PeakErosion = 30,
+                        MinimumActiveCharacterHpPermille = 900,
+                    },
+                },
+                rows: [KnownNormalBattle(2), KnownNormalBattle(3)]
+            )
+        );
+
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.SelectedNode).NodeId);
+        AssertRouteTieBreakAudit(plan, winnerId: 2, loserId: 3, rationale: "peak-erosion");
+    }
+
+    [Fact]
+    public void Production_route_tie_break_prefers_higher_minimum_hp_after_equal_peak_for_equal_known_vectors()
+    {
+        NetherFloorNode current = Node(1, 80, NetherFloorNodeType.Recovery);
+        NetherFloorNode higherHp = Node(2, 81, NetherFloorNodeType.Battle, 1);
+        NetherFloorNode lowerHp = Node(3, 81, NetherFloorNodeType.Battle, 1);
+        NetherFloorNode boss = Node(4, 82, NetherFloorNodeType.Boss, 2, 3);
+        NetherFloorNode[] floors = [current, higherHp, lowerHp, boss];
+
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(
+            Snapshot(current, floors),
+            Context(
+                floors,
+                new Dictionary<long, NetherRouteHorizonSafetyEvaluation>
+                {
+                    [2] = Horizon(floors, 2, 4) with
+                    {
+                        PeakErosion = 20,
+                        MinimumActiveCharacterHpPermille = 900,
+                    },
+                    [3] = Horizon(floors, 3, 4) with
+                    {
+                        PeakErosion = 20,
+                        MinimumActiveCharacterHpPermille = 800,
+                    },
+                },
+                rows: [KnownNormalBattle(2), KnownNormalBattle(3)]
+            )
+        );
+
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.SelectedNode).NodeId);
+        AssertRouteTieBreakAudit(plan, winnerId: 2, loserId: 3, rationale: "active-hp");
+    }
+
+    [Fact]
+    public void Production_route_tie_break_uses_coordinates_after_equal_vector_peak_and_hp()
+    {
+        NetherFloorNode current = Node(1, 80, NetherFloorNodeType.Recovery);
+        NetherFloorNode lowerCoordinates = Node(10, 81, NetherFloorNodeType.Battle, 1) with
+        {
+            FloorIndex = 2,
+        };
+        NetherFloorNode higherCoordinates = Node(20, 81, NetherFloorNodeType.Battle, 1) with
+        {
+            FloorIndex = 2,
+        };
+        NetherFloorNode boss = Node(30, 82, NetherFloorNodeType.Boss, 10, 20);
+        NetherFloorNode[] floors = [current, lowerCoordinates, higherCoordinates, boss];
+
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(
+            Snapshot(current, floors),
+            Context(
+                floors,
+                new Dictionary<long, NetherRouteHorizonSafetyEvaluation>
+                {
+                    [10] = Horizon(floors, 10, 30) with
+                    {
+                        PeakErosion = 20,
+                        MinimumActiveCharacterHpPermille = 900,
+                    },
+                    [20] = Horizon(floors, 20, 30) with
+                    {
+                        PeakErosion = 20,
+                        MinimumActiveCharacterHpPermille = 900,
+                    },
+                },
+                rows: [KnownNormalBattle(10), KnownNormalBattle(20)]
+            )
+        );
+
+        Assert.Equal(10, Assert.IsType<NetherFloorNode>(plan.SelectedNode).NodeId);
+        AssertRouteTieBreakAudit(plan, winnerId: 10, loserId: 20, rationale: "coordinates");
+    }
+
+    private static void AssertRouteTieBreakAudit(
+        NetherRoutePlan plan,
+        long winnerId,
+        long loserId,
+        string rationale
+    )
+    {
+        NetherRouteCandidateAudit winner = Assert.Single(
+            plan.Audit,
+            audit => audit.FloorId == winnerId && audit.IsSelected
+        );
+        NetherRouteCandidateAudit loser = Assert.Single(
+            plan.Audit,
+            audit => audit.FloorId == loserId && !audit.IsSelected
+        );
+
+        Assert.Equal(NetherRouteCandidateHardGate.None, winner.FirstFailingHardGate);
+        Assert.Equal(NetherRouteCandidateHardGate.None, loser.FirstFailingHardGate);
+        Assert.Equal(NetherRouteSemanticTier.NormalBattle, winner.SemanticTier);
+        Assert.Equal(NetherRouteSemanticTier.NormalBattle, loser.SemanticTier);
+        Assert.True(winner.SemanticVectorKnown);
+        Assert.True(loser.SemanticVectorKnown);
+        Assert.Empty(winner.SemanticVectorUnknownReason);
+        Assert.Empty(loser.SemanticVectorUnknownReason);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, winner.UnknownReasonCode);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, loser.UnknownReasonCode);
+        Assert.NotNull(winner.SemanticVector);
+        Assert.Equal(winner.SemanticVector, loser.SemanticVector);
+        Assert.Contains($"retained-over:{loserId}:{rationale}", winner.ComparisonRationale);
+        Assert.Contains($"lost-to:{winnerId}:{rationale}", loser.ComparisonRationale);
+        Assert.Equal(NetherRouteSemanticTier.NormalBattle, plan.SelectionEvidence!.SelectedSemanticTier);
+        Assert.Equal(
+            "semantic-vector>peak-erosion>active-hp>coordinates",
+            plan.SelectionEvidence.TieBreakOrder
+        );
+    }
+
+    [Fact]
     public void Unknown_research_completion_pauses_instead_of_using_completed_equipment_order()
     {
         NetherFloorNode current = Node(1, 80, NetherFloorNodeType.Recovery);
@@ -940,7 +1137,7 @@ public class NetherVisibleBranchRoutePlannerTests
     }
 
     [Fact]
-    public void Treasure_rank_shortcut_without_native_rarity_does_not_create_rank_five_value()
+    public void Low_rarity_treasure_does_not_detour_or_spend_held_key_unless_it_is_the_final_reachable_opportunity()
     {
         NetherFloorNode current = Node(1, 95, NetherFloorNodeType.Recovery);
         NetherFloorNode treasure = Node(2, 96, NetherFloorNodeType.Treasure, 1);
@@ -955,21 +1152,68 @@ public class NetherVisibleBranchRoutePlannerTests
             NetherRewardRarity.Purple
         );
 
+        NetherRouteSafetyContext earlyContext = Context(
+            floors,
+            new Dictionary<long, NetherRouteHorizonSafetyEvaluation>
+            {
+                [2] = Horizon(floors, 2, 4),
+                [3] = Horizon(floors, 3, 4),
+            },
+            rows: [treasureRow, unsupportedRankShortcut],
+            researchIncomplete: false
+        );
         NetherRoutePlan plan = new NetherRoutePlanner().Plan(
-            Snapshot(current, floors),
+            Snapshot(current, floors) with { TreasureKeyCount = 1 },
+            earlyContext
+        );
+
+        Assert.Equal(3, Assert.IsType<NetherFloorNode>(plan.SelectedNode).NodeId);
+        Assert.DoesNotContain(2, plan.SelectedPathNodeIds);
+        Assert.Empty(earlyContext.MandatoryRankFiveKeyObjectiveNodeIds);
+
+        NetherFloorNode finalCurrent = Node(10, 95, NetherFloorNodeType.Recovery);
+        NetherFloorNode finalTreasure = Node(11, 96, NetherFloorNodeType.Treasure, 10);
+        NetherFloorNode finalBoss = Node(12, 97, NetherFloorNodeType.Boss, 11);
+        NetherFloorNode[] finalFloors = [finalCurrent, finalTreasure, finalBoss];
+        NetherSnapshot finalSnapshot = Snapshot(finalCurrent, finalFloors) with { TreasureKeyCount = 1 };
+        NetherRoutePlan finalOpportunity = new NetherRoutePlanner().Plan(
+            finalSnapshot,
             Context(
-                floors,
+                finalFloors,
                 new Dictionary<long, NetherRouteHorizonSafetyEvaluation>
                 {
-                    [2] = Horizon(floors, 2, 4),
-                    [3] = Horizon(floors, 3, 4),
+                    [11] = Horizon(finalFloors, 11, 12),
                 },
-                rows: [treasureRow, unsupportedRankShortcut],
+                rows: [TreasureRow(11, 6003)],
                 researchIncomplete: false
             )
         );
 
-        Assert.Equal(3, Assert.IsType<NetherFloorNode>(plan.SelectedNode).NodeId);
+        Assert.Equal(11, Assert.IsType<NetherFloorNode>(finalOpportunity.SelectedNode).NodeId);
+        NetherEventOption keyPayment = new(
+            1,
+            [
+                new NetherEffect(NetherEffectKind.TreasureKeyUsed, 1),
+                new NetherEffect(NetherEffectKind.Item, 1),
+            ]
+        )
+        {
+            EventId = 6003,
+            EventPartId = 6004,
+            FloorId = finalTreasure.FloorId,
+            NodeId = finalTreasure.NodeId,
+        };
+        NetherEventDecision finalPayment = new NetherEventPolicy().DecideTreasure(
+            finalSnapshot,
+            [keyPayment],
+            new NetherAutoClimbSettings { TreasureMode = NetherTreasureMode.KeyOnly }
+        );
+        Assert.Equal(NetherEventDecisionKind.Select, finalPayment.Kind);
+        Assert.Equal(1, finalPayment.OptionNumber);
+        Assert.Equal(0, finalPayment.ProjectedTreasureKeys);
+        Assert.Equal(1, finalPayment.ExpectedEffects.Count(effect =>
+            effect.Kind == NetherEffectKind.TreasureKeyUsed && effect.Amount == 1
+        ));
     }
 
     [Theory]
@@ -1423,6 +1667,20 @@ public class NetherVisibleBranchRoutePlannerTests
                 ]
             ),
         ],
+    };
+
+    private static NetherStrategyVisibleContentRow KnownNormalBattle(long nodeId) => new(
+        NetherStrategyVisibleContentKind.Battle,
+        nodeId,
+        4000 + nodeId,
+        4000 + nodeId
+    )
+    {
+        IsKnown = true,
+        BattleStageId = 5000 + nodeId,
+        BattleType = 1,
+        CodeDropRatio = 0,
+        EventBattleTier = NetherEventBattleTier.NormalBattle,
     };
 
     private static NetherStrategyVisibleContentRow EventPart(

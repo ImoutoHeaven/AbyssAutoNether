@@ -360,7 +360,7 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
-    public void Equipment_orders_by_complete_native_value_when_displayed_power_is_reversed()
+    public void Completed_research_targets_delegate_later_code_offers_to_equipment_native_portfolio_value_when_displayed_power_is_reversed()
     {
         NetherCodeCandidate weaker = Candidate(
             991201,
@@ -380,6 +380,19 @@ public class NetherCodePolicyTests
             stronger
         ) with
         {
+            // The story boundary is the completed configured Research target, not a fixed Code
+            // count.  Both configured families are complete from wallet plus projected normal
+            // settlement, so the production policy must delegate this offer to Equipment value.
+            Research = ResearchState(NetherCodeFamily.Rush, technologyRate: 10)
+                .Select(row => row.Family is NetherCodeFamily.Rush or NetherCodeFamily.Safe
+                    ? row with
+                    {
+                        WalletPoints = 20_000,
+                        IsProjectedNormalSettlementKnown = true,
+                    }
+                    : row)
+                .ToArray(),
+            ActiveResearchFamily = NetherCodeFamily.Rush,
             EquipmentMutationValuesByKey = new Dictionary<NetherCodeMutationKey, NetherCodeEquipmentMutationEvidence>
             {
                 [new NetherCodeMutationKey(weaker.CodeId, 0)] = Mutation(
@@ -397,10 +410,31 @@ public class NetherCodePolicyTests
             },
         };
 
-        NetherCodeDecision decision = Decide(Portfolio(), evidence, weaker, stronger);
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(),
+            [weaker, stronger],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+                ResearchSecondaryFamily = NetherCodeFamily.Safe,
+                CodeReloadReserve = 1,
+            },
+            evidence
+        );
 
         Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
         Assert.Equal(stronger.CodeId, decision.SelectedCodeId);
+        Assert.Equal(NetherCodeDecisionTier.RetainedPortfolioStrictImprovement, decision.DecisionTier);
+        Assert.Equal(NetherEquipmentMutationValueKind.StrictQuantifiedImprovement, decision.MutationValueKind);
+        Assert.True(decision.StrictImprovementProven);
+        Assert.False(decision.DisplayPowerUsedForDecision);
+        NetherCodeCandidateAudit selectedAudit = Assert.Single(
+            decision.CandidateAudits,
+            audit => audit.CodeId == stronger.CodeId
+        );
+        Assert.Equal(NetherCodeCandidateHardGate.None, selectedAudit.FirstFailingHardGate);
+        Assert.Equal(NetherCodeDecisionTier.RetainedPortfolioStrictImprovement, selectedAudit.SelectionTier);
     }
 
     [Fact]

@@ -851,6 +851,12 @@ internal sealed class NetherRoutePlanner
         }
 
         NetherRouteCandidateAudit existing = audit[index];
+        string mergedSemanticVectorUnknownReason = incoming.SemanticVectorKnown
+            && string.IsNullOrEmpty(incoming.SemanticVectorUnknownReason)
+            ? string.Empty
+            : string.IsNullOrEmpty(incoming.SemanticVectorUnknownReason)
+                ? existing.SemanticVectorUnknownReason
+                : incoming.SemanticVectorUnknownReason;
         NetherRouteCandidateAudit merged = existing with
         {
             IsSelected = existing.IsSelected || incoming.IsSelected,
@@ -866,9 +872,10 @@ internal sealed class NetherRoutePlanner
                 : incoming.UnknownReasonCode,
             SemanticVector = incoming.SemanticVector ?? existing.SemanticVector,
             SemanticVectorKnown = existing.SemanticVectorKnown || incoming.SemanticVectorKnown,
-            SemanticVectorUnknownReason = string.IsNullOrEmpty(incoming.SemanticVectorUnknownReason)
-                ? existing.SemanticVectorUnknownReason
-                : incoming.SemanticVectorUnknownReason,
+            SemanticVectorUnknownReason = mergedSemanticVectorUnknownReason,
+            SemanticTier = incoming.SemanticTier == NetherRouteSemanticTier.None
+                ? existing.SemanticTier
+                : incoming.SemanticTier,
             ComparisonRationale = string.IsNullOrEmpty(incoming.ComparisonRationale)
                 ? existing.ComparisonRationale
                 : string.IsNullOrEmpty(existing.ComparisonRationale)

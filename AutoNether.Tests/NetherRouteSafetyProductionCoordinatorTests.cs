@@ -1058,7 +1058,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
     }
 
     [Fact]
-    public void Production_rank_five_procurement_uses_the_event_located_battle_entry_after_plus_eighty_recovery()
+    public void Production_event_erosion_requires_complete_visible_recovery_before_the_terminal_boss()
     {
         // Fresh native decomp d: Event execution is bound to the exact visible option, while the
         // route gate must evaluate the first later battle entry, not a terminal-node snapshot.
@@ -1178,6 +1178,20 @@ public class NetherRouteSafetyProductionCoordinatorTests
         Assert.Equal(NetherKeyProcurementSourceKind.ErosionPaidEventKey, plan.RankFiveKeyProcurement.SourceKind);
         Assert.True(plan.RankFiveKeyProcurement.ErosionAmountIsExactEighty);
         Assert.Equal(5, plan.RankFiveKeyProcurement.Objective.ObjectiveNodeId);
+        NetherRouteHorizonSafetyEvaluation eventHorizon = plan.Context.HorizonEvaluationByFloorId[2];
+        Assert.True(eventHorizon.IsEligible, eventHorizon.RejectionDetail);
+        Assert.Contains(
+            eventHorizon.HorizonSteps,
+            step => step.NodeId == 3 && step.NodeType == NetherFloorNodeType.Recovery
+        );
+        Assert.Contains(
+            plan.Route.SelectedPathNodeIds,
+            nodeId => nodeId == 2
+        );
+        Assert.Contains(
+            plan.Route.SelectedPathNodeIds,
+            nodeId => nodeId == 3
+        );
     }
 
     [Fact]

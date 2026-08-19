@@ -200,6 +200,7 @@ internal sealed record NetherInteractiveOptionProjection(
     public NetherInteractiveOptionHardGate FirstFailingHardGate { get; init; }
     public NetherInteractiveOptionSelectionTier SelectionTier { get; init; }
     public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
+    public string Detail { get; init; } = string.Empty;
     public string ComparisonRationale { get; init; } = string.Empty;
 }
 
@@ -217,12 +218,14 @@ internal enum NetherInteractiveOptionHardGate
     ErosionSafety,
     Resource,
     Procurement,
+    RecoveryTransformPolicy,
 }
 
 internal enum NetherInteractiveOptionSelectionTier
 {
     None = 0,
     Recovery,
+    RecoveryTransform,
     TreasureKey,
     TreasureHpPayment,
     Battle,
@@ -349,7 +352,9 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyResult
             HpDelta = entry.Value.HpDelta,
             CommittedGoldMinimum = entry.Value.CommittedGoldMinimum,
             CommittedKeyMinimum = entry.Value.CommittedKeyMinimum,
-            Detail = entry.Value.UnknownReason,
+            Detail = entry.Value.Detail.Length == 0
+                ? entry.Value.UnknownReason
+                : entry.Value.Detail,
             ComparisonRationale = entry.Value.ComparisonRationale,
         })
         .ToArray();
@@ -365,6 +370,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
 {
     private readonly NetherFloorMasterBoundsMapper _boundsMapper = new();
     private readonly NetherEventPolicy _eventPolicy = new();
+    private readonly NetherCodeTransformPolicy _transformPolicy = new();
 
     public NetherInteractiveFloorPreEntrySafetyResult Evaluate(NetherInteractiveFloorPreEntrySafetyInput? input)
     {
@@ -1309,15 +1315,22 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             {
                 if (ReferenceEquals(option, selectedOption))
                     continue;
-                optionProjections[OptionKey(option)] = UnknownProjection(
-                    option,
-                    floorId,
-                    nodeId,
-                    "recovery-option-not-selected-by-complete-branch-proof",
-                    NetherInteractiveOptionHardGate.RecoveryBranchSafety,
-                    NetherStrategyUnknownReasonCode.None,
-                    "excluded:first-failing-gate=RecoveryBranchSafety"
-                );
+                optionProjections[OptionKey(option)] =
+                    option.RecoveryBranchSafety?.BranchKind == NetherRecoveryBranchKind.Transform
+                        ? CreateRecoveryTransformPolicyProjection(option, floorId, nodeId, snapshot)
+                        : option.RecoveryBranchSafety is
+                            { BranchKind: NetherRecoveryBranchKind.Rest or NetherRecoveryBranchKind.Purification,
+                                IsAuthoritative: true, IsNextVisibleBranchSafe: true }
+                            ? CreateSafeRecoveryTieLossProjection(option, floorId, nodeId)
+                            : UnknownProjection(
+                                option,
+                                floorId,
+                                nodeId,
+                                "recovery-option-not-selected-by-complete-branch-proof",
+                                NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+                                NetherStrategyUnknownReasonCode.None,
+                                "excluded:first-failing-gate=RecoveryBranchSafety"
+                            );
             }
             selectedOptionNumber = completeBranchDecision.OptionNumber;
             selectedProjection = projection;
@@ -1554,6 +1567,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         FirstFailingHardGate = gate,
         SelectionTier = tier,
         UnknownReasonCode = code,
+        Detail = policyAudit?.Detail ?? decision.Detail,
         ComparisonRationale = rationale,
     };
     }
@@ -1599,6 +1613,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         HasRouteSafetyEvidence = false,
         RouteSafetyAllowed = false,
         RouteSafetyUnknownReason = rejectionDetail,
+        Detail = rejectionDetail,
         ParticipatesInSelection = true,
         IsSelected = false,
         FirstFailingHardGate = gate,
@@ -1608,6 +1623,85 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
             ? "excluded:first-failing-gate=" + gate
             : comparisonRationale,
     };
+    }
+
+    private static NetherInteractiveOptionProjection CreateSafeRecoveryTieLossProjection(
+        NetherEventOption option,
+        long floorId,
+        long nodeId
+    ) => new(
+        option.OptionNumber,
+        0,
+        0,
+        option.Effects ?? Array.Empty<NetherEffect>()
+    )
+    {
+        EventId = option.EventId,
+        EventPartId = option.EventPartId,
+        FloorId = floorId,
+        NodeId = nodeId,
+        IsKnown = true,
+        UnknownReason = string.Empty,
+        HasRouteSafetyEvidence = true,
+        RouteSafetyAllowed = true,
+        RouteSafetyUnknownReason = string.Empty,
+        ParticipatesInSelection = true,
+        IsSelected = false,
+        FirstFailingHardGate = NetherInteractiveOptionHardGate.None,
+        SelectionTier = NetherInteractiveOptionSelectionTier.Recovery,
+        UnknownReasonCode = NetherStrategyUnknownReasonCode.None,
+        Detail = "safe-complete-visible-recovery-branch-proof",
+        ComparisonRationale = "eligible-safe-but-not-selected-by-deterministic-recovery-tie-break",
+    };
+
+    private NetherInteractiveOptionProjection CreateRecoveryTransformPolicyProjection(
+        NetherEventOption option,
+        long floorId,
+        long nodeId,
+        NetherSnapshot snapshot
+    )
+    {
+        NetherCodeTransformDecision transform = _transformPolicy.Decide(
+            snapshot.Codes,
+            snapshot.CodeCapacity,
+            option.RecoveryBranchSafety?.TransformEligibility
+        );
+        bool unknown = transform.PauseReason is NetherPauseReason.UnknownMasterData
+            or NetherPauseReason.UnknownEffect
+            or NetherPauseReason.BindingUnavailable
+            or NetherPauseReason.InvalidConfiguration;
+        return new NetherInteractiveOptionProjection(
+            option.OptionNumber,
+            0,
+            0,
+            option.Effects ?? Array.Empty<NetherEffect>()
+        )
+        {
+            EventId = option.EventId,
+            EventPartId = option.EventPartId,
+            FloorId = floorId,
+            NodeId = nodeId,
+            IsKnown = !unknown,
+            UnknownReason = unknown ? transform.Detail : string.Empty,
+            HasRouteSafetyEvidence = false,
+            RouteSafetyAllowed = false,
+            RouteSafetyUnknownReason = transform.Detail,
+            ParticipatesInSelection = true,
+            IsSelected = false,
+            FirstFailingHardGate = transform.CanTransform
+                ? NetherInteractiveOptionHardGate.None
+                : NetherInteractiveOptionHardGate.RecoveryTransformPolicy,
+            SelectionTier = transform.CanTransform
+                ? NetherInteractiveOptionSelectionTier.RecoveryTransform
+                : NetherInteractiveOptionSelectionTier.None,
+            UnknownReasonCode = unknown
+                ? NetherStrategyUnknownReasonCodes.FromDetail(transform.Detail)
+                : NetherStrategyUnknownReasonCode.None,
+            Detail = transform.Detail,
+            ComparisonRationale = transform.CanTransform
+                ? "eligible-transform-not-selected-by-deterministic-rest-purification-policy"
+                : "excluded:recovery-transform-policy=" + transform.Detail,
+        };
     }
 
     private static NetherEventOptionHardGate InferEventOptionHardGate(
@@ -1652,6 +1746,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
         NetherEventOptionHardGate.NativeMasterData => NetherInteractiveOptionHardGate.NativeMasterData,
         NetherEventOptionHardGate.NativeEffect => NetherInteractiveOptionHardGate.NativeEffect,
         NetherEventOptionHardGate.RecoveryBranchSafety => NetherInteractiveOptionHardGate.RecoveryBranchSafety,
+        NetherEventOptionHardGate.RecoveryTransformPolicy => NetherInteractiveOptionHardGate.RecoveryTransformPolicy,
         NetherEventOptionHardGate.BattleRouteSafety => NetherInteractiveOptionHardGate.BattleRouteSafety,
         NetherEventOptionHardGate.HpSafety => NetherInteractiveOptionHardGate.HpSafety,
         NetherEventOptionHardGate.ErosionSafety => NetherInteractiveOptionHardGate.ErosionSafety,
@@ -1667,6 +1762,7 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
     ) => tier switch
     {
         NetherEventOptionSelectionTier.Recovery => NetherInteractiveOptionSelectionTier.Recovery,
+        NetherEventOptionSelectionTier.RecoveryTransform => NetherInteractiveOptionSelectionTier.RecoveryTransform,
         NetherEventOptionSelectionTier.TreasureKey => NetherInteractiveOptionSelectionTier.TreasureKey,
         NetherEventOptionSelectionTier.TreasureHpPayment => NetherInteractiveOptionSelectionTier.TreasureHpPayment,
         NetherEventOptionSelectionTier.BossBattle
