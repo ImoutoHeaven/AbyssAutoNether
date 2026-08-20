@@ -160,6 +160,34 @@ public sealed class NetherStrategyEvidenceMapperTests
     }
 
     [Fact]
+    public void Battle_result_code_owner_maps_current_evidence_without_a_floor_scene_entered_event()
+    {
+        // Fresh current-game Cpp2IL evidence (Project.dll 033a5d1e...c75f4,
+        // GameAssembly.dll f2ad9478...767) shows
+        // AbyssCodeSelectPopupController.InitializeView(NetherPartyModel, long[], Action<long>,
+        // Action) stores the live party model, while FloorSelection transitions to the Result
+        // scene before Result's later floor-selection return. A result-owned offer therefore has
+        // a positive result owner generation but no current FloorSelection.OnEntered proof.
+        NetherSnapshot snapshot = Snapshot();
+        NetherStrategyEvidenceMapResult mapped = NetherStrategyEvidenceMapper.Map(
+            new NetherStrategyEvidenceMapRequest(
+                new NetherStrategyEvidenceIdentity(
+                    RuntimeGeneration: 6,
+                    ControllerOwnerGeneration: 4,
+                    EnteredSubsceneGeneration: 0,
+                    SnapshotFingerprint: snapshot.Fingerprint
+                ),
+                snapshot
+            )
+        );
+
+        Assert.True(mapped.IsMapped, mapped.Detail);
+        Assert.Equal(6, mapped.Package!.Identity.RuntimeGeneration);
+        Assert.Equal(4, mapped.Package.Identity.ControllerOwnerGeneration);
+        Assert.Equal(0, mapped.Package.Identity.EnteredSubsceneGeneration);
+    }
+
+    [Fact]
     public void Unknown_party_is_local_and_display_diagnostics_cannot_substitute_for_mechanics()
     {
         NetherSnapshot snapshot = Snapshot();

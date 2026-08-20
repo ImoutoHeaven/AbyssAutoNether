@@ -76,3 +76,81 @@ internal static class NetherStrategyEvidenceProductionGate
             : NetherRuntimeStrategyEvidenceResult.Failure(accepted.Detail);
     }
 }
+
+/// <summary>
+/// Immutable boundary for Code policy captured from a native battle-result-owned code popup.
+/// This owner deliberately has no FloorSelection OnEntered proof: the result view owns it until
+/// its Next continuation has been invoked.
+/// </summary>
+internal readonly record struct NetherBattleResultCodeEvidenceCaptureBoundary(
+    object? PopupController,
+    object? Popup,
+    object? PartyModel,
+    long RuntimeGeneration,
+    long OwnerGeneration,
+    long Sequence,
+    bool IsCurrentResultOwner
+)
+{
+    public bool IsUsable => PopupController != null
+        && Popup != null
+        && PartyModel != null
+        && RuntimeGeneration > 0
+        && OwnerGeneration > 0
+        && Sequence > 0
+        && IsCurrentResultOwner;
+}
+
+internal readonly record struct NetherBattleResultCodeEvidenceCaptureDecision(
+    bool IsAccepted,
+    string Detail
+)
+{
+    public static NetherBattleResultCodeEvidenceCaptureDecision Accepted { get; } = new(
+        true,
+        string.Empty
+    );
+
+    public static NetherBattleResultCodeEvidenceCaptureDecision Rejected(string detail) => new(
+        false,
+        detail
+    );
+}
+
+/// <summary>
+/// Proves a result-owned popup and the exact party object remained current across the read-only
+/// evidence capture. It intentionally does not substitute a stale FloorSelection owner.
+/// </summary>
+internal static class NetherBattleResultCodeEvidenceProductionGate
+{
+    public static NetherBattleResultCodeEvidenceCaptureDecision Evaluate(
+        NetherBattleResultCodeEvidenceCaptureBoundary before,
+        NetherBattleResultCodeEvidenceCaptureBoundary after
+    )
+    {
+        if (!before.IsUsable)
+        {
+            return NetherBattleResultCodeEvidenceCaptureDecision.Rejected(
+                "battle-result-code-evidence-owner-unavailable"
+            );
+        }
+        if (!after.IsUsable)
+        {
+            return NetherBattleResultCodeEvidenceCaptureDecision.Rejected(
+                "battle-result-code-evidence-owner-lost-during-capture"
+            );
+        }
+        if (!ReferenceEquals(before.PopupController, after.PopupController)
+            || !ReferenceEquals(before.Popup, after.Popup)
+            || !ReferenceEquals(before.PartyModel, after.PartyModel)
+            || before.RuntimeGeneration != after.RuntimeGeneration
+            || before.OwnerGeneration != after.OwnerGeneration
+            || before.Sequence != after.Sequence)
+        {
+            return NetherBattleResultCodeEvidenceCaptureDecision.Rejected(
+                "battle-result-code-evidence-owner-replaced-during-capture"
+            );
+        }
+        return NetherBattleResultCodeEvidenceCaptureDecision.Accepted;
+    }
+}

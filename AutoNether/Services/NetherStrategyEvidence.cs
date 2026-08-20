@@ -7,9 +7,10 @@ using System.Linq;
 namespace AutoNether.Services;
 
 /// <summary>
-/// Immutable identity shared by every strategy component.  The three generation values are
-/// intentionally explicit: a controller can be current before the matching FloorSelection
-/// SubScene.OnEntered evidence has been observed, and neither fact proves the server snapshot.
+/// Immutable identity shared by every strategy component. FloorSelection evidence requires one
+/// current controller generation and its matching SubScene.OnEntered proof. Result-owned Code
+/// evidence instead uses the current runtime generation, its independent positive result-owner
+/// generation, and an explicit zero EnteredSubsceneGeneration: no FloorSelection scene is live.
 /// </summary>
 internal readonly record struct NetherStrategyEvidenceIdentity(
     long RuntimeGeneration,
@@ -1313,9 +1314,11 @@ internal static class NetherStrategyEvidenceMapper
 
         NetherSnapshot snapshot = request.Snapshot;
         NetherStrategyEvidenceIdentity identity = request.Identity;
-        if (identity.RuntimeGeneration <= 0
-            || identity.ControllerOwnerGeneration != identity.RuntimeGeneration
-            || identity.EnteredSubsceneGeneration != identity.RuntimeGeneration)
+        bool floorSelectionOwner = identity.ControllerOwnerGeneration == identity.RuntimeGeneration
+            && identity.EnteredSubsceneGeneration == identity.RuntimeGeneration;
+        bool resultOwnedCode = identity.ControllerOwnerGeneration > 0
+            && identity.EnteredSubsceneGeneration == 0;
+        if (identity.RuntimeGeneration <= 0 || (!floorSelectionOwner && !resultOwnedCode))
         {
             return NetherStrategyEvidenceMapResult.Failure("invalid-strategy-evidence-owner-binding");
         }

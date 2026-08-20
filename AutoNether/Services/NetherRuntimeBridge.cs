@@ -2450,6 +2450,28 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             );
         }
 
+        // The native result-owned popup is live after FloorSelection has transitioned away and
+        // before Result invokes Next. Its party model is authoritative for Code policy, but it
+        // cannot satisfy the FloorSelection OnEntered contract used by route planning.
+        if (HasActiveBattleResultCodeOwner())
+        {
+            NetherRuntimeStrategyEvidenceResult battleResultStrategy =
+                TryCaptureBattleResultCodeStrategyEvidence(snapshot, settings);
+            if (!battleResultStrategy.IsSuccess)
+            {
+                return NetherRuntimeCodePolicyEvidenceResult.Failure(
+                    "battle-result-code-policy-strategy-evidence:" + battleResultStrategy.Detail
+                );
+            }
+            return AssembleCodePolicyEvidence(
+                battleResultStrategy.Package!,
+                snapshot,
+                candidates,
+                settings,
+                captureFloorRouteEvidence: false
+            );
+        }
+
         NetherRuntimeStrategyEvidenceResult strategy = TryCaptureStrategyEvidence(snapshot, settings);
         if (!strategy.IsSuccess)
         {
@@ -2457,7 +2479,166 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 "code-policy-strategy-evidence:" + strategy.Detail
             );
         }
+        return AssembleCodePolicyEvidence(
+            strategy.Package!,
+            snapshot,
+            candidates,
+            settings,
+            captureFloorRouteEvidence: true
+        );
+    }
 
+    private bool HasActiveBattleResultCodeOwner()
+    {
+        lock (_gate)
+        {
+            return _battleResultCodeGeneration > 0
+                && _battleResultContinuation.HasObservation
+                && !_battleResultContinuation.NextInvoked;
+        }
+    }
+
+    private NetherRuntimeStrategyEvidenceResult TryCaptureBattleResultCodeStrategyEvidence(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings
+    )
+    {
+        NetherBattleResultCodeEvidenceCaptureBoundary before =
+            CaptureBattleResultCodeEvidenceBoundary();
+        if (!before.IsUsable
+            || before.PartyModel is not Project.Nether.NetherPartyModel partyModel)
+        {
+            return NetherRuntimeStrategyEvidenceResult.Failure(
+                "battle-result-code-evidence-owner-unavailable"
+            );
+        }
+
+        NetherStrategyEvidenceMapRequest request;
+        try
+        {
+            UserData? userData = Engine.Get<UserData>();
+            NetherDataStore? dataStore = userData?.NetherDataStore;
+            NetherPointData? pointData = dataStore?.NetherPointData;
+            MasterDataStore? masterDataStore = Engine.Get<MasterDataStore>();
+            if (dataStore == null || pointData == null || masterDataStore == null)
+            {
+                return NetherRuntimeStrategyEvidenceResult.Failure(
+                    "battle-result-code-evidence-missing-live-store-or-master"
+                );
+            }
+
+            bool partyMapped = TryMapStrategyPartyModel(
+                partyModel,
+                out IReadOnlyList<NetherStrategyPartyMember>? mappedParty,
+                out string partyError
+            );
+            bool codesMapped = TryMapStrategyCodes(
+                snapshot,
+                masterDataStore,
+                out NetherStrategyOwnedCodeEvidence? mappedCodes,
+                out string codesError
+            );
+            bool researchMapped = TryMapStrategyResearch(
+                pointData,
+                snapshot.Codes,
+                out IReadOnlyList<NetherStrategyResearchFamilyState>? mappedResearch,
+                out string researchError
+            );
+            bool mechanicsMapped = NetherNativeMechanicProductionCapture.TryCapture(
+                snapshot.Codes,
+                masterDataStore,
+                out IReadOnlyList<NetherStrategyNativeMechanic>? mappedMechanics,
+                out string mechanicsError
+            );
+            request = new NetherStrategyEvidenceMapRequest(
+                new NetherStrategyEvidenceIdentity(
+                    before.RuntimeGeneration,
+                    before.OwnerGeneration,
+                    0,
+                    snapshot.Fingerprint
+                ),
+                snapshot
+            )
+            {
+                EvidenceVersion = NetherStrategyEvidenceContract.CurrentVersion,
+                StrategyMode = settings.StrategyMode,
+                ResearchPrimaryFamily = settings.ResearchPrimaryFamily,
+                ResearchSecondaryFamily = settings.ResearchSecondaryFamily,
+                Party = partyMapped ? mappedParty : null,
+                PartyUnknownReason = partyError,
+                OwnedCodes = codesMapped ? mappedCodes : null,
+                OwnedCodesUnknownReason = codesError,
+                Research = researchMapped ? mappedResearch : null,
+                ResearchUnknownReason = researchError,
+                NativeMechanics = mechanicsMapped ? mappedMechanics : null,
+                NativeMechanicsUnknownReason = mechanicsError,
+                VisibleMap = null,
+                VisibleMapUnknownReason =
+                    "battle-result-code-visible-map-unavailable-before-floor-scene-rebind",
+            };
+        }
+        catch (Exception ex)
+        {
+            return NetherRuntimeStrategyEvidenceResult.Failure(
+                "battle-result-code-evidence-capture-exception:"
+                    + ex.GetType().Name + ":" + ex.Message
+            );
+        }
+
+        NetherStrategyEvidenceMapResult mapped = NetherStrategyEvidenceMapper.Map(request);
+        NetherBattleResultCodeEvidenceCaptureDecision accepted =
+            NetherBattleResultCodeEvidenceProductionGate.Evaluate(
+                before,
+                CaptureBattleResultCodeEvidenceBoundary()
+            );
+        if (!accepted.IsAccepted)
+            return NetherRuntimeStrategyEvidenceResult.Failure(accepted.Detail);
+        return mapped.IsMapped && mapped.Package != null
+            ? NetherRuntimeStrategyEvidenceResult.Success(mapped.Package)
+            : NetherRuntimeStrategyEvidenceResult.Failure(
+                "battle-result-code-evidence-map:" + mapped.Detail
+            );
+    }
+
+    private NetherBattleResultCodeEvidenceCaptureBoundary
+        CaptureBattleResultCodeEvidenceBoundary()
+    {
+        lock (_gate)
+        {
+            PopupRegistration? registration = _codeSelectPopup;
+            bool currentOwner = registration is PopupRegistration popup
+                && popup.IsLive
+                && popup.OwnerAction == NetherActionKind.BattleSettlement
+                && popup.OwnerGeneration == _battleResultCodeGeneration
+                && popup.RuntimeGeneration == _runtimeGeneration
+                && _battleResultCodeGeneration > 0
+                && _battleResultContinuation.HasObservation
+                && !_battleResultContinuation.NextInvoked;
+            object? partyModel = null;
+            if (currentOwner && registration is PopupRegistration current)
+            {
+                TryReadMember(current.Controller, "_partyModel", out partyModel);
+            }
+            return new NetherBattleResultCodeEvidenceCaptureBoundary(
+                registration?.Controller,
+                registration?.Popup,
+                partyModel,
+                _runtimeGeneration,
+                _battleResultCodeGeneration,
+                registration?.Sequence ?? 0,
+                currentOwner
+            );
+        }
+    }
+
+    private NetherRuntimeCodePolicyEvidenceResult AssembleCodePolicyEvidence(
+        NetherStrategyEvidencePackage strategyPackage,
+        NetherSnapshot snapshot,
+        NetherRuntimeCodeCandidatesResult candidates,
+        NetherAutoClimbSettings settings,
+        bool captureFloorRouteEvidence
+    )
+    {
         try
         {
             MasterDataStore? masterDataStore = Engine.Get<MasterDataStore>();
@@ -2502,36 +2683,47 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     "code-policy-offered-mechanics:" + mechanicError
                 );
             }
-            NetherProductionRouteSafetyPlan routePlan = new NetherRouteSafetyProductionCoordinator()
-                .Plan(
-                    snapshot,
-                    settings.MaxDepth,
-                    settings,
-                    TryCaptureRouteSafety(snapshot.Floors),
-                    TryCaptureInteractivePreEntryInputs(snapshot, settings)
+
+            NetherCodePolicyRouteEvidence routeEvidence;
+            if (!captureFloorRouteEvidence)
+            {
+                routeEvidence = NetherCodePolicyRouteEvidence.Unknown(
+                    "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind"
                 );
-            MNetherFloorBattles[]? nativeBattles = masterDataStore.GetCache<MNetherFloorBattles>();
-            MNetherBattleStages[]? nativeStages = masterDataStore.GetCache<MNetherBattleStages>();
-            NetherCodePolicyRouteEvidence routeEvidence = nativeBattles == null || nativeStages == null
-                ? NetherCodePolicyRouteEvidenceMapper.Map(snapshot, routePlan)
-                : NetherCodePolicyRouteEvidenceMapper.Map(
-                    snapshot,
-                    routePlan,
-                    nativeBattles.Where(row => row != null).Select(row =>
-                        new NetherStrategyBattleMasterRow(
-                            row.id,
-                            row.m_nether_map_floor_id,
-                            row.type,
-                            row.m_nether_battle_stage_id,
-                            row.code_drop_ratio
-                        )
-                    ).ToArray(),
-                    nativeStages.Where(row => row != null).Select(row =>
-                        new NetherCodePolicyBattleStageRow(row.id, row.time_limit)
-                    ).ToArray()
-                );
+            }
+            else
+            {
+                NetherProductionRouteSafetyPlan routePlan = new NetherRouteSafetyProductionCoordinator()
+                    .Plan(
+                        snapshot,
+                        settings.MaxDepth,
+                        settings,
+                        TryCaptureRouteSafety(snapshot.Floors),
+                        TryCaptureInteractivePreEntryInputs(snapshot, settings)
+                    );
+                MNetherFloorBattles[]? nativeBattles = masterDataStore.GetCache<MNetherFloorBattles>();
+                MNetherBattleStages[]? nativeStages = masterDataStore.GetCache<MNetherBattleStages>();
+                routeEvidence = nativeBattles == null || nativeStages == null
+                    ? NetherCodePolicyRouteEvidenceMapper.Map(snapshot, routePlan)
+                    : NetherCodePolicyRouteEvidenceMapper.Map(
+                        snapshot,
+                        routePlan,
+                        nativeBattles.Where(row => row != null).Select(row =>
+                            new NetherStrategyBattleMasterRow(
+                                row.id,
+                                row.m_nether_map_floor_id,
+                                row.type,
+                                row.m_nether_battle_stage_id,
+                                row.code_drop_ratio
+                            )
+                        ).ToArray(),
+                        nativeStages.Where(row => row != null).Select(row =>
+                            new NetherCodePolicyBattleStageRow(row.id, row.time_limit)
+                        ).ToArray()
+                    );
+            }
             NetherRuntimeCodePolicyEvidenceResult assembled = NetherCodePolicyEvidenceAssembler.Assemble(
-                strategy.Package!,
+                strategyPackage,
                 snapshot,
                 candidates.Candidates,
                 mechanics,
@@ -2539,7 +2731,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 routeEvidence
             );
             return assembled.IsSuccess
-                ? assembled with { StrategyAudit = strategy.Package!.EvidenceAudit }
+                ? assembled with { StrategyAudit = strategyPackage.EvidenceAudit }
                 : assembled;
         }
         catch (Exception ex)
@@ -8717,10 +8909,28 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         out string error
     )
     {
+        if (!TryReadMember(model, "PartyModel", out object? party)
+            || party is not Project.Nether.NetherPartyModel nativeParty)
+        {
+            members = null;
+            error = "missing-strategy-party-model";
+            return false;
+        }
+        return TryMapStrategyPartyModel(nativeParty, out members, out error);
+    }
+
+    /// <summary>
+    /// Maps the same live native party relationship from either FloorSelection.NetherModel or the
+    /// result-owned AbyssCodeSelect popup. Callers prove the owner lifetime separately.
+    /// </summary>
+    private static bool TryMapStrategyPartyModel(
+        Project.Nether.NetherPartyModel nativeParty,
+        out IReadOnlyList<NetherStrategyPartyMember>? members,
+        out string error
+    )
+    {
         members = null;
-        if (!TryReadMember(model, "PartyModel", out object? party) || party == null
-            || party is not Project.Nether.NetherPartyModel nativeParty
-            || nativeParty.CharacterModels == null)
+        if (nativeParty == null || nativeParty.CharacterModels == null)
         {
             error = "missing-strategy-party-model";
             return false;

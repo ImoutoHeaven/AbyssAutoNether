@@ -50,6 +50,24 @@ public sealed class AutoNetherBattleInteropContractTests
     }
 
     [Fact]
+    public void Battle_result_code_policy_uses_the_result_owned_popup_party_not_a_torn_down_floor_scene()
+    {
+        // Fresh current-game Cpp2IL: AbyssCodeSelectPopupController.InitializeView receives and
+        // stores NetherPartyModel, while FloorSelection.TransitionNetherResultScene changes scene.
+        // The result owner must therefore be independently gated and leave route horizons unknown
+        // until FloorSelection rebinds, rather than pretending OnEntered still exists.
+        string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+
+        Assert.Contains("HasActiveBattleResultCodeOwner()", runtime);
+        Assert.Contains("TryCaptureBattleResultCodeStrategyEvidence", runtime);
+        Assert.Contains("TryMapStrategyPartyModel", runtime);
+        Assert.Contains(
+            "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind",
+            runtime
+        );
+    }
+
+    [Fact]
     public void Return_popup_owns_its_already_initialized_nested_scroll_without_waiting_for_a_wrapper_hook()
     {
         string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
