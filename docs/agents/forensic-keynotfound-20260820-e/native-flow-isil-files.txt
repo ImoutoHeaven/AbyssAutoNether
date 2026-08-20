@@ -1,0 +1,5 @@
+IsilDump/Project/Project/Master/NoaMessagePack/MNetherFloorEvents.txt
+IsilDump/Project/Project/Master/NoaMessagePack/MNetherMapFloors.txt
+IsilDump/Project/Project/Nether/FloorSelection/NetherFloorModel.txt
+IsilDump/Project/Project/Nether/FloorSelection/NetherTreasureFloorEventFlow.txt
+IsilDump/Project/Project/Nether/NetherFloorMasterResolver.txt

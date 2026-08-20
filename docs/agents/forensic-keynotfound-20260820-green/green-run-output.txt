@@ -1,0 +1,74 @@
+GREEN_EVIDENCE_ID=forensic-keynotfound-20260820-green
+SOURCE_MOUNT=/src:readonly
+GAME_MOUNT=/game:readonly
+/game/BepInEx/interop/Project.dll: OK
+/game/GameAssembly.dll: OK
+/game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat: OK
+debconf: delaying package configuration, since apt-utils is not installed
+CPP2IL_ACQUISITION_EXIT=0
+CPP2IL_DIFFABLE_EXIT=0
+CPP2IL_ISIL_EXIT=0
+Version 2022.1.0-pre-release.21+58fc404ac503f4e512055cafc48c03088fc6e224
+[0m[38;2;173;216;230m[Info] [Program] [0m[38;2;173;216;230mDetermined game's unity version to be 6000.3.8f1
+52f25532f31995f63dd484a74439586fb2cd5b0f994820495cc6d19a3d6de5e1  /tmp/green-diffable/DiffableCs/Project/Project/Master/MasterDataStore.cs
+e7b39b723f9e8207796e899caf477f5056592cd4d70e0f908a749963584f8d52  /tmp/green-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorTreasures.cs
+6eafaf49c368a667939c7757bc859d9fc4a880e29e3d7205c017db1bcd2688a1  /tmp/green-diffable/DiffableCs/Project/Project/Nether/FloorSelection/NetherFloorModel.cs
+f17ce33f89426f5a91958ba1b681d844d410d8b7bfc87ae752373c7be0e18f69  /tmp/green-diffable/DiffableCs/Project/Project/Nether/NetherFloorMasterResolver.cs
+aeb486ae6693e4034b9306e174ec0704a680a0dda43eaf8c2270f14db71c9006  /tmp/green-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorEvents.cs
+f78be6e5b2ec21d036c1cb19d7bc2d4c3c67d31d628cd38676660f25b93d11be  /tmp/green-isil/IsilDump/Project/Project/Master/MasterDataStore.txt
+0070eb2cddfe065dd6da35e2a4b98d8580467a8d10ae4ea3db8a3655323c0347  /tmp/green-isil/IsilDump/Project/Project/Nether/FloorSelection/NetherFloorModel.txt
+70f44540867f95caf351a57e845baad210dd8c876da7e59a320fe10bef3a7f97  /tmp/green-isil/IsilDump/Project/Project/Nether/NetherFloorMasterResolver.txt
+NATIVE_NETHER_FLOW_TREASURE_CACHE_REFS=0
+772:	048 Call Dictionary`2<Object, Object>.TryGetValue, rcx, rdx, r8
+842:	118 Call KeyNotFoundException..ctor, rcx, rdx
+965:	042 Call Dictionary`2<Object, Object>.TryGetValue, rcx, rdx, r8
+10:		public static Func<MNetherFloorRestricts, NetherMapFloorEntity, Boolean> <>9__57_1; //Field offset: 0x10
+11:		public static Func<MNetherFloorBattles, Int64, Boolean> <>9__57_2; //Field offset: 0x18
+12:		public static Func<MNetherBattleStages, Int64, Boolean> <>9__57_3; //Field offset: 0x20
+20:		internal bool <CreateModel>b__57_1(MNetherFloorRestricts masterData, NetherMapFloorEntity sEntity) { }
+22:		internal bool <CreateModel>b__57_2(MNetherFloorBattles masterData, long mNetherMapFloorId) { }
+24:		internal bool <CreateModel>b__57_3(MNetherBattleStages masterData, long mNetherBattleStageId) { }
+35:	private readonly long <ExtendId>k__BackingField; //Field offset: 0x20
+65:	public private long ExtendId
+178:	public long get_ExtendId() { }
+217:	private void set_ExtendId(long value) { }
+9:		public static Func<MNetherFloorEvents, Int64, Boolean> <>9__1_0; //Field offset: 0x8
+10:		public static Func<MNetherFloorEvents, Int64, Boolean> <>9__1_1; //Field offset: 0x10
+18:		internal bool <GetMNetherFloorEvents>b__1_0(MNetherFloorEvents masterData, long id) { }
+20:		internal bool <GetMNetherFloorEvents>b__1_1(MNetherFloorEvents masterData, long mId) { }
+29:	public static MNetherFloorEvents GetMNetherFloorEvents(long mNetherMapFloorId, long extendId) { }
+31:	public static MNetherFloorEvents GetMNetherFloorEvents(MasterDataStore masterDataStore, long mNetherMapFloorId, long extendId) { }
+33:	public static MNetherFloorShops GetMNetherFloorShops(long mNetherMapFloorId, long extendId) { }
+35:	public static MNetherFloorShops GetMNetherFloorShops(MasterDataStore masterDataStore, long mNetherMapFloorId, long extendId) { }
+  Determining projects to restore...
+  Restored /src/AutoNether.Tests/AutoNether.Tests.csproj (in 25.23 sec).
+  Restored /src/AutoNether/AutoNether.csproj (in 25.23 sec).
+  AutoNether -> /src/release/Debug/net6.0/AutoNether.dll
+  AutoNether.Tests -> /src/AutoNether.Tests/bin/Debug/net8.0/AutoNether.Tests.dll
+Test run for /src/AutoNether.Tests/bin/Debug/net8.0/AutoNether.Tests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.29)
+[xUnit.net 00:00:00.05]   Discovering: AutoNether.Tests
+[xUnit.net 00:00:00.18]   Discovered:  AutoNether.Tests
+[xUnit.net 00:00:00.19]   Starting:    AutoNether.Tests
+[xUnit.net 00:00:00.25]     AutoNether.Tests.NetherStrategyVisibleEvidenceMapperTests.Missing_legacy_treasure_cache_preserves_exact_event_reward_and_known_sibling_evidence [FAIL]
+[xUnit.net 00:00:00.25]       event-battle-semantic-tier-unavailable-for-raw-type:2
+[xUnit.net 00:00:00.25]       Stack Trace:
+[xUnit.net 00:00:00.25]         /src/AutoNether.Tests/NetherStrategyVisibleEvidenceMapperTests.cs(38,0): at AutoNether.Tests.NetherStrategyVisibleEvidenceMapperTests.Missing_legacy_treasure_cache_preserves_exact_event_reward_and_known_sibling_evidence()
+[xUnit.net 00:00:00.25]            at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+[xUnit.net 00:00:00.25]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+[xUnit.net 00:00:00.25]   Finished:    AutoNether.Tests
+  Passed AutoNether.Tests.NetherStrategySpecReviewFixTests.Missing_native_treasure_cache_is_component_local_unknown_at_visible_capture_seam [4 ms]
+  Failed AutoNether.Tests.NetherStrategyVisibleEvidenceMapperTests.Missing_legacy_treasure_cache_preserves_exact_event_reward_and_known_sibling_evidence [20 ms]
+  Error Message:
+   event-battle-semantic-tier-unavailable-for-raw-type:2
+  Stack Trace:
+     at AutoNether.Tests.NetherStrategyVisibleEvidenceMapperTests.Missing_legacy_treasure_cache_preserves_exact_event_reward_and_known_sibling_evidence() in /src/AutoNether.Tests/NetherStrategyVisibleEvidenceMapperTests.cs:line 38
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+
+Test Run Failed.
+Total tests: 2
+     Passed: 1
+     Failed: 1
+ Total time: 0.5928 Seconds

@@ -8,6 +8,101 @@ namespace AutoNether.Tests;
 public sealed class NetherStrategyVisibleEvidenceMapperTests
 {
     [Fact]
+    public void Current_native_treasure_event_authority_preserves_exact_reward_and_known_sibling_evidence()
+    {
+        NetherFloorNode recovery = Floor(101, 10001, NetherFloorNodeType.Recovery);
+        NetherFloorNode treasure = Floor(102, 10002, NetherFloorNodeType.Treasure);
+        var request = new NetherStrategyVisibleEvidenceCaptureRequest(
+            [recovery, treasure],
+            [],
+            [],
+            [
+                new NetherFloorEventMasterRow(401, 101, 5, 4011, 0, 0, 0),
+                new NetherFloorEventMasterRow(501, 102, 10, 601, 0, 0, 0),
+            ],
+            [
+                new NetherFloorEventPartMasterRow(4011, 0, 0, 0, 0, 0, 0, 165, 0, 40),
+                new NetherFloorEventPartMasterRow(601, 0, 0, 0, 0, 0, 0, 30, 701, 2),
+            ],
+            [new NetherStrategyItemMasterRow(701, 91, 5, 888, 9)]
+        )
+        {
+            UsesCurrentNativeTreasureEventAuthority = true,
+            ExtendIdByNodeId = new Dictionary<long, long>
+            {
+                [10001] = 401,
+                [10002] = 501,
+            },
+            TypedSemanticProvider = new NetherStrategyTypedSemanticProviderEvidence
+            {
+                CanonicalRewardTiers =
+                [new NetherCanonicalRewardTierProviderEvidence(701, NetherCanonicalRewardTier.GoldRankFive, 91)],
+            },
+        };
+
+        NetherStrategyVisibleEvidenceCaptureResult result =
+            NetherStrategyVisibleEvidenceMapper.Map(request);
+
+        Assert.True(result.IsSuccess, result.Detail);
+        NetherStrategyVisibleMapEvidence visible = result.Evidence!;
+        NetherStrategyVisibleContentRow knownRecovery = Assert.Single(
+            visible.ContentRows,
+            row => row.NodeId == recovery.NodeId
+                && row.Kind == NetherStrategyVisibleContentKind.Event
+                && row.EventPartId == 4011
+        );
+        Assert.True(knownRecovery.IsKnown, knownRecovery.UnknownReason);
+        Assert.Equal(401, knownRecovery.MasterRowId);
+
+        NetherStrategyVisibleContentRow authoritativeTreasure = Assert.Single(
+            visible.ContentRows,
+            row => row.NodeId == treasure.NodeId
+                && row.Kind == NetherStrategyVisibleContentKind.Treasure
+        );
+        Assert.True(authoritativeTreasure.IsKnown, authoritativeTreasure.UnknownReason);
+        Assert.Equal(501, authoritativeTreasure.MasterRowId);
+        Assert.Equal(501, authoritativeTreasure.EventId);
+
+        NetherStrategyVisibleContentRow exactReward = Assert.Single(
+            visible.ContentRows,
+            row => row.NodeId == treasure.NodeId
+                && row.Kind == NetherStrategyVisibleContentKind.Item
+        );
+        Assert.Equal(501, exactReward.EventId);
+        Assert.Equal(601, exactReward.EventPartId);
+        Assert.Equal(701, exactReward.ContentId);
+        Assert.True(exactReward.IsKnown, exactReward.UnknownReason);
+        Assert.Equal(NetherCanonicalRewardTier.GoldRankFive, exactReward.CanonicalRewardTier);
+
+        var snapshot = new NetherSnapshot
+        {
+            Status = NetherSessionStatus.Play,
+            NetherId = 1,
+            MapId = 2,
+            CurrentFloorId = recovery.FloorId,
+            CurrentNodeId = recovery.NodeId,
+            FloorLevel = 20,
+            MasterMaxFloorLevel = 130,
+            AuthoritativeBossFloorLevels = new[] { 10, 20, 30, 40, 50, 60, 70 },
+            Floors = request.Floors,
+            CharacterHpHash = "party",
+            CodeHash = "codes",
+            MapHash = "map",
+        };
+        NetherStrategyEvidenceMapResult package = NetherStrategyEvidenceMapper.Map(
+            new NetherStrategyEvidenceMapRequest(
+                new NetherStrategyEvidenceIdentity(3, 3, 3, snapshot.Fingerprint),
+                snapshot
+            )
+            {
+                VisibleMap = visible,
+            }
+        );
+        Assert.True(package.IsMapped, package.Detail);
+        Assert.True(package.Package!.VisibleMap.IsKnown, package.Package.VisibleMap.UnknownReason);
+    }
+
+    [Fact]
     public void Production_mapper_resolves_direct_treasure_and_event_battles_through_exact_master_relations()
     {
         // Fresh Project.dll SHA-256 53806a5b...1300 and GameAssembly.dll SHA-256

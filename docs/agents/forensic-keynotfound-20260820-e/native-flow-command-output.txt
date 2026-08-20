@@ -1,0 +1,13 @@
+NATIVE_FLOW_EVIDENCE_ID=forensic-keynotfound-20260820-e-flow
+GAME_MOUNT=/game:readonly
+/game/BepInEx/interop/Project.dll: OK
+/game/GameAssembly.dll: OK
+/game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat: OK
+CPP2IL_ACQUISITION_EXIT=0
+CPP2IL_DIFFABLE_EXIT=0
+CPP2IL_ISIL_EXIT=0
+Version 2022.1.0-pre-release.21+58fc404ac503f4e512055cafc48c03088fc6e224
+[0m[38;2;173;216;230m[Info] [Program] [0m[38;2;173;216;230mDetermined game's unity version to be 6000.3.8f1
+FLOW_DIFFABLE_MATCH_COUNT=8
+FLOW_ISIL_MATCH_COUNT=5
+NATIVE_FLOW_EVIDENCE_COMPLETE=1

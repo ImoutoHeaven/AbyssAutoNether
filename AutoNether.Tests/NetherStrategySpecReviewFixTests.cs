@@ -10,6 +10,39 @@ namespace AutoNether.Tests;
 public sealed class NetherStrategySpecReviewFixTests
 {
     [Fact]
+    public void Current_native_visible_capture_never_requests_residual_treasure_cache()
+    {
+        string source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Services",
+            "NetherRuntimeBridge.cs"
+        ));
+        int start = source.IndexOf(
+            "private static bool TryMapStrategyVisibleEvidence(",
+            StringComparison.Ordinal
+        );
+        int end = source.IndexOf("private static bool TryMapCharacters(", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        string capture = source[start..end];
+
+        Assert.DoesNotContain("MNetherFloorTreasures", capture, StringComparison.Ordinal);
+        Assert.Contains("UsesCurrentNativeTreasureEventAuthority = true", capture, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Missing_native_buff_strategy_registration_is_candidate_local_unknown_at_capture_seam()
+    {
+        bool mapped = NetherNativeMechanicProductionCapture.TryResolveStrategyBuffMap(
+            () => throw new KeyNotFoundException("_BuffTypeStrategies_ is not registered"),
+            out string error
+        );
+
+        Assert.False(mapped);
+        Assert.Equal("buff-strategy-map-unavailable", error);
+    }
+
+    [Fact]
     public void Route_audit_is_complete_for_every_frontier_candidate_and_records_comparison_data()
     {
         NetherFloorNode current = Node(1, 1, NetherFloorNodeType.Recovery);
@@ -329,4 +362,16 @@ public sealed class NetherStrategySpecReviewFixTests
         TreasureKeyCount = keys,
         Characters = [new NetherCharacterState(1, hp)],
     };
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "AutoNether.sln")))
+                return directory.FullName;
+            directory = directory.Parent;
+        }
+        throw new DirectoryNotFoundException("Could not locate AutoNether repository root.");
+    }
 }

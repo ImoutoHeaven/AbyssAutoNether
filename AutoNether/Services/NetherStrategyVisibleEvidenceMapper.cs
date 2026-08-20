@@ -18,7 +18,7 @@ internal readonly record struct NetherStrategyBattleMasterRow(
     public bool HasRequiredFields { get; init; } = true;
 }
 
-/// <summary>Exact current MNetherFloorTreasures relation.</summary>
+/// <summary>Legacy MNetherFloorTreasures relation retained for non-current capture callers.</summary>
 internal readonly record struct NetherStrategyTreasureMasterRow(long Id, long MapFloorMasterId);
 
 /// <summary>Exact non-localized MItems reward fields visible from an Event/Treasure part.</summary>
@@ -353,6 +353,11 @@ internal sealed record NetherStrategyVisibleEvidenceCaptureRequest(
     /// because fresh native evidence exposes only raw item/battle fields.
     /// </summary>
     public NetherStrategyTypedSemanticProviderEvidence? TypedSemanticProvider { get; init; }
+    /// <summary>
+    /// Current-native contract: Treasure identity/value comes from the exact live ExtendId and
+    /// MNetherFloorEvents/Parts/Items chain, without consulting the residual Treasure cache.
+    /// </summary>
+    public bool UsesCurrentNativeTreasureEventAuthority { get; init; }
     public IReadOnlyDictionary<long, long> ExtendIdByNodeId { get; init; } =
         new Dictionary<long, long>();
     public IReadOnlyDictionary<long, NetherStrategyShopInventoryCapture> ShopInventoryByNodeId { get; init; } =
@@ -502,7 +507,7 @@ internal static class NetherStrategyVisibleEvidenceMapper
         NetherStrategyTreasureMasterRow[] matches = treasureById.Values
             .Where(row => row.MapFloorMasterId == floor.FloorId)
             .ToArray();
-        if (matches.Length != 1)
+        if (!request.UsesCurrentNativeTreasureEventAuthority && matches.Length != 1)
         {
             rows.Add(Unknown(
                 NetherStrategyVisibleContentKind.Treasure,
@@ -513,12 +518,13 @@ internal static class NetherStrategyVisibleEvidenceMapper
             ));
             return;
         }
+        long treasureMasterId = matches.Length == 1 ? matches[0].Id : 0;
         if (!TryResolveEvents(floor, request, eventById, out NetherFloorEventMasterRow[] events, out string error))
         {
             rows.Add(new NetherStrategyVisibleContentRow(
                 NetherStrategyVisibleContentKind.Treasure,
                 floor.NodeId,
-                matches[0].Id,
+                treasureMasterId,
                 0
             )
             {
@@ -530,10 +536,13 @@ internal static class NetherStrategyVisibleEvidenceMapper
         }
         foreach (NetherFloorEventMasterRow eventRow in events)
         {
+            long authoritativeMasterId = request.UsesCurrentNativeTreasureEventAuthority
+                ? eventRow.EventId
+                : treasureMasterId;
             rows.Add(new NetherStrategyVisibleContentRow(
                 NetherStrategyVisibleContentKind.Treasure,
                 floor.NodeId,
-                matches[0].Id,
+                authoritativeMasterId,
                 eventRow.EventId
             )
             {

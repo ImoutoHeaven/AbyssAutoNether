@@ -1,0 +1,4 @@
+DiffableCs/Project/Project/Master/MasterDataStore.cs
+DiffableCs/Project/Project/Master/MasterDataStoreStageEffectExtensions.cs
+DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorTreasures.cs
+DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorTreasuresArray.cs

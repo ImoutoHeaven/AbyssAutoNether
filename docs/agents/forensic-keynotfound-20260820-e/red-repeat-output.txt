@@ -1,0 +1,15 @@
+RED_REPEAT_EVIDENCE_ID=forensic-keynotfound-20260820-e-red-repeat
+NATIVE_EVIDENCE_ID=forensic-keynotfound-20260820-e
+/game/BepInEx/interop/Project.dll: OK
+/game/GameAssembly.dll: OK
+/game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat: OK
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:11.96
+RED_RUN_1=EXPECTED_FAILURE
+RED_RUN_2=EXPECTED_FAILURE
+RED_RUN_3=EXPECTED_FAILURE
+RED_REPRODUCTION=3/3

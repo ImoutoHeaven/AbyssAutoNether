@@ -9180,12 +9180,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         evidence = null;
         MNetherFloorBattles[]? nativeBattles = masterDataStore.GetCache<MNetherFloorBattles>();
-        MNetherFloorTreasures[]? nativeTreasures = masterDataStore.GetCache<MNetherFloorTreasures>();
         MNetherFloorEvents[]? nativeEvents = masterDataStore.GetCache<MNetherFloorEvents>();
         MNetherFloorEventParts[]? nativeParts = masterDataStore.GetCache<MNetherFloorEventParts>();
         MItems[]? nativeItems = masterDataStore.GetCache<MItems>();
         if (nativeBattles == null
-            || nativeTreasures == null
             || nativeEvents == null
             || nativeParts == null
             || nativeItems == null)
@@ -9211,9 +9209,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         row.code_drop_ratio
                     )
                 ).ToArray(),
-                nativeTreasures.Where(row => row != null).Select(row =>
-                    new NetherStrategyTreasureMasterRow(row.id, row.m_nether_map_floor_id)
-                ).ToArray(),
+                Array.Empty<NetherStrategyTreasureMasterRow>(),
                 nativeEvents.Where(row => row != null).Select(row =>
                     new NetherFloorEventMasterRow(
                         row.id,
@@ -9254,6 +9250,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     )
                     {
                         TypedSemanticProvider = interactive.TypedSemanticProvider,
+                        UsesCurrentNativeTreasureEventAuthority = true,
                     }
                 )
             );

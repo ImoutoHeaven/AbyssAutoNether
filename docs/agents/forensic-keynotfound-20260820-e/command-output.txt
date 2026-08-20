@@ -1,0 +1,14 @@
+NATIVE_EVIDENCE_ID=forensic-keynotfound-20260820-e
+GAME_MOUNT=/game:readonly
+GAME_WRITE_CHECK=readonly
+033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4  /game/BepInEx/interop/Project.dll
+f2ad94781c161fe93040463b884c328599a40c78079aecacbe17a9b78edfc767  /game/GameAssembly.dll
+d7dffa623675ac493a0a4c7cfe8dc729bc37846b455a5284af94a901c1e25c27  /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat
+CPP2IL_ACQUISITION_EXIT=0
+CPP2IL_DIFFABLE_EXIT=0
+CPP2IL_ISIL_EXIT=0
+Version 2022.1.0-pre-release.21+58fc404ac503f4e512055cafc48c03088fc6e224
+[0m[38;2;173;216;230m[Info] [Program] [0m[38;2;173;216;230mDetermined game's unity version to be 6000.3.8f1
+DIFFABLE_MATCH_COUNT=5
+ISIL_MATCH_COUNT=128
+NATIVE_EVIDENCE_COMPLETE=1

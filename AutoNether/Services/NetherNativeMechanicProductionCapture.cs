@@ -19,6 +19,50 @@ namespace AutoNether.Services;
 /// </summary>
 internal static class NetherNativeMechanicProductionCapture
 {
+    public static bool TryResolveStrategyBuffMap(
+        Func<object?> resolveStore,
+        out string error
+    ) => TryResolveStrategyStore(resolveStore, out _, out error);
+
+    private static bool TryResolveStrategyBuffMap(
+        Func<object?> resolveStore,
+        out IReadOnlyDictionary<int, Project.Ingame.IBuffStrategy> strategies,
+        out string error
+    )
+    {
+        if (!TryResolveStrategyStore(resolveStore, out object? rawStore, out error))
+        {
+            strategies = new Dictionary<int, Project.Ingame.IBuffStrategy>();
+            return false;
+        }
+
+        return TryReadStrategyBuffMap(
+            rawStore as Project.Ingame.BuffTypeStrategies,
+            out strategies,
+            out error
+        );
+    }
+
+    private static bool TryResolveStrategyStore(
+        Func<object?> resolveStore,
+        out object? store,
+        out string error
+    )
+    {
+        try
+        {
+            store = resolveStore();
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception)
+        {
+            store = null;
+            error = "buff-strategy-map-unavailable";
+            return false;
+        }
+    }
+
     public static bool TryCapture(
         IReadOnlyList<NetherCodeState> codes,
         MasterDataStore masterDataStore,
@@ -40,8 +84,8 @@ internal static class NetherNativeMechanicProductionCapture
         Project.NetherCodeAbilityAssetDataStore? netherAbilityStore =
             Engine.Get<Project.NetherCodeAbilityAssetDataStore>();
         Project.AbilityAssetDataStore? commonAbilityStore = Engine.Get<Project.AbilityAssetDataStore>();
-        TryReadStrategyBuffMap(
-            Engine.Get<Project.Ingame.BuffTypeStrategies>(),
+        TryResolveStrategyBuffMap(
+            () => Engine.Get<Project.Ingame.BuffTypeStrategies>(),
             out IReadOnlyDictionary<int, Project.Ingame.IBuffStrategy> strategyByBuffType,
             out string buffMapError
         );

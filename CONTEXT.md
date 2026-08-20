@@ -604,3 +604,32 @@ is `6000.3.8f1`. The current diffable design binds
 `SubViewController.<HandleStartEventByStatusAsync>d__35` and
 `NetherContinueConfirmPopupController.<SetupPopupEvent>b__9_1`/`b__9_2`.
 Historical native hashes are not required for current-world acceptance.
+
+## Current-world Treasure cache authority (2026-08-20)
+
+Fresh read-only Docker Cpp2IL evidence
+`forensic-keynotfound-20260820-e` and the independent post-review rerun
+`forensic-keynotfound-20260820-review-repair` use the current-world hashes above:
+Project.dll `033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4`,
+GameAssembly.dll `f2ad94781c161fe93040463b884c328599a40c78079aecacbe17a9b78edfc767`,
+and global-metadata.dat
+`d7dffa623675ac493a0a4c7cfe8dc729bc37846b455a5284af94a901c1e25c27`.
+Cpp2IL acquisition, diffable, and ISIL all exited zero in both evidence cycles.
+
+`MasterDataStore.GetCache<T>()` calls the backing dictionary's `TryGetValue` and
+constructs `KeyNotFoundException` when the type key is absent. Although the
+generated serializer type `MNetherFloorTreasures` remains in the assembly, a
+full fresh current-native Nether namespace search has zero flow references to
+that cache. `NetherFloorModel.CreateModel` instead carries the live `ExtendId`,
+and `NetherFloorMasterResolver.GetMNetherFloorEvents(mapFloorId, extendId)`
+selects the exact `MNetherFloorEvents` row by positive `ExtendId`, falling back
+to the map-floor relation only when native receives no positive ExtendId.
+
+Production strategy capture must therefore never request
+`MNetherFloorTreasures`. Current-native Treasure identity and value use the
+exact `ExtendId -> MNetherFloorEvents -> MNetherFloorEventParts -> MItems`
+chain. The exact Event row ID is the Treasure content's authoritative master
+ID; it is not a substituted floor ID. Canonical rank-five status still requires
+the authoritative typed provider, while unresolved Event, Part, Item, or typed
+semantics fail closed locally and known sibling evidence remains usable. This
+implements the existing Treasure Route Priority without a spec deviation.

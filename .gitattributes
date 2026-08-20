@@ -5,3 +5,6 @@
 *.sln text eol=lf
 *.md text eol=lf
 *.json text eol=lf
+
+# Preserve byte-exact generated native evidence, including emitter whitespace.
+docs/agents/forensic-keynotfound-*/native-*/** -whitespace

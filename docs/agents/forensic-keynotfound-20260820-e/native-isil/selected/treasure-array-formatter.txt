@@ -1,0 +1,413 @@
+Type: MessagePack.GeneratedMessagePackResolver+Project+Master+NoaMessagePack+MNetherFloorTreasuresArrayFormatter
+
+Method: System.Void Serialize(ref MessagePack.MessagePackWriter writer, Project.Master.NoaMessagePack.MNetherFloorTreasuresArray value, MessagePack.MessagePackSerializerOptions options)
+
+Disassembly:
+	mov [rsp+18h],rbx
+	mov [rsp+20h],rsi
+	push rdi
+	sub rsp,30h
+	cmp byte ptr [18874559Fh],0
+	mov rdi,r9
+	mov rbx,r8
+	mov rsi,rdx
+	jne short 00000001847FF74Ch
+	lea rcx,[18821B330h]
+	call 00000001807E2F10h
+	lea rcx,[188195288h]
+	call 00000001807E2F10h
+	lea rcx,[1881BC898h]
+	call 00000001807E2F10h
+	mov byte ptr [18874559Fh],1
+	test rbx,rbx
+	je near ptr 00000001847FF84Bh
+	mov [rsp+48h],r14
+	test rdi,rdi
+	je near ptr 00000001847FF864h
+	mov [rsp+40h],rbp
+	xor r8d,r8d
+	mov rbp,[rdi+10h]
+	mov edx,1
+	mov rcx,rsi
+	call 0000000183A5C8B0h
+	mov rcx,[188195288h]
+	cmp dword ptr [rcx+0E4h],0
+	jne short 00000001847FF791h
+	call 00000001807E3250h
+	mov rdx,[18821B330h]
+	mov rcx,rbp
+	call 00000001808AEBD0h
+	mov rbx,[rbx+10h]
+	mov r14,rax
+	mov rbp,[rsp+40h]
+	test rax,rax
+	je near ptr 00000001847FF864h
+	mov r10,[rax]
+	xor ecx,ecx
+	mov r9,[1881BC898h]
+	movzx edx,word ptr [r10+12Eh]
+	cmp cx,dx
+	jae short 00000001847FF7F4h
+	mov r8,[r10+0B0h]
+	nop word ptr [rax+rax]
+	movzx eax,cx
+	add rax,rax
+	cmp [r8+rax*8],r9
+	je short 00000001847FF831h
+	inc cx
+	cmp cx,dx
+	jb short 00000001847FF7E0h
+	xor r8d,r8d
+	mov rdx,r9
+	mov rcx,r14
+	call 00000001807DFF80h
+	mov r10,[rax]
+	mov r9,rdi
+	mov rax,[rax+8]
+	mov r8,rbx
+	mov rdx,rsi
+	mov [rsp+60h],rax
+	mov rcx,r14
+	mov r14,[rsp+48h]
+	mov rbx,[rsp+50h]
+	mov rsi,[rsp+58h]
+	add rsp,30h
+	pop rdi
+	jmp r10
+	movzx ecx,cx
+	add rcx,rcx
+	movsxd rax,dword ptr [r8+rcx*8+8]
+	shl rax,4
+	add rax,138h
+	add rax,r10
+	jmp short 00000001847FF802h
+	xor edx,edx
+	mov rcx,rsi
+	mov rbx,[rsp+50h]
+	mov rsi,[rsp+58h]
+	add rsp,30h
+	pop rdi
+	jmp near ptr 0000000183A5D330h
+	call 00000001807E31C0h
+
+ISIL:
+	001 Move stack:0x18, rbx
+	002 Move stack:0x20, rsi
+	003 ShiftStack -8
+	004 Move stack:0x0, rdi
+	005 ShiftStack -48
+	006 Compare [0x18874559F], 0
+	007 Move rdi, r9
+	008 Move rbx, r8
+	009 Move rsi, rdx
+	010 JumpIfNotEqual {18}
+	011 LoadAddress rcx, [0x18821B330]
+	012 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	013 LoadAddress rcx, [0x188195288]
+	014 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	015 LoadAddress rcx, [0x1881BC898]
+	016 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	017 Move [0x18874559F], 1
+	018 Compare rbx, 0
+	019 JumpIfEqual {81}
+	020 Move stack:0x48, r14
+	021 Compare rdi, 0
+	022 JumpIfEqual {90}
+	023 Move stack:0x40, rbp
+	024 Move r8, 0
+	025 Move rbp, [rdi+16]
+	026 Move rdx, 1
+	027 Move rcx, rsi
+	028 Call MessagePackWriter.WriteArrayHeader, rcx, rdx
+	029 Move rcx, typeof(MessagePack.FormatterResolverExtensions)
+	030 Compare [rcx+228], 0
+	031 JumpIfNotEqual {33}
+	032 Call "il2cpp_runtime_class_init_export", rcx, rdx, r8, r9
+	033 Move rdx, [0x18821B330]
+	034 Move rcx, rbp
+	035 Call 0x1808AEBD0, rcx, rdx, r8, r9
+	036 Move rbx, [rbx+16]
+	037 Move r14, rax
+	038 Move rbp, stack:0x40
+	039 Compare rax, 0
+	040 JumpIfEqual {90}
+	041 Move r10, [rax]
+	042 Move rcx, 0
+	043 Move r9, typeof(MessagePack.Formatters.IMessagePackFormatter`1<MNetherFloorTreasures[1]>)
+	044 Move rdx, [r10+302]
+	045 Compare rcx, rdx
+	046 JumpIfGreaterOrEqual {56}
+	047 Move r8, [r10+176]
+	048 Nop 
+	049 Move rax, rcx
+	050 Add rax, rax, rax
+	051 Compare [r8+rax*8], r9
+	052 JumpIfEqual {74}
+	053 Add rcx, rcx, 1
+	054 Compare rcx, rdx
+	055 JumpIfLess {49}
+	056 Move r8, 0
+	057 Move rdx, r9
+	058 Move rcx, r14
+	059 Call 0x1807DFF80, rcx, rdx, r8, r9
+	060 Move r10, [rax]
+	061 Move r9, rdi
+	062 Move rax, [rax+8]
+	063 Move r8, rbx
+	064 Move rdx, rsi
+	065 Move stack:0x60, rax
+	066 Move rcx, r14
+	067 Move r14, stack:0x48
+	068 Move rbx, stack:0x50
+	069 Move rsi, stack:0x58
+	070 ShiftStack 48
+	071 Move rdi, stack:0x0
+	072 ShiftStack 8
+	073 CallNoReturn r10
+	074 Move rcx, rcx
+	075 Add rcx, rcx, rcx
+	076 Move rax, [r8+8+rcx*8]
+	077 ShiftLeft rax, 4
+	078 Add rax, rax, 312
+	079 Add rax, rax, r10
+	080 Goto {60}
+	081 Move rdx, 0
+	082 Move rcx, rsi
+	083 Move rbx, stack:0x50
+	084 Move rsi, stack:0x58
+	085 ShiftStack 48
+	086 Move rdi, stack:0x0
+	087 ShiftStack 8
+	088 Call MessagePackWriter.WriteNil, rcx, rdx
+	089 Return 
+	090 Call 0x1807E31C0, rcx, rdx, r8, r9
+
+Method: Project.Master.NoaMessagePack.MNetherFloorTreasuresArray Deserialize(ref MessagePack.MessagePackReader reader, MessagePack.MessagePackSerializerOptions options)
+
+Disassembly:
+	push rbp
+	push rdi
+	sub rsp,38h
+	cmp byte ptr [1887455A0h],0
+	mov rbp,r8
+	mov rdi,rdx
+	jne short 00000001847FF5ADh
+	lea rcx,[18821B330h]
+	call 00000001807E2F10h
+	lea rcx,[188195288h]
+	call 00000001807E2F10h
+	lea rcx,[1881BC898h]
+	call 00000001807E2F10h
+	lea rcx,[188198830h]
+	call 00000001807E2F10h
+	mov byte ptr [1887455A0h],1
+	cmp byte ptr [18872931Dh],0
+	jne short 00000001847FF5C9h
+	lea rcx,[1881A7768h]
+	call 00000001807E2F10h
+	mov byte ptr [18872931Dh],1
+	xor edx,edx
+	mov rcx,rdi
+	call 0000000183A3DA30h
+	cmp al,0C0h
+	jne short 00000001847FF5F4h
+	mov r8,[1881A7768h]
+	mov edx,1
+	mov rcx,rdi
+	call 00000001808AF2B0h
+	xor eax,eax
+	add rsp,38h
+	pop rdi
+	pop rbp
+	ret
+	mov [rsp+50h],rbx
+	mov [rsp+58h],rsi
+	mov [rsp+60h],r14
+	mov [rsp+30h],r15
+	test rbp,rbp
+	je near ptr 00000001847FF6F5h
+	mov rcx,[rbp+28h]
+	test rcx,rcx
+	je near ptr 00000001847FF6F5h
+	xor r8d,r8d
+	mov rdx,rdi
+	call 0000000183A3DD10h
+	mov r15,[rbp+10h]
+	xor edx,edx
+	mov rcx,rdi
+	call 0000000183A38B50h
+	mov rcx,[188198830h]
+	mov r14d,eax
+	call 00000001807E3170h
+	xor edx,edx
+	mov rcx,rax
+	mov rsi,rax
+	call 00000001808AFB10h
+	xor ebx,ebx
+	test r14d,r14d
+	jle short 00000001847FF6D1h
+	nop word ptr [rax+rax]
+	test ebx,ebx
+	je short 00000001847FF670h
+	xor edx,edx
+	mov rcx,rdi
+	call 0000000183A3A660h
+	jmp short 00000001847FF6CAh
+	mov rcx,[188195288h]
+	cmp dword ptr [rcx+0E4h],0
+	jne short 00000001847FF685h
+	call 00000001807E3250h
+	mov rdx,[18821B330h]
+	mov rcx,r15
+	call 00000001808AEBD0h
+	test rax,rax
+	je short 00000001847FF6F5h
+	mov rdx,[1881BC898h]
+	mov ecx,1
+	mov r9,rdi
+	mov [rsp+20h],rbp
+	mov r8,rax
+	call 00000001800032A0h
+	test rsi,rsi
+	je short 00000001847FF6F5h
+	lea rcx,[rsi+10h]
+	mov [rsi+10h],rax
+	mov rdx,rax
+	call 00000001807E2220h
+	inc ebx
+	cmp ebx,r14d
+	jl short 00000001847FF660h
+	dec dword ptr [rdi+88h]
+	mov rax,rsi
+	mov rsi,[rsp+58h]
+	mov r14,[rsp+60h]
+	mov rbx,[rsp+50h]
+	mov r15,[rsp+30h]
+	add rsp,38h
+	pop rdi
+	pop rbp
+	ret
+	call 00000001807E31C0h
+
+ISIL:
+	001 ShiftStack -8
+	002 Move stack:0x0, rbp
+	003 ShiftStack -8
+	004 Move stack:0x0, rdi
+	005 ShiftStack -56
+	006 Compare [0x1887455A0], 0
+	007 Move rbp, r8
+	008 Move rdi, rdx
+	009 JumpIfNotEqual {19}
+	010 LoadAddress rcx, [0x18821B330]
+	011 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	012 LoadAddress rcx, [0x188195288]
+	013 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	014 LoadAddress rcx, [0x1881BC898]
+	015 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	016 LoadAddress rcx, [0x188198830]
+	017 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	018 Move [0x1887455A0], 1
+	019 Compare [0x18872931D], 0
+	020 JumpIfNotEqual {24}
+	021 LoadAddress rcx, [0x1881A7768]
+	022 Call "il2cpp_codegen_initialize_runtime_metadata", rcx, rdx, r8, r9
+	023 Move [0x18872931D], 1
+	024 Move rdx, 0
+	025 Move rcx, rdi
+	026 Call MessagePackReader.get_NextCode, rcx, rdx
+	027 Compare rax, 192
+	028 JumpIfNotEqual {40}
+	029 Move r8, [0x1881A7768]
+	030 Move rdx, 1
+	031 Move rcx, rdi
+	032 Call 0x1808AF2B0, rcx, rdx
+	033 Move rax, 0
+	034 ShiftStack 56
+	035 Move rdi, stack:0x0
+	036 ShiftStack 8
+	037 Move rbp, stack:0x0
+	038 ShiftStack 8
+	039 Return rax
+	040 Move stack:0x50, rbx
+	041 Move stack:0x58, rsi
+	042 Move stack:0x60, r14
+	043 Move stack:0x30, r15
+	044 Compare rbp, 0
+	045 JumpIfEqual {109}
+	046 Move rcx, [rbp+40]
+	047 Compare rcx, 0
+	048 JumpIfEqual {109}
+	049 Move r8, 0
+	050 Move rdx, rdi
+	051 Call MessagePackSecurity.DepthStep, rcx, rdx
+	052 Move r15, [rbp+16]
+	053 Move rdx, 0
+	054 Move rcx, rdi
+	055 Call MessagePackReader.ReadArrayHeader, rcx, rdx
+	056 Move rcx, typeof(Project.Master.NoaMessagePack.MNetherFloorTreasuresArray)
+	057 Move r14, rax
+	058 Call "il2cpp_codegen_object_new", rcx, rdx, r8, r9
+	059 Move rdx, 0
+	060 Move rcx, rax
+	061 Move rsi, rax
+	062 Call 0x1808AFB10, rcx, rdx, r8
+	063 Move rbx, 0
+	064 Compare r14, 0
+	065 JumpIfLessOrEqual {97}
+	066 Nop 
+	067 Compare rbx, 0
+	068 JumpIfEqual {73}
+	069 Move rdx, 0
+	070 Move rcx, rdi
+	071 Call MessagePackReader.Skip, rcx, rdx
+	072 Goto {94}
+	073 Move rcx, typeof(MessagePack.FormatterResolverExtensions)
+	074 Compare [rcx+228], 0
+	075 JumpIfNotEqual {77}
+	076 Call "il2cpp_runtime_class_init_export", rcx, rdx, r8, r9
+	077 Move rdx, [0x18821B330]
+	078 Move rcx, r15
+	079 Call 0x1808AEBD0, rcx, rdx, r8, r9
+	080 Compare rax, 0
+	081 JumpIfEqual {109}
+	082 Move rdx, typeof(MessagePack.Formatters.IMessagePackFormatter`1<MNetherFloorTreasures[1]>)
+	083 Move rcx, 1
+	084 Move r9, rdi
+	085 Move stack:0x20, rbp
+	086 Move r8, rax
+	087 Call 0x1800032A0, rcx, rdx, r8, r9
+	088 Compare rsi, 0
+	089 JumpIfEqual {109}
+	090 LoadAddress rcx, [rsi+16]
+	091 Move [rsi+16], rax
+	092 Move rdx, rax
+	093 Call 0x1807E2220, rcx, rdx, r8, r9
+	094 Add rbx, rbx, 1
+	095 Compare rbx, r14
+	096 JumpIfLess {67}
+	097 Subtract [rdi+136], [rdi+136], 1
+	098 Move rax, rsi
+	099 Move rsi, stack:0x58
+	100 Move r14, stack:0x60
+	101 Move rbx, stack:0x50
+	102 Move r15, stack:0x30
+	103 ShiftStack 56
+	104 Move rdi, stack:0x0
+	105 ShiftStack 8
+	106 Move rbp, stack:0x0
+	107 ShiftStack 8
+	108 Return rax
+	109 Call 0x1807E31C0, rcx, rdx, r8, r9
+
+Method: System.Void .ctor()
+
+Disassembly:
+	xor edx,edx
+	jmp near ptr 00000001808AF6D0h
+
+ISIL:
+	001 Move rdx, 0
+	002 Call 0x1808AF6D0, rcx, rdx, r8, r9, stack:0x0, stack:0x8, stack:0x10
+	003 Return 
+
