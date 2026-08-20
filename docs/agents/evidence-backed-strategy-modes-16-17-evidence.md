@@ -1707,10 +1707,23 @@ This section is the current acceptance record for the updated accessible game
 tree. Historical native evidence elsewhere in this ledger is not an acceptance
 criterion for this current-world run.
 
-CURRENT_HEAD: `b25f8ea36b4a29ac42d7b866e7efd6b14ced9864`
+CURRENT_HEAD: `<derived by git rev-parse HEAD>`
+CURRENT_HEAD_POLICY=git rev-parse HEAD
 CURRENT_NATIVE_EVIDENCE_ID=final-sol-current-world-native-20260820-b
 CURRENT_RELEASE_EVIDENCE_ID=final-sol-current-world-release-20260820-j
 CURRENT_RELEASE_DLL_SHA256: `412a66cfe3e70a2225b2b34940b78f7da585e3fa26d5e8bf05ff0aa7946e8d71`
+FRESH_NATIVE_REVALIDATION_EVIDENCE_ID=delivery-current-native-20260820-d
+FRESH_NATIVE_REVALIDATION_JOB=j-qghnyi
+STAGED_SEMANTIC_GREEN_EVIDENCE_ID=delivery-current-semantic-green-20260820-e
+STAGED_SEMANTIC_GREEN_JOB=j-obgi6v
+STAGED_TEST_EVIDENCE_ID=delivery-current-staged-tests-20260820-f
+STAGED_TEST_JOB=j-lccrqm
+RELEASE_ARTIFACT_IDENTITY_GREEN_EVIDENCE_ID=delivery-current-artifact-identity-20260820-g
+RELEASE_ARTIFACT_IDENTITY_GREEN_JOB=j-vjjifi
+RELEASE_ARTIFACT_SOURCE_WITH_GIT_SHA256=412a66cfe3e70a2225b2b34940b78f7da585e3fa26d5e8bf05ff0aa7946e8d71
+RELEASE_ARTIFACT_ARCHIVE_WITHOUT_GIT_SHA256=412a66cfe3e70a2225b2b34940b78f7da585e3fa26d5e8bf05ff0aa7946e8d71
+RELEASE_ARTIFACT_CONTEXTS_MATCH=1
+RELEASE_ARTIFACT_SOURCE_REVISION_METADATA=disabled
 TARGET_GREEN=1/1 (prior current-world targeted evidence; superseded by the four-finding GREEN below)
 GREEN_TARGETED_FOUR_FINDINGS=6/6 (foreground Docker run; final-sol-current-world-green-20260820-g)
 GREEN_MIXED_DUPLICATE=3/3 (foreground Docker run; final-sol-current-world-mixed-duplicate-green-20260820-h)

@@ -10,7 +10,25 @@ LEDGER_PATH = ROOT / "docs/agents/evidence-backed-strategy-modes-16-17-evidence.
 SPEC_PATH = ROOT / "docs/specs/evidence-backed-strategy-modes.md"
 README_PATH = ROOT / ".scratch/evidence-backed-strategy-modes/README.md"
 ISSUE_DIR = ROOT / ".scratch/evidence-backed-strategy-modes/issues"
-CURRENT_HEAD = "b25f8ea36b4a29ac42d7b866e7efd6b14ced9864"
+
+
+def git_output(*args):
+    return subprocess.run(
+        ["git", *args],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+CURRENT_HEAD = git_output("rev-parse", "HEAD")
+INTENDED_STAGED_PATHS = {
+    "AutoNether/AutoNether.csproj",
+    "docs/agents/evidence-backed-strategy-modes-16-17-evidence.md",
+    "docs/agents/evidence-backed-strategy-modes-17-semantic-audit.py",
+    ".scratch/evidence-backed-strategy-modes/README.md",
+}
 CURRENT_NATIVE_EVIDENCE_ID = "final-sol-current-world-native-20260820-b"
 CURRENT_RELEASE_EVIDENCE_ID = "final-sol-current-world-release-20260820-j"
 CURRENT_SEMANTIC_EVIDENCE_ID = "final-sol-current-world-semantic-20260820-k"
@@ -470,14 +488,24 @@ def audit_tracker_and_ledger():
     current_marker = "## Current-world adversarial parser/native reconciliation — 2026-08-20"
     assert current_marker in ledger
     current = ledger.split(current_marker, 1)[1].split("\n<a id=", 1)[0]
-    assert f"CURRENT_HEAD: `{CURRENT_HEAD}`" in current
-    assert subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip() == CURRENT_HEAD
+    assert "CURRENT_HEAD_POLICY=git rev-parse HEAD" in current
+    assert re.fullmatch(r"[0-9a-f]{40}", CURRENT_HEAD)
+    assert git_output("rev-parse", "HEAD") == CURRENT_HEAD
+    assert git_output("branch", "--show-current") == "logic-overhaul"
+    assert git_output("remote", "get-url", "origin") == "https://github.com/ImoutoHeaven/AbyssAutoNether.git"
+    assert git_output("ls-remote", "--heads", "origin", "logic-overhaul").split()[0] == CURRENT_HEAD
+    staged_paths = [path for path in git_output("diff", "--cached", "--name-only").splitlines() if path]
+    assert set(staged_paths).issubset(INTENDED_STAGED_PATHS), staged_paths
+    assert not any(
+        path.startswith("dotabyss_x_cl/") or "native-decomp-" in path
+        for path in staged_paths
+    ), staged_paths
+    assert not git_output("diff", "--name-only")
+    tracked_paths = git_output("ls-files").splitlines()
+    assert not any(
+        path.startswith("dotabyss_x_cl/") or "native-decomp-" in path
+        for path in tracked_paths
+    ), [path for path in tracked_paths if "native-decomp-" in path or path.startswith("dotabyss_x_cl/")]
     assert f"CURRENT_NATIVE_EVIDENCE_ID={CURRENT_NATIVE_EVIDENCE_ID}" in current
     assert f"CURRENT_RELEASE_EVIDENCE_ID={CURRENT_RELEASE_EVIDENCE_ID}" in current
     assert f"CURRENT_RELEASE_DLL_SHA256: `{CURRENT_RELEASE_DLL_SHA256}`" in current
@@ -551,6 +579,8 @@ def main():
     print("US005_US006_US019_US048_US093_US100_US101_US109_US115_US116=PASS")
     print("TRACKER_01_17_STATUS_AUDIT=PASS")
     print("LEDGER_CURRENT_IDS_AUDIT=PASS")
+    print("CURRENT_HEAD_DERIVED_FROM_GIT=PASS")
+    print("BRANCH_REMOTE_STAGED_NATIVE_DECOMP_AUDIT=PASS")
     print("SEMANTIC_MAP_AUDIT=PASS")
 
 

@@ -43,8 +43,9 @@ The feature is complete only when all 17 tickets are completed, the full regress
 
 ## Current final US-100 production behavior — 2026-08-20
 
-The current final US-100 production behavior is recorded against `HEAD`
-`b25f8ea36b4a29ac42d7b866e7efd6b14ced9864`. The repair-focused Docker GREEN is
+The current final US-100 production behavior is recorded against the checked-out
+`HEAD`, which the semantic audit derives with `git rev-parse HEAD`. The
+repair-focused Docker GREEN is
 5/5, the full suite is 1328/1328, and the production Release build is 0
 warnings/0 errors. Final native evidence is
 `final-sol-current-world-native-20260820-b`; final Release evidence is
@@ -101,6 +102,14 @@ semantic/anchor/tracker `final-sol-current-world-semantic-20260820-k`, same-run
 read-only preservation/path/remote/isolation `task10-us100-current-preservation-20260820-x`
 (`j-p4dfku`), and final bounded audit
 `final-sol-current-world-audit-20260820-l`.
+
+The Release identity is reproducible across both clean Docker source contexts:
+the Git worktree and a Git archive without `.git` each build the exact DLL
+SHA-256
+`412a66cfe3e70a2225b2b34940b78f7da585e3fa26d5e8bf05ff0aa7946e8d71`, with 0
+warnings and 0 errors. Release no longer injects the source revision into the
+informational version, so the verified artifact identity does not depend on the
+presence of Git metadata.
 
 The current four-finding regression set covers RecoveryTransform semantic-tier
 preservation in both audit paths, the native `b__9_2` Continue callback contract,
