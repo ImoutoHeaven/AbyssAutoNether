@@ -3654,12 +3654,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         if (contentConfirm.Kind != NetherNativeActionResultKind.Completed)
             return contentConfirm;
 
-        NetherNativeActionResult hintConfirm = ConfirmFloorEventHintPopupIfNeeded(
-            recovered: false
-        );
-        if (hintConfirm.Kind != NetherNativeActionResultKind.Completed)
-            return hintConfirm;
-
         NetherOwnedPopupStageParentGate ownedStage = PumpOwnedPopupStagesBeforeParent();
         if (!ownedStage.MayPollParent)
         {
@@ -3678,6 +3672,16 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             if (code.Kind != NetherNativeActionResultKind.Completed)
                 return code;
         }
+
+        // The native floor-event sequence can register this acknowledgement while a Code Offer
+        // Keep/Cancel task is still Pending.  PopupService must finish that earlier transition
+        // before its one-shot Hint close callback is claimed, otherwise the visible Hint can
+        // remain open with no safe retry path.
+        NetherNativeActionResult hintConfirm = ConfirmFloorEventHintPopupIfNeeded(
+            recovered: false
+        );
+        if (hintConfirm.Kind != NetherNativeActionResultKind.Completed)
+            return hintConfirm;
 
         // Event/Treasure callbacks can be UniTask.Void.  Do not treat their return as a
         // settlement: wait for the owning floor parent task below.
