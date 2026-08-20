@@ -570,3 +570,37 @@ native evidence showed no boundary requiring a semantic deviation. The final
 Docker gates passed the 29/29 focused set, 1319/1319 clean full suite, and
 zero-warning/zero-error Release build. Both persistent reviewers converged
 PASS on Standards and Spec axes.
+## Fresh native design boundary (2026-08-20 final parser re-review)
+
+The final read-only Docker native rerun used evidence
+`task10-us100-final-native-20260820-k` with Project.dll SHA-256
+`53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300`,
+GameAssembly.dll SHA-256
+`573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb`, and
+global-metadata.dat SHA-256
+`ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5`.
+Cpp2IL `2022.1.0-pre-release.21+58fc404ac503f4e512055cafc48c03088fc6e224`
+reported Unity `6000.3.8f1`, acquisition 0, diffable 0, and ISIL 0, with
+`dotabyss_x_cl` mounted read-only at `/game`. The fresh diffable output keeps
+`SubViewController.<HandleStartEventByStatusAsync>d__35` and
+`NetherContinueConfirmPopupController.<SetupPopupEvent>b__9_1`/`b__9_2` as the
+exact current callback/state-machine anchors; the Boost popup remains on its
+`b__7_1`/`b__7_2` anchors. Production bindings follow these current native
+identities; no semantic strategy boundary was inferred from stale names.
+
+## Current-world native authority (2026-08-20)
+
+The canonical current game tree is `C:/Users/Eden/PixelAbyssX/dotabyss_x_cl`,
+mounted read-only as `/game`. Fresh evidence
+`final-sol-current-world-native-20260820-b` (job `j-10nd0n`) records Project.dll SHA-256
+`033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4`,
+GameAssembly.dll SHA-256
+`f2ad94781c161fe93040463b884c328599a40c78079aecacbe17a9b78edfc767`, and
+global-metadata.dat SHA-256
+`d7dffa623675ac493a0a4c7cfe8dc729bc37846b455a5284af94a901c1e25c27`.
+Cpp2IL acquisition, diffable, and ISIL all exited 0; Cpp2IL is
+`2022.1.0-pre-release.21+58fc404ac503f4e512055cafc48c03088fc6e224` and Unity
+is `6000.3.8f1`. The current diffable design binds
+`SubViewController.<HandleStartEventByStatusAsync>d__35` and
+`NetherContinueConfirmPopupController.<SetupPopupEvent>b__9_1`/`b__9_2`.
+Historical native hashes are not required for current-world acceptance.

@@ -6,7 +6,7 @@ namespace AutoNether.Services;
 
 /// <summary>
 /// Exact generated callback descriptors for the one-ticket Continue branch.  Both values of
-/// Continue popup <c>_canBoost</c> enter the packaged <c>b__8_2</c> chain; the true branch then
+/// Continue popup <c>_canBoost</c> enter the packaged <c>b__9_2</c> chain; the true branch then
 /// owns a fresh Boost popup whose count is set to one before its confirm callback runs.
 /// </summary>
 internal static class NetherCheckpointContinueNativeBinding
@@ -20,7 +20,7 @@ internal static class NetherCheckpointContinueNativeBinding
         "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopup";
 
     public static NetherNativeMethodDescriptor ContinueCallback { get; } = new(
-        "<SetupPopupEvent>b__8_2",
+        "<SetupPopupEvent>b__9_2",
         new[] { UnitTypeName, ContinueControllerTypeName },
         "System.Void"
     );
@@ -38,15 +38,15 @@ internal static class NetherCheckpointContinueNativeBinding
     );
 
     public static NetherCodePopupInteropMethodBinding ContinueCallbackInterop { get; } = new(
-        "_SetupPopupEvent_b__8_2",
-        "<SetupPopupEvent>b__8_2",
+        "_SetupPopupEvent_b__9_2",
+        "<SetupPopupEvent>b__9_2",
         new[] { UnitTypeName, ContinueControllerTypeName },
         "System.Void"
     ) { IsStatic = false };
 
     public static NetherCodePopupInteropMethodBinding FinishCallbackInterop { get; } = new(
-        "_SetupPopupEvent_b__8_1",
-        "<SetupPopupEvent>b__8_1",
+        "_SetupPopupEvent_b__9_1",
+        "<SetupPopupEvent>b__9_1",
         new[] { UnitTypeName, ContinueControllerTypeName },
         "System.Void"
     ) { IsStatic = false };

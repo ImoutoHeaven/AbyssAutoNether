@@ -1306,7 +1306,9 @@ internal sealed class NetherInteractiveFloorPreEntrySafety
                 hasRouteSafetyEvidence: true,
                 routeSafetyAllowed: selectedProof.IsNextVisibleBranchSafe,
                 routeSafetyUnknownReason: selectedProof.UnknownReason,
-                selectionTier: NetherInteractiveOptionSelectionTier.Recovery,
+                selectionTier: selectedOption.RecoveryBranchSafety?.BranchKind == NetherRecoveryBranchKind.Transform
+                    ? NetherInteractiveOptionSelectionTier.RecoveryTransform
+                    : NetherInteractiveOptionSelectionTier.Recovery,
                 isSelected: true,
                 comparisonRationale: "selected-by-complete-branch-proof"
             );

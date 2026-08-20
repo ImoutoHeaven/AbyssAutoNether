@@ -119,6 +119,48 @@ public sealed class NetherStrategyModes1012Tests
     }
 
     [Fact]
+    public void Recovery_transform_selection_retains_the_transform_semantic_tier_in_the_policy_audit()
+    {
+        NetherSnapshot snapshot = Snapshot(erosion: 0, hp: 1000) with
+        {
+            Codes = [new NetherCodeState(40024, NetherCodeFamily.Risk, 1) { IsKnown = true }],
+            CodeCapacity = 5,
+        };
+        NetherEventOption[] options =
+        [
+            RecoveryOption(1, NetherRecoveryBranchKind.Rest, new NetherEffect(NetherEffectKind.Heal, 100), safe: false),
+            RecoveryOption(2, NetherRecoveryBranchKind.Purification, new NetherEffect(NetherEffectKind.ErosionHeal, 10), safe: false),
+            RecoveryOption(3, NetherRecoveryBranchKind.Transform, new NetherEffect(NetherEffectKind.AbyssCodeTransform, 0), safe: true),
+        ];
+
+        NetherEventDecision decision = new NetherEventPolicy().DecideRecovery(
+            snapshot,
+            options,
+            Settings() with { EquipmentRecoveryCodeTransformEnabled = true },
+            Array.Empty<NetherErosionModifier>(),
+            new NetherCodeTransformHardExclusionEvidence
+            {
+                IsKnown = true,
+                HardExcludedCodes =
+                [
+                    new NetherCodeTransformHardExclusion(
+                        40024,
+                        NetherCodeTransformHardExclusionReason.AdverseErosionAdjustment
+                    ),
+                ],
+            }
+        );
+
+        Assert.Equal(NetherEventDecisionKind.Select, decision.Kind);
+        NetherEventOptionAudit selected = Assert.Single(
+            decision.OptionAudits,
+            audit => audit.OptionNumber == 3
+        );
+        Assert.True(selected.IsSelected);
+        Assert.Equal(NetherEventOptionSelectionTier.RecoveryTransform, selected.SelectionTier);
+    }
+
+    [Fact]
     public void Treasure_rejects_a_non_40_or_80_hp_payment_even_with_route_proof()
     {
         NetherEventDecision decision = new NetherEventPolicy().DecideTreasure(

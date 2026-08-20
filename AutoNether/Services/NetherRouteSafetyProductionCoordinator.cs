@@ -686,6 +686,62 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             InteractivePreEntry = interactivePreEntry,
         };
         NetherRoutePlan route = _routePlanner.Plan(snapshot, context);
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> routeCommitments =
+            BuildRouteOwnedCommitments(
+                snapshot,
+                route,
+                context,
+                runtime,
+                interactivePreEntry
+            );
+        bool procurementFixedPoint = false;
+        // Branch-local commitments are discovered from the selected route's exact pre-entry
+        // capture. They must become planner input before the authoritative route audit is built;
+        // otherwise the audit records the provisional count even though the returned plan carries
+        // the newly generated budgets. Replan until the route and its owned commitment map agree,
+        // with a bounded fail-closed guard for an impossible oscillating capture.
+        for (int iteration = 0; iteration < 4; iteration++)
+        {
+            if (ProcurementCommitmentsEqual(context.EventProcurementCommitments, routeCommitments))
+            {
+                procurementFixedPoint = true;
+                break;
+            }
+
+            context = context with
+            {
+                EventProcurementCommitments = routeCommitments,
+            };
+            route = _routePlanner.Plan(snapshot, context);
+            routeCommitments = BuildRouteOwnedCommitments(
+                snapshot,
+                route,
+                context,
+                runtime,
+                interactivePreEntry
+            );
+        }
+        if (!procurementFixedPoint
+            && ProcurementCommitmentsEqual(context.EventProcurementCommitments, routeCommitments))
+        {
+            procurementFixedPoint = true;
+        }
+        if (!procurementFixedPoint)
+        {
+            route = route with
+            {
+                SelectedNode = null,
+                SelectedPathNodeIds = Array.Empty<long>(),
+                BranchIdentity = null,
+                PauseReason = NetherPauseReason.UnknownMasterData,
+                PauseDetail = "route-owned-procurement-fixed-point-unavailable",
+            };
+            routeCommitments = new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
+            context = context with
+            {
+                EventProcurementCommitments = routeCommitments,
+            };
+        }
         NetherRankFiveKeyProcurementDecision rankFiveProcurement = EvaluateRankFiveSelectedRoute(
             snapshot,
             context,
@@ -700,6 +756,28 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 interactivePreEntry,
                 runtime.RecoveryTransformEligibility
             );
+        return new NetherProductionRouteSafetyPlan
+        {
+            Route = route,
+            Context = context,
+            BattleProjectionByFloorId = payloads,
+            EventProcurementCommitments = routeCommitments,
+            RouteIdentity = route.BranchIdentity,
+            RankFiveKeyProcurement = rankFiveProcurement,
+            RecoveryBranchSafetyByPartId = recoveryBranchSafety,
+            RecoveryTransformEligibility = runtime.RecoveryTransformEligibility,
+        };
+    }
+
+    private static IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>
+        BuildRouteOwnedCommitments(
+            NetherSnapshot snapshot,
+            NetherRoutePlan route,
+            NetherRouteSafetyContext context,
+            NetherRuntimeRouteSafetyData runtime,
+            NetherRuntimeInteractivePreEntryInputsResult? interactivePreEntry
+        )
+    {
         IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> runtimeCommitments =
             runtime.RouteIdentity is { } runtimeIdentity
                 && route.BranchIdentity is { } routeIdentity
@@ -717,7 +795,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                     interactivePreEntry
                 )
             );
-        routeCommitments = NetherRouteOwnedEventProcurementProducer.Merge(
+        return NetherRouteOwnedEventProcurementProducer.Merge(
             routeCommitments,
             NetherRouteOwnedEventProcurementProducer.FromSelectedVisibleBranch(
                 snapshot,
@@ -727,17 +805,22 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 runtime.VisibleMap
             )
         );
-        return new NetherProductionRouteSafetyPlan
+    }
+
+    private static bool ProcurementCommitmentsEqual(
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? first,
+        IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>? second
+    )
+    {
+        if (first == null || second == null || first.Count != second.Count)
+            return first == null && second == null;
+        foreach ((NetherInteractiveEventOptionKey key, NetherEventProcurementBudget budget) in first)
         {
-            Route = route,
-            Context = context,
-            BattleProjectionByFloorId = payloads,
-            EventProcurementCommitments = routeCommitments,
-            RouteIdentity = route.BranchIdentity,
-            RankFiveKeyProcurement = rankFiveProcurement,
-            RecoveryBranchSafetyByPartId = recoveryBranchSafety,
-            RecoveryTransformEligibility = runtime.RecoveryTransformEligibility,
-        };
+            if (!second.TryGetValue(key, out NetherEventProcurementBudget other)
+                || other != budget)
+                return false;
+        }
+        return true;
     }
 
     private NetherRankFiveKeyProcurementDecision[] EvaluateRankFiveHorizonDecisions(

@@ -136,6 +136,11 @@ public class NetherRouteSafetyProductionCoordinatorTests
         Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
         Assert.Equal(new NetherEventProcurementBudget(200, 0), plan.EventProcurementCommitments[goldKey]);
         Assert.Equal(new NetherEventProcurementBudget(0, 1), plan.EventProcurementCommitments[keyKey]);
+        Assert.Equal(2, plan.Route.SelectionEvidence!.ProcurementCommitmentCount);
+        Assert.All(
+            plan.Route.Audit.Where(audit => audit.IsCandidate),
+            audit => Assert.Equal(2, audit.ProcurementCommitmentCount)
+        );
         Assert.True(
             plan.RankFiveKeyProcurement.HasMandatoryObjective,
             $"{plan.RankFiveKeyProcurement.Detail}|source={plan.RankFiveKeyProcurement.SourceKind}|path={string.Join(",", plan.Route.SelectedPathNodeIds ?? Array.Empty<long>())}|hardSafe={string.Join(",", plan.Context.HardSafeByFloorId.Where(pair => pair.Value).Select(pair => pair.Key))}"

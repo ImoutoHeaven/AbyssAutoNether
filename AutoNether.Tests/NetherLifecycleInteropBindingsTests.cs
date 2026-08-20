@@ -631,8 +631,8 @@ public sealed class NetherLifecycleInteropBindingsTests
         );
         var cases = new[]
         {
-            (continueController, NetherCheckpointContinueNativeBinding.ContinueCallbackInterop, "_SetupPopupEvent_b__8_2"),
-            (continueController, NetherCheckpointContinueNativeBinding.FinishCallbackInterop, "_SetupPopupEvent_b__8_1"),
+            (continueController, NetherCheckpointContinueNativeBinding.ContinueCallbackInterop, "_SetupPopupEvent_b__9_2"),
+            (continueController, NetherCheckpointContinueNativeBinding.FinishCallbackInterop, "_SetupPopupEvent_b__9_1"),
             (boostController, NetherCheckpointContinueNativeBinding.BoostSetCountInterop, "_SetupPopupEvent_b__7_2"),
             (boostController, NetherCheckpointContinueNativeBinding.BoostConfirmInterop, "_SetupPopupEvent_b__7_1"),
         };

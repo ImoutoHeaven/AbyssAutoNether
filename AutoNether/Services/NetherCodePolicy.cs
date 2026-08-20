@@ -219,25 +219,31 @@ internal sealed class NetherCodePolicy
         {
             return Pause(NetherPauseReason.UnknownMasterData, "incomplete-code-portfolio") with
             {
+                CandidateAudits = CreateIncompleteCandidateAudits(candidates),
                 FirstFailingHardGate = NetherCodeCandidateHardGate.CandidateIdentity,
                 UnknownReasonCode = NetherStrategyUnknownReasonCode.CandidateIdentityInvalid,
             };
         }
 
-        NetherCodeCandidateAudit[] duplicateAudits = candidates
+        HashSet<long> duplicateCodeIds = candidates
             .GroupBy(candidate => candidate.CodeId)
             .Where(group => group.Count() > 1)
-            .SelectMany(group => group.Select(candidate => new NetherCodeCandidateAudit(
-                candidate.CodeId,
-                NetherCodeCandidateHardGate.AmbiguousCandidateIdentity,
-                "duplicate-candidate-code-id"
-            )
-            {
-                UnknownReasonCode = NetherStrategyUnknownReasonCode.AmbiguousCandidateIdentity,
-            }))
-            .ToArray();
-        if (duplicateAudits.Length > 0)
+            .Select(group => group.Key)
+            .ToHashSet();
+        if (duplicateCodeIds.Count > 0)
         {
+            NetherCodeCandidateAudit[] duplicateAudits = candidates
+                .Select(candidate => new NetherCodeCandidateAudit(
+                    candidate.CodeId,
+                    NetherCodeCandidateHardGate.AmbiguousCandidateIdentity,
+                    duplicateCodeIds.Contains(candidate.CodeId)
+                        ? "duplicate-candidate-code-id"
+                        : "ambiguous-candidate-set"
+                )
+                {
+                    UnknownReasonCode = NetherStrategyUnknownReasonCode.AmbiguousCandidateIdentity,
+                })
+                .ToArray();
             return Pause(NetherPauseReason.UnknownMasterData, "ambiguous-code-candidate-identity") with
             {
                 CandidateAudits = duplicateAudits,
@@ -498,6 +504,19 @@ internal sealed class NetherCodePolicy
             evidence,
             effectiveResearchFamily
         ))
+        .ToArray();
+
+    private static NetherCodeCandidateAudit[] CreateIncompleteCandidateAudits(
+        IReadOnlyList<NetherCodeCandidate> candidates
+    ) => candidates
+        .Select(candidate => new NetherCodeCandidateAudit(
+            candidate?.CodeId ?? 0,
+            NetherCodeCandidateHardGate.CandidateIdentity,
+            "incomplete-code-portfolio"
+        )
+        {
+            UnknownReasonCode = NetherStrategyUnknownReasonCode.CandidateIdentityInvalid,
+        })
         .ToArray();
 
     private static NetherCodeCandidateAudit CreateCandidateAudit(

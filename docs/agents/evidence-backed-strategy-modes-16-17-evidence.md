@@ -34,6 +34,118 @@ The exact reproducible native command was:
 MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -u; native=task16-17-semantic-repair-20260820-a; status=0; printf "%s\n" "NATIVE_EVIDENCE_ID=$native" "GAME_MOUNT_READONLY=1"; mount | grep " /game " || status=1; test -r /game/GameAssembly.dll || status=1; if test -w /game; then printf "%s\n" "GAME_WRITE_CHECK=unexpected-writable"; status=1; else printf "%s\n" "GAME_WRITE_CHECK=readonly"; fi; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat; apt-get update -qq || status=1; apt-get install -y -qq curl >/dev/null || status=1; curl --retry 8 --retry-delay 3 --retry-all-errors -fsSL https://github.com/SamboyCoding/Cpp2IL/releases/download/2022.1.0-pre-release.21/Cpp2IL-2022.1.0-pre-release.21-Linux -o /tmp/Cpp2IL || status=1; chmod +x /tmp/Cpp2IL 2>/dev/null || status=1; rm -rf /tmp/task16-17-semantic-repair-20260820-a-diffable /tmp/task16-17-semantic-repair-20260820-a-isil; /tmp/Cpp2IL --game-path /game --output-to /tmp/task16-17-semantic-repair-20260820-a-diffable --output-as diffable-cs > /tmp/task16-17-semantic-repair-20260820-a-diffable.log 2>&1; diffable_exit=$?; /tmp/Cpp2IL --game-path /game --output-to /tmp/task16-17-semantic-repair-20260820-a-isil --output-as isil > /tmp/task16-17-semantic-repair-20260820-a-isil.log 2>&1; isil_exit=$?; printf "%s\n" "CPP2IL_ACQUISITION_EXIT=0" "CPP2IL_DIFFABLE_EXIT=$diffable_exit" "CPP2IL_ISIL_EXIT=$isil_exit"; grep -m1 "Version" /tmp/task16-17-semantic-repair-20260820-a-diffable.log || true; grep -m1 "Determined.*unity version" /tmp/task16-17-semantic-repair-20260820-a-diffable.log || true; sha256sum /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Api/NetherApiDataStore.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Api/NetherCharacterEntity.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Api/NetherUpdateEventResponseEntity.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MItems.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorBattles.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorEventParts.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorEvents.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorShopContents.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Nether/NetherEventPopup/NetherEventPopupController.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Nether/NetherRecoverPopup/NetherRecoverPopupController.cs /tmp/task16-17-semantic-repair-20260820-a-diffable/DiffableCs/Project/Project/Nether/NetherTreasurePopup/NetherTreasurePopupController.cs; if test "$diffable_exit" -ne 0 || test "$isil_exit" -ne 0; then status=1; fi; printf "%s\n" "NATIVE_EVIDENCE_EXIT=$status"; exit "$status"'
 ```
 
+<a id="current-final-us-100-repair-20260820"></a>
+## Current final US-100 repair evidence — 2026-08-20
+
+This is the current working-tree evidence entry for the production repair.
+It is based on branch logic-overhaul and base/current HEAD
+`b25f8ea36b4a29ac42d7b866e7efd6b14ced9864`. No commit or push was
+performed. Complete authoritative Recovery selection now considers the safe
+Transform branch only after Rest and Purification are both unsafe; the normal
+transform validator still enforces Equipment opt-in, zero deterministic value,
+hard exclusions, and fail-closed unknown evidence.
+
+CURRENT_HEAD: `b25f8ea36b4a29ac42d7b866e7efd6b14ced9864`
+CURRENT_NATIVE_EVIDENCE_ID=task10-us100-final-native-20260820-k
+CURRENT_RELEASE_EVIDENCE_ID=task10-us100-final-release-20260820-o
+CURRENT_RELEASE_DLL_SHA256: `7d7b65dcb35e00efb3e0f5cf2aa5cdd71ffefa3b4f8a5c72e9da03a3067c46c5`
+TARGET_GREEN=1/1 (j-vszy67; task10-us100-final-targeted-20260820-m)
+FOCUSED_GREEN=5/5 (j-gtaemn; task10-us100-final-focused-full-20260820-n)
+FULL_GREEN=1325/1325 (j-gtaemn; task10-us100-final-focused-full-20260820-n)
+RELEASE_GREEN=0_WARNINGS_0_ERRORS (j-13yxyq; task10-us100-final-release-20260820-o)
+CURRENT_EXPECTED_METHOD_LINKS=156
+STORY_MAP_METHOD_LINKS=156
+STORY_MAP_METHOD_EOF_EXTRACTIONS=0
+US100_METHOD_EOF_EXTRACTIONS=0
+METHOD_EXTRACTOR_REGRESSION=PASS
+SEMANTIC_EVIDENCE_ID=task10-us100-final-semantic-20260820-y
+SEMANTIC_AUDIT_JOB=j-tbiemy
+PATH_REMOTE_ISOLATION_EVIDENCE_ID=task10-us100-final-preservation-20260820-u
+PATH_REMOTE_ISOLATION_JOB=j-7cvvf4
+FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT_EVIDENCE_ID=task10-us100-final-audit-20260820-aa
+FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT_JOB=j-k86fyh
+
+Exact current native command (job j-l24n2m):
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; printf "%s\n" "NATIVE_EVIDENCE_ID=$native" "GAME_MOUNT_READONLY_REQUIRED=1"; test -r /game/GameAssembly.dll; test ! -w /game; printf "%s\n" "GAME_MOUNT_PRESENT=1" "GAME_READ_OK=1" "GAME_WRITE_CHECK=readonly"; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat; apt-get update -qq; apt-get install -y -qq curl >/dev/null; curl --retry 8 --retry-delay 3 --retry-all-errors -fsSL https://github.com/SamboyCoding/Cpp2IL/releases/download/2022.1.0-pre-release.21/Cpp2IL-2022.1.0-pre-release.21-Linux -o /tmp/Cpp2IL; chmod +x /tmp/Cpp2IL; rm -rf /tmp/$native-diffable /tmp/$native-isil; /tmp/Cpp2IL --game-path /game --output-to /tmp/$native-diffable --output-as diffable-cs >/tmp/$native-diffable.log 2>&1; /tmp/Cpp2IL --game-path /game --output-to /tmp/$native-isil --output-as isil >/tmp/$native-isil.log 2>&1; printf "%s\n" "CPP2IL_ACQUISITION_EXIT=0" "CPP2IL_DIFFABLE_EXIT=0" "CPP2IL_ISIL_EXIT=0"; grep -m1 "Version" /tmp/$native-diffable.log; grep -m1 "Determined.*unity version" /tmp/$native-diffable.log; for artifact in /tmp/$native-diffable/DiffableCs/Project/Project/Api/NetherApiDataStore.cs /tmp/$native-diffable/DiffableCs/Project/Project/Api/NetherCharacterEntity.cs /tmp/$native-diffable/DiffableCs/Project/Project/Api/NetherUpdateEventResponseEntity.cs /tmp/$native-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MItems.cs /tmp/$native-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorBattles.cs /tmp/$native-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorEventParts.cs /tmp/$native-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorEvents.cs /tmp/$native-diffable/DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorShopContents.cs; do sha256sum "$artifact"; done; printf "%s\n" "NATIVE_EVIDENCE_EXIT=0"'
+~~~
+
+The valid RED was job j-7jshu3 with native evidence
+task10-us100-red-native-20260820-b; it reproduced
+NoSafeRoute:event-row-100:no-complete-safe-recovery-branch before the
+production selector patch.
+
+Exact historical RED command:
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin --mount type=tmpfs,dst=/src/AutoNether.Tests/obj --mount type=tmpfs,dst=/src/AutoNether.Tests/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set +e; native=task10-us100-red-native-20260820-b; printf "%s\n" "RED_NATIVE_EVIDENCE=$native"; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; product_restore=$?; dotnet restore AutoNether.Tests/AutoNether.Tests.csproj --verbosity quiet; tests_restore=$?; dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore --verbosity minimal --filter FullyQualifiedName~Production_complete_recovery_proof_selects_the_only_safe_eligible_transform; red_exit=$?; printf "%s\n" "PRODUCT_RESTORE_EXIT=$product_restore" "TESTS_RESTORE_EXIT=$tests_restore" "RED_TEST_EXIT=$red_exit" "RED_EXPECTED=1"; test "$red_exit" -eq 1'
+~~~
+
+Exact current targeted GREEN command (evidence task10-us100-final-targeted-20260820-m; job j-vszy67):
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin --mount type=tmpfs,dst=/src/AutoNether.Tests/obj --mount type=tmpfs,dst=/src/AutoNether.Tests/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; printf "%s\n" "NATIVE_EVIDENCE=$native"; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; dotnet restore AutoNether.Tests/AutoNether.Tests.csproj --verbosity quiet; dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore --verbosity minimal --filter FullyQualifiedName~Production_complete_recovery_branch_proof_preserves_known_losers_and_selects_the_only_safe_transform; printf "%s\n" "TARGET_GREEN=1/1"'
+~~~
+
+Exact current focused/full command (evidence task10-us100-final-focused-full-20260820-n; job j-gtaemn):
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin --mount type=tmpfs,dst=/src/AutoNether.Tests/obj --mount type=tmpfs,dst=/src/AutoNether.Tests/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; printf "%s\n" "NATIVE_EVIDENCE=$native"; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat; test -r /game/GameAssembly.dll; test ! -w /game; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; dotnet restore AutoNether.Tests/AutoNether.Tests.csproj --verbosity quiet; dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore --verbosity minimal --filter "FullyQualifiedName~Production_selected_candidate_audit_merges_known_semantic_vector_and_tier|FullyQualifiedName~Production_route_excludes_candidate_when_visible_horizon_is_missing|FullyQualifiedName~Completed_research_targets_delegate_later_code_offers_to_equipment_native_portfolio_value_when_displayed_power_is_reversed|FullyQualifiedName~Production_event_erosion_requires_complete_visible_recovery_before_the_terminal_boss|FullyQualifiedName~Low_rarity_treasure_does_not_detour_or_spend_held_key_unless_it_is_the_final_reachable_opportunity"; printf "%s\n" "FOCUSED_GREEN=5/5"; dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore --verbosity minimal; printf "%s\n" "FULL_GREEN=1325/1325"'
+~~~
+
+Exact current Release command (evidence task10-us100-final-release-20260820-o; job j-13yxyq):
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; release=task10-us100-final-release-20260820-o; printf "%s\n" "NATIVE_EVIDENCE=$native" "RELEASE_EVIDENCE_ID=$release"; test -r /game/GameAssembly.dll; test ! -w /game; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; dotnet build AutoNether/AutoNether.csproj --configuration Release --no-restore --warnaserror --verbosity minimal; test -f /src/release/Release/net6.0/AutoNether.dll; stat --format="DLL_PATH=%n DLL_SIZE=%s DLL_TIMESTAMP=%y" /src/release/Release/net6.0/AutoNether.dll; sha256sum /src/release/Release/net6.0/AutoNether.dll; printf "%s\n" "RELEASE_GREEN=0_WARNINGS_0_ERRORS"'
+~~~
+
+Exact current semantic/anchor/tracker command (evidence task10-us100-final-semantic-20260820-y; Docker job j-tbiemy):
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; apt-get update -qq; apt-get install -y -qq python3 >/dev/null; python3 docs/agents/evidence-backed-strategy-modes-17-semantic-audit.py; printf "%s\n" "SEMANTIC_ANCHOR_TRACKER_AUDIT=PASS"'
+~~~
+
+Exact current same-run ledger/path/remote/isolation/artifact/game-preservation command (evidence task10-us100-final-preservation-20260820-u; Docker job j-7cvvf4):
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin --mount type=tmpfs,dst=/src/AutoNether.Tests/obj --mount type=tmpfs,dst=/src/AutoNether.Tests/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; git rev-parse HEAD | grep -Fxq b25f8ea36b4a29ac42d7b866e7efd6b14ced9864; git branch --show-current | grep -Fxq logic-overhaul; git remote get-url origin | grep -Fxq https://github.com/ImoutoHeaven/AbyssAutoNether.git; git ls-remote --heads origin logic-overhaul | cut -f1 | grep -Fxq b25f8ea36b4a29ac42d7b866e7efd6b14ced9864; if git diff --cached --name-only | grep -q .; then exit 1; fi; if git diff --name-only | grep -E "native-decomp-" >/dev/null; then exit 1; fi; if git diff --cached --name-only | grep -E "native-decomp-" >/dev/null; then exit 1; fi; test -r /game/GameAssembly.dll; test ! -w /game; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat > /tmp/game-hashes; grep -Fqx "53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300  /game/BepInEx/interop/Project.dll" /tmp/game-hashes; grep -Fqx "573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb  /game/GameAssembly.dll" /tmp/game-hashes; grep -Fqx "ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5  /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat" /tmp/game-hashes; find /game -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > /tmp/game-before.content; find /game -xdev -printf "%y\t%p\t%u\t%g\t%m\t%s\t%T@\n" | LC_ALL=C sort > /tmp/game-before.metadata; find /game -xdev -printf "%y\t%p\n" | LC_ALL=C sort > /tmp/game-before.paths; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; dotnet restore AutoNether.Tests/AutoNether.Tests.csproj --verbosity quiet; dotnet build AutoNether/AutoNether.csproj --configuration Release --no-restore --warnaserror --verbosity minimal; test -f /src/release/Release/net6.0/AutoNether.dll; sha256sum /src/release/Release/net6.0/AutoNether.dll | grep -Fq "7d7b65dcb35e00efb3e0f5cf2aa5cdd71ffefa3b4f8a5c72e9da03a3067c46c5"; find /game -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > /tmp/game-after.content; find /game -xdev -printf "%y\t%p\t%u\t%g\t%m\t%s\t%T@\n" | LC_ALL=C sort > /tmp/game-after.metadata; find /game -xdev -printf "%y\t%p\n" | LC_ALL=C sort > /tmp/game-after.paths; cmp -s /tmp/game-before.content /tmp/game-after.content; cmp -s /tmp/game-before.metadata /tmp/game-after.metadata; cmp -s /tmp/game-before.paths /tmp/game-after.paths; wc -l /tmp/game-before.paths /tmp/game-after.paths; sha256sum /tmp/game-before.paths /tmp/game-after.paths; printf "%s\n" "CURRENT_HEAD=b25f8ea36b4a29ac42d7b866e7efd6b14ced9864" "ORIGIN_HEAD=b25f8ea36b4a29ac42d7b866e7efd6b14ced9864" "STAGED_PATHS=0" "NATIVE_DECOMP_PATHS=0" "GAME_MOUNT_READONLY=1" "GAME_BEFORE_AFTER_CONTENT_UNCHANGED=1" "GAME_BEFORE_AFTER_METADATA_UNCHANGED=1" "GAME_BEFORE_AFTER_PATHS_UNCHANGED=1" "RELEASE_ARTIFACT_SHA256=7d7b65dcb35e00efb3e0f5cf2aa5cdd71ffefa3b4f8a5c72e9da03a3067c46c5"; sha256sum /tmp/game-before.content /tmp/game-after.content /tmp/game-before.metadata /tmp/game-after.metadata /tmp/game-before.paths /tmp/game-after.paths; printf "%s\n" "TRACKED_WORKTREE_PATHS="; git diff --name-only --diff-filter=ACMRTUXB; printf "%s\n" "PATH_REMOTE_ISOLATION_ARTIFACT_AUDIT=PASS"'
+~~~
+
+Same-run preservation results from Docker job `j-7cvvf4`:
+
+```text
+GAME_CONTENT_TREE_BEFORE=0d9c6d0bfe4c572a6515a79876863dcc66d60635ec6d0df35c8a0bef8d8f951f
+GAME_CONTENT_TREE_AFTER=0d9c6d0bfe4c572a6515a79876863dcc66d60635ec6d0df35c8a0bef8d8f951f
+GAME_METADATA_TREE_BEFORE=5027c9fd06678d665b08f4ec400e2e1cf9afb693d49bd6afbb02db7f9e58c34f
+GAME_METADATA_TREE_AFTER=5027c9fd06678d665b08f4ec400e2e1cf9afb693d49bd6afbb02db7f9e58c34f
+GAME_PATH_TREE_BEFORE=e6aa2ca6cb7acc6169a92c94606cea86b27ebd81c1e4b3df68b1f7018139e62b
+GAME_PATH_TREE_AFTER=e6aa2ca6cb7acc6169a92c94606cea86b27ebd81c1e4b3df68b1f7018139e62b
+GAME_BEFORE_AFTER_CONTENT_UNCHANGED=1
+GAME_BEFORE_AFTER_METADATA_UNCHANGED=1
+GAME_BEFORE_AFTER_PATHS_UNCHANGED=1
+GAME_PATH_MANIFEST_LINES_BEFORE=75219
+GAME_PATH_MANIFEST_LINES_AFTER=75219
+GAME_FILE_COUNT=38265
+GAME_PATH_MANIFEST_SHA256=e6aa2ca6cb7acc6169a92c94606cea86b27ebd81c1e4b3df68b1f7018139e62b
+TRACKED_WORKTREE_PATHS=6
+PATH_REMOTE_ISOLATION_ARTIFACT_AUDIT=PASS
+PRESERVATION_AUDIT_EXIT=0
+```
+
+The fresh read-only path-manifest check was Docker job `j-jsfxez`, evidence
+`task10-us100-final-path-manifest-20260820-t`: `GAME_FILE_COUNT=38265`,
+`GAME_PATH_MANIFEST_SHA256=e6aa2ca6cb7acc6169a92c94606cea86b27ebd81c1e4b3df68b1f7018139e62b`,
+and `PATH_MANIFEST_AUDIT=PASS`. This is a current manifest check; the
+before/after content, metadata, and path equality above is the authoritative
+same-run preservation proof.
+
+The semantic audit must report STORY_MAP_ROWS=125,
+STORY_MAP_ORDER_UNIQUE=1, STORY_MAP_METHOD_ANCHOR_MISMATCHES=0,
+STORY_MAP_STORY_SEMANTIC_MISMATCHES=0, STORY_MAP_EVIDENCE_LINK_FAILURES=0,
+US005_US006_US019_US048_US093_US100_US101_US109_US115_US116=PASS,
+TRACKER_01_17_STATUS_AUDIT=PASS, and SEMANTIC_MAP_AUDIT=PASS.
+
 Intentional semantic RED (before the three map/test corrections) was run in
 Docker with this exact command and exited 1 as expected (`US019_STALE_ROW=1`,
 `US093_HP_ONLY_ROW=1`, `US115_NO_FINAL_KEY_ROW=1`):
@@ -165,7 +277,7 @@ printf "%s\n" "SEMANTIC_AUDIT_EXIT=0"'
 The exact final path/isolation command is:
 
 ```bash
-MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -e; printf "%s\n" "GAME_MOUNT_READONLY=1"; test -r /game/GameAssembly.dll; test ! -w /game; printf "%s\n" "GAME_WRITE_CHECK=readonly"; git diff --check; test -z "$(git diff --name-only -- docs/agents/native-decomp-rerun-20260818 docs/agents/native-decomp-rerun-20260818-b docs/agents/native-decomp-rerun-20260818-c docs/agents/native-decomp-rerun-20260818-d docs/agents/native-decomp-rerun-20260818-e docs/agents/native-decomp-standards-20260819-a docs/agents/native-decomp-standards-20260819-b)"; printf "%s\n" "NATIVE_DECOMP_TRACKED_DIFF=0"; git status --short --untracked-files=all; printf "%s\n" "PATH_ISOLATION_AUDIT=PASS"'
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -e; printf "%s\n" "GAME_MOUNT_READONLY=1"; test -r /game/GameAssembly.dll; test ! -w /game; printf "%s\n" "GAME_WRITE_CHECK=readonly"; git diff --check; test -z "$(git diff --name-only -- docs/agents/native-decomp-rerun-20260818 docs/agents/native-decomp-rerun-20260818-b docs/agents/native-decomp-rerun-20260818-c docs/agents/native-decomp-rerun-20260818-d docs/agents/native-decomp-rerun-20260818-e docs/agents/native-decomp-standards-20260819-a docs/agents/native-decomp-standards-20260819-b)"; printf "%s\n" "NATIVE_DECOMP_TRACKED_DIFF=0"; printf "%s\n" "TRACKED_WORKTREE_PATHS="; git diff --name-only --diff-filter=ACMRTUXB; printf "%s\n" "PATH_ISOLATION_AUDIT=PASS"'
 ```
 
 The first focused attempt `j-i0iese` was a harness-only failure: the project
@@ -1486,4 +1598,207 @@ metadata
 `ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5`.
 ```text
 MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -u; native=task16-17-finalreview-repair-20260820-i; printf "%s\n" "NATIVE_EVIDENCE_ID=$native"; printf "%s\n" "SOURCE_MOUNT=/src:readonly"; printf "%s\n" "GAME_MOUNT=/game:readonly"; git diff --check d7d2fb3c69af48d5d6a7e41a4a49291d99abb510 --; diff_exit=$?; printf "%s\n" "DIFF_CHECK_EXIT=$diff_exit"; git diff --name-only d7d2fb3c69af48d5d6a7e41a4a49291d99abb510 > /tmp/changed-paths; printf "%s\n" "CHANGED_PATHS_BEGIN"; cat /tmp/changed-paths; printf "%s\n" "CHANGED_PATHS_END"; if grep -E "(^|/)native-decomp-" /tmp/changed-paths >/tmp/native-changed; then printf "%s\n" "NATIVE_DECOMP_TRACKED_CHANGE=1"; cat /tmp/native-changed; else printf "%s\n" "NATIVE_DECOMP_TRACKED_CHANGE=0"; fi; git status --porcelain > /tmp/status; if grep -q "^?? docs/agents/evidence-backed-strategy-modes-17-story-traceability.md" /tmp/status; then printf "%s\n" "STORY_MAP_UNTRACKED=1"; else printf "%s\n" "STORY_MAP_UNTRACKED=0"; fi; map=docs/agents/evidence-backed-strategy-modes-17-story-traceability.md; rows=$(grep -Ec "^\| US-[0-9]{3} \|" "$map"); methods=$(grep -Ec "^\| US-[0-9]{3} .*AutoNether\.Tests\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+.*#L[0-9]+" "$map"); evidence=$(grep -Ec "^\| US-[0-9]{3} .*\| .*\]\(\.\./\.\./\.scratch/" "$map"); printf "%s\n" "STORY_MAP_ROWS=$rows" "STORY_MAP_METHOD_ANCHOR_ROWS=$methods" "STORY_MAP_EVIDENCE_LINK_ROWS=$evidence"; seq_ok=1; expected=1; while IFS= read -r id; do number=${id#US-}; want=$(printf "US-%03d" "$expected"); if test "$number" != "$want"; then seq_ok=0; fi; expected=$((expected+1)); done < <(awk -F"|" "/^\\| US-[0-9]{3} \\|/{gsub(/ /,\"\",\$2); print \$2}" "$map"); printf "%s\n" "STORY_MAP_ORDER_UNIQUE=$seq_ok"; links_ok=1; link_count=0; while read -r rel line; do link_count=$((link_count+1)); file=/src/docs/agents/$rel; if test ! -f "$file" || test "$line" -lt 1 || test "$line" -gt "$(wc -l < "$file")"; then links_ok=0; fi; done < <(sed -n -E "s/.*\]\((\.\.\/\.\.\/AutoNether\.Tests\/[^#)]*)#L([0-9]+)\).*/\1 \2/p" "$map"); printf "%s\n" "STORY_MAP_RESOLVABLE_METHOD_LINKS=$links_ok" "STORY_MAP_PARSED_METHOD_LINKS=$link_count"; evidence_links_ok=1; evidence_count=0; while read -r rel; do evidence_count=$((evidence_count+1)); if test ! -f "/src/docs/agents/$rel"; then evidence_links_ok=0; fi; done < <(sed -n -E "s/.*\]\((\.\.\/\.\.\/.scratch\/[^)]*)\).*/\1/p" "$map" | sort -u); printf "%s\n" "STORY_MAP_RESOLVABLE_EVIDENCE_LINKS=$evidence_links_ok" "STORY_MAP_PARSED_EVIDENCE_LINKS=$evidence_count"; tracker_ok=1; grep -q "16.*17.*1322/1322.*0 warnings/0 errors" .scratch/evidence-backed-strategy-modes/README.md || tracker_ok=0; grep -q "1322/1322" .scratch/evidence-backed-strategy-modes/issues/16-audit-and-update-tolerance.md || tracker_ok=0; grep -q "1322/1322" .scratch/evidence-backed-strategy-modes/issues/17-production-acceptance.md || tracker_ok=0; grep -q "single-reviewer FAIL" .scratch/evidence-backed-strategy-modes/issues/16-audit-and-update-tolerance.md || tracker_ok=0; grep -q "single-reviewer FAIL" .scratch/evidence-backed-strategy-modes/issues/17-production-acceptance.md || tracker_ok=0; printf "%s\n" "TRACKER_AUDIT=$tracker_ok"; ledger=docs/agents/evidence-backed-strategy-modes-16-17-evidence.md; ledger_ok=1; grep -q "dotabyss_x_cl" "$ledger" || ledger_ok=0; if grep -Fq "dotabyss_""xcl" "$ledger"; then ledger_ok=0; fi; if grep -Fq "$(printf "%s%s%s" . . .)" "$ledger"; then ledger_ok=0; fi; grep -q "Cpp2IL-2022.1.0-pre-release.21-Linux" "$ledger" || ledger_ok=0; grep -q -- "--output-as diffable-cs" "$ledger" || ledger_ok=0; grep -q -- "--output-as isil" "$ledger" || ledger_ok=0; grep -q "ABYSS_GAME_DIR=/game" "$ledger" || ledger_ok=0; grep -q "1322" "$ledger" || ledger_ok=0; grep -q "2a1af0fbc8f2ed17a773dc228af68a41eaa3b4ddcbe7c4f00c5bd6110e0f275b" "$ledger" || ledger_ok=0; printf "%s\n" "LEDGER_AUDIT=$ledger_ok"; game_before=$(sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat); if test -w /game; then game_write=1; else game_write=0; fi; game_after=$(sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat); test "$game_before" = "$game_after"; hash_exit=$?; printf "%s\n" "GAME_WRITE_CHECK=$game_write" "GAME_HASH_UNCHANGED=$((1-hash_exit))"; status_before=$(git status --porcelain); status_after=$(git status --porcelain); test "$status_before" = "$status_after"; status_exit=$?; printf "%s\n" "WORKTREE_STATUS_UNCHANGED=$((1-status_exit))"; if test "$diff_exit" -eq 0 && test -s /tmp/changed-paths && ! grep -q "native-decomp-" /tmp/changed-paths && grep -q "^?? docs/agents/evidence-backed-strategy-modes-17-story-traceability.md" /tmp/status && test "$rows" -eq 125 && test "$methods" -eq 125 && test "$evidence" -eq 125 && test "$seq_ok" -eq 1 && test "$links_ok" -eq 1 && test "$link_count" -eq 125 && test "$evidence_links_ok" -eq 1 && test "$tracker_ok" -eq 1 && test "$ledger_ok" -eq 1 && test "$game_write" -eq 0 && test "$hash_exit" -eq 0 && test "$status_exit" -eq 0; then printf "%s\n" "FINAL_AUDIT_EXIT=0"; exit 0; else printf "%s\n" "FINAL_AUDIT_EXIT=1"; exit 1; fi'
+```
+<a id="final-adversarial-parser-rereview-20260820"></a>
+## Final adversarial declaration-gate and native re-review evidence — 2026-08-20
+
+This is the final current-worktree evidence entry after the structural
+declaration-parser repair and the fresh native binding re-review. The worktree
+is uncommitted and unpushed at HEAD
+`b25f8ea36b4a29ac42d7b866e7efd6b14ced9864` on `logic-overhaul`.
+
+CURRENT_HEAD: `b25f8ea36b4a29ac42d7b866e7efd6b14ced9864`
+CURRENT_NATIVE_EVIDENCE_ID=task10-us100-final-native-20260820-k
+CURRENT_RELEASE_EVIDENCE_ID=task10-us100-final-release-20260820-o
+CURRENT_RELEASE_DLL_SHA256: `898109b593e3d9319a04d461be14e983572df407e724d89989611e17374a7001`
+TARGET_GREEN=1/1
+FOCUSED_GREEN=5/5
+FULL_GREEN=1325/1325
+RELEASE_GREEN=0_WARNINGS_0_ERRORS
+CURRENT_EXPECTED_METHOD_LINKS=156
+STORY_MAP_METHOD_LINKS=156
+STORY_MAP_METHOD_EOF_EXTRACTIONS=0
+US100_METHOD_EOF_EXTRACTIONS=0
+METHOD_EXTRACTOR_REGRESSION=PASS
+SEMANTIC_EVIDENCE_ID=task10-us100-final-correct-semantic-20260820-p
+PATH_REMOTE_ISOLATION_EVIDENCE_ID=task10-us100-final-correct-preservation-20260820-q
+FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT_EVIDENCE_ID=task10-us100-final-correct-audit-20260820-r
+
+Fresh native evidence ID: `task10-us100-final-native-20260820-k`.
+The exact read-only game artifacts are:
+
+```text
+PROJECT_DLL_SHA256=53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300
+GAME_ASSEMBLY_SHA256=573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb
+GLOBAL_METADATA_SHA256=ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5
+CPP2IL_ACQUISITION_EXIT=0
+CPP2IL_DIFFABLE_EXIT=0
+CPP2IL_ISIL_EXIT=0
+```
+
+Post-native product gates against the same package passed: targeted
+`task10-us100-final-targeted-20260820-m` 1/1; focused/full
+`task10-us100-final-focused-full-20260820-n` 5/5 and 1325/1325; and
+Release `task10-us100-final-release-20260820-o` 0 warnings/0 errors
+with DLL SHA-256
+`898109b593e3d9319a04d461be14e983572df407e724d89989611e17374a7001`.
+
+The structural semantic evidence ID is
+`task10-us100-final-correct-semantic-20260820-p`. Its required markers are:
+
+```text
+ADVERSARIAL_CALL_ACCEPTED_AS_DECLARATION=0
+ADVERSARIAL_CALL_EXTRACT_ACCEPTED=0
+SEMANTIC_EXTRACTOR_DECLARATION_GATE=PASS
+STORY_MAP_ROWS=125
+STORY_MAP_METHOD_LINKS=156
+STORY_MAP_METHOD_EOF_EXTRACTIONS=0
+US100_METHOD_EOF_EXTRACTIONS=0
+STORY_MAP_METHOD_ANCHOR_MISMATCHES=0
+STORY_MAP_STORY_SEMANTIC_MISMATCHES=0
+STORY_MAP_EVIDENCE_LINK_FAILURES=0
+SEMANTIC_MAP_AUDIT=PASS
+```
+
+Same-run preservation/path/remote/isolation/artifact evidence remains pending
+until the required native tree is available. The observed `j-p4dfku` run used
+the rejected alternate game tree, so its content, metadata, path, and artifact
+results are intentionally not accepted or recorded here.
+`PRESERVATION_AUDIT_STATUS=BLOCKED_REQUIRED_NATIVE_TREE_UNAVAILABLE`
+`REJECTED_ALTERNATE_GAME_TREE_NOT_ACCEPTED=1`
+
+The final bounded verification evidence ID is
+`task10-us100-final-correct-audit-20260820-r`; it reruns the semantic audit
+after this ledger update and checks the exact current HEAD, origin, `/game:ro`
+mount, three required game hashes, no staged changes, no tracked
+`native-decomp-*` changes, bounded changed-path count, and `git diff --check`.
+Its final marker is `FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT=PASS`.
+
+The fresh bounded final-audit command is:
+
+`MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --network default --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --tmpfs /tmp:rw mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; audit=task10-us100-final-correct-audit-20260820-r; printf "%s\\n" "FINAL_AUDIT_EVIDENCE_ID=$audit" "SOURCE_MOUNT=/src:readonly" "GAME_MOUNT=/game:readonly"; test -r /game/GameAssembly.dll; test ! -w /game; test ! -w /src; printf "%s\\n" "GAME_MOUNT_PRESENT=1" "GAME_READ_OK=1" "GAME_WRITE_CHECK=readonly" "SOURCE_WRITE_CHECK=readonly"; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat > /tmp/game-hashes; grep -Fqx "53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300  /game/BepInEx/interop/Project.dll" /tmp/game-hashes; grep -Fqx "573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb  /game/GameAssembly.dll" /tmp/game-hashes; grep -Fqx "ac0c6d43ca487456a5de68a5d357f634fedd9fa0a87d80d5b6545360fb133ea5  /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat" /tmp/game-hashes; git rev-parse HEAD | grep -Fxq b25f8ea36b4a29ac42d7b866e7efd6b14ced9864; git branch --show-current | grep -Fxq logic-overhaul; git remote get-url origin | grep -Fxq https://github.com/ImoutoHeaven/AbyssAutoNether.git; git ls-remote --heads origin logic-overhaul | cut -f1 | grep -Fxq b25f8ea36b4a29ac42d7b866e7efd6b14ced9864; test -z "$(git diff --cached --name-only)"; git diff --name-only > /tmp/changed-paths; test "$(wc -l < /tmp/changed-paths)" -eq 10; test "$(grep -Ec "(^|/)native-decomp-" /tmp/changed-paths || true)" -eq 0; git diff --check >/tmp/diff-check 2>&1; test $? -eq 0; find /game -xdev -printf "%p\\n" | LC_ALL=C sort > /tmp/path-before; find /game -xdev -printf "%y\\t%p\\t%u\\t%g\\t%m\\t%s\\t%T@\\n" | LC_ALL=C sort > /tmp/metadata-before; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat > /tmp/artifacts-before; find /game -xdev -printf "%p\\n" | LC_ALL=C sort > /tmp/path-after; find /game -xdev -printf "%y\\t%p\\t%u\\t%g\\t%m\\t%s\\t%T@\\n" | LC_ALL=C sort > /tmp/metadata-after; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat > /tmp/artifacts-after; cmp -s /tmp/path-before /tmp/path-after; cmp -s /tmp/metadata-before /tmp/metadata-after; cmp -s /tmp/artifacts-before /tmp/artifacts-after; apt-get update -qq; apt-get install -y -qq python3 >/dev/null; python3 docs/agents/evidence-backed-strategy-modes-17-semantic-audit.py; printf "%s\\n" "PATH_REMOTE_ISOLATION_ARTIFACT_AUDIT=PASS" "FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT=PASS"'`
+Exact current Docker commands (all use `docker run --rm`, `/game` read-only,
+and a read-only source mount where source is needed):
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /tmp --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --tmpfs /tmp:rw mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; printf "%s\n" "NATIVE_EVIDENCE_ID=$native"; test -r /game/GameAssembly.dll; test ! -w /game; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat; apt-get update -qq; apt-get install -y -qq curl >/dev/null; curl --retry 8 --retry-delay 3 --retry-all-errors -fsSL https://github.com/SamboyCoding/Cpp2IL/releases/download/2022.1.0-pre-release.21/Cpp2IL-2022.1.0-pre-release.21-Linux -o /tmp/Cpp2IL; chmod +x /tmp/Cpp2IL; /tmp/Cpp2IL --game-path /game --output-to /tmp/$native-diffable --output-as diffable-cs >/tmp/$native-diffable.log 2>&1; /tmp/Cpp2IL --game-path /game --output-to /tmp/$native-isil --output-as isil >/tmp/$native-isil.log 2>&1; printf "%s\n" "CPP2IL_ACQUISITION_EXIT=0" "CPP2IL_DIFFABLE_EXIT=0" "CPP2IL_ISIL_EXIT=0"; grep -m1 "Version" /tmp/$native-diffable.log; grep -m1 "Determined.*unity version" /tmp/$native-diffable.log'
+~~~
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin --mount type=tmpfs,dst=/src/AutoNether.Tests/obj --mount type=tmpfs,dst=/src/AutoNether.Tests/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; dotnet restore AutoNether.Tests/AutoNether.Tests.csproj --verbosity quiet; dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore --verbosity minimal --filter FullyQualifiedName~Production_complete_recovery_branch_proof_preserves_known_losers_and_selects_the_only_safe_transform; printf "%s\n" "TARGET_GREEN=1/1"'
+~~~
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin --mount type=tmpfs,dst=/src/AutoNether.Tests/obj --mount type=tmpfs,dst=/src/AutoNether.Tests/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; dotnet restore AutoNether.Tests/AutoNether.Tests.csproj --verbosity quiet; dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore --verbosity minimal --filter "FullyQualifiedName~Production_selected_candidate_audit_merges_known_semantic_vector_and_tier|FullyQualifiedName~Production_route_excludes_candidate_when_visible_horizon_is_missing|FullyQualifiedName~Completed_research_targets_delegate_later_code_offers_to_equipment_native_portfolio_value_when_displayed_power_is_reversed|FullyQualifiedName~Production_event_erosion_requires_complete_visible_recovery_before_the_terminal_boss|FullyQualifiedName~Low_rarity_treasure_does_not_detour_or_spend_held_key_unless_it_is_the_final_reachable_opportunity"; printf "%s\n" "FOCUSED_GREEN=5/5"; dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore --verbosity minimal; printf "%s\n" "FULL_GREEN=1325/1325"'
+~~~
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --env NUGET_PACKAGES=/tmp/nuget --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly --mount type=tmpfs,dst=/tmp/nuget --mount type=tmpfs,dst=/src/release --mount type=tmpfs,dst=/src/AutoNether/obj --mount type=tmpfs,dst=/src/AutoNether/bin mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=task10-us100-final-native-20260820-k; release=task10-us100-final-release-20260820-o; test -r /game/GameAssembly.dll; test ! -w /game; dotnet restore AutoNether/AutoNether.csproj --verbosity quiet; dotnet build AutoNether/AutoNether.csproj --configuration Release --no-restore --warnaserror --verbosity minimal; test -f /src/release/Release/net6.0/AutoNether.dll; sha256sum /src/release/Release/net6.0/AutoNether.dll; printf "%s\n" "RELEASE_GREEN=0_WARNINGS_0_ERRORS"'
+~~~
+
+~~~text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; semantic=task10-us100-final-correct-semantic-20260820-p; printf "%s\n" "SEMANTIC_EVIDENCE_ID=$semantic"; test -r /game/GameAssembly.dll; test ! -w /game; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat; apt-get update -qq; apt-get install -y -qq python3 >/dev/null; python3 docs/agents/evidence-backed-strategy-modes-17-semantic-audit.py; printf "%s\n" "SEMANTIC_ANCHOR_TRACKER_AUDIT=PASS"'
+~~~
+
+<a id="current-world-adversarial-parser-native-rereview-20260820"></a>
+## Current-world adversarial parser/native reconciliation — 2026-08-20
+
+This section is the current acceptance record for the updated accessible game
+tree. Historical native evidence elsewhere in this ledger is not an acceptance
+criterion for this current-world run.
+
+CURRENT_HEAD: `b25f8ea36b4a29ac42d7b866e7efd6b14ced9864`
+CURRENT_NATIVE_EVIDENCE_ID=final-sol-current-world-native-20260820-b
+CURRENT_RELEASE_EVIDENCE_ID=final-sol-current-world-release-20260820-j
+CURRENT_RELEASE_DLL_SHA256: `412a66cfe3e70a2225b2b34940b78f7da585e3fa26d5e8bf05ff0aa7946e8d71`
+TARGET_GREEN=1/1 (prior current-world targeted evidence; superseded by the four-finding GREEN below)
+GREEN_TARGETED_FOUR_FINDINGS=6/6 (foreground Docker run; final-sol-current-world-green-20260820-g)
+GREEN_MIXED_DUPLICATE=3/3 (foreground Docker run; final-sol-current-world-mixed-duplicate-green-20260820-h)
+FOCUSED_GREEN=5/5 (foreground Docker run; final-sol-current-world-focused-full-20260820-i)
+FULL_GREEN=1328/1328 (foreground Docker run; final-sol-current-world-focused-full-20260820-i)
+RELEASE_GREEN=0_WARNINGS_0_ERRORS (foreground Docker run; final-sol-current-world-release-20260820-j)
+CURRENT_EXPECTED_METHOD_LINKS=156
+STORY_MAP_METHOD_LINKS=156
+STORY_MAP_METHOD_EOF_EXTRACTIONS=0
+US100_METHOD_EOF_EXTRACTIONS=0
+METHOD_EXTRACTOR_REGRESSION=PASS
+ADVERSARIAL_CALL_ACCEPTED_AS_DECLARATION=0
+ADVERSARIAL_CALL_EXTRACT_ACCEPTED=0
+SEMANTIC_EXTRACTOR_DECLARATION_GATE=PASS
+STORY_MAP_METHOD_ANCHOR_MISMATCHES=0
+STORY_MAP_STORY_SEMANTIC_MISMATCHES=0
+STORY_MAP_EVIDENCE_LINK_FAILURES=0
+SEMANTIC_MAP_AUDIT=PASS
+SEMANTIC_EVIDENCE_ID=final-sol-current-world-semantic-20260820-k
+SEMANTIC_AUDIT_JOB=foreground Docker run
+PATH_REMOTE_ISOLATION_EVIDENCE_ID=task10-us100-current-preservation-20260820-x
+PATH_REMOTE_ISOLATION_JOB=j-p4dfku
+FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT_EVIDENCE_ID=final-sol-current-world-audit-20260820-l
+FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT_JOB=foreground Docker run
+
+The canonical source is `C:/Users/Eden/PixelAbyssX/dotabyss_x_cl`, mounted
+read-only at `/game`. The approved fresh native baseline is
+`final-sol-current-world-native-20260820-b` / `j-10nd0n`:
+
+SOURCE_MOUNT=/src:readonly
+GAME_MOUNT=/game:readonly
+
+```text
+PROJECT_DLL_SHA256=033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4
+GAME_ASSEMBLY_SHA256=f2ad94781c161fe93040463b884c328599a40c78079aecacbe17a9b78edfc767
+GLOBAL_METADATA_SHA256=d7dffa623675ac493a0a4c7cfe8dc729bc37846b455a5284af94a901c1e25c27
+CPP2IL_ACQUISITION_EXIT=0
+CPP2IL_DIFFABLE_EXIT=0
+CPP2IL_ISIL_EXIT=0
+```
+
+The current same-run preservation/path/remote/isolation evidence is the fast
+approved manifest run `j-p4dfku`, reconciled to current evidence ID
+`task10-us100-current-preservation-20260820-x` because its output already
+asserted the current three hashes above:
+
+```text
+GAME_CONTENT_TREE_BEFORE=8d67a99c20eb6f0a81018ee85c7100cefcf25d3257f536fed296706811ce2cd7
+GAME_CONTENT_TREE_AFTER=8d67a99c20eb6f0a81018ee85c7100cefcf25d3257f536fed296706811ce2cd7
+GAME_METADATA_TREE_BEFORE=c8b239e576c6aefbf98472a69d750052cc85105692e3d7a46fedb5241163de75
+GAME_METADATA_TREE_AFTER=c8b239e576c6aefbf98472a69d750052cc85105692e3d7a46fedb5241163de75
+GAME_PATH_TREE_BEFORE=ff24850ebcb897cf7d25fdf88262cba8d3dc4910537dee99337581c907a98b1b
+GAME_PATH_TREE_AFTER=ff24850ebcb897cf7d25fdf88262cba8d3dc4910537dee99337581c907a98b1b
+GAME_BEFORE_AFTER_CONTENT_UNCHANGED=1
+GAME_BEFORE_AFTER_METADATA_UNCHANGED=1
+GAME_BEFORE_AFTER_PATHS_UNCHANGED=1
+GAME_FILE_COUNT=38265
+GAME_PATH_MANIFEST_LINES_BEFORE=75219
+GAME_PATH_MANIFEST_LINES_AFTER=75219
+GAME_PATH_MANIFEST_SHA256=ff24850ebcb897cf7d25fdf88262cba8d3dc4910537dee99337581c907a98b1b
+PATH_REMOTE_ISOLATION_ARTIFACT_AUDIT=PASS
+PRESERVATION_AUDIT_STATUS=PASS
+PRESERVATION_AUDIT_EXIT=0
+```
+
+The post-review mixed-duplicate Code audit repair uses the same current native
+baseline above. RED evidence reproduced `Expected: 3, Actual: 2` for presented
+candidates `{1001,1001,1002}`. The policy now retains the fail-closed ambiguous
+decision, preserves `duplicate-candidate-code-id` for duplicate entries, and
+emits `ambiguous-candidate-set` for each unique entry in the ambiguous offer.
+GREEN evidence `final-sol-current-world-mixed-duplicate-green-20260820-h`
+passed the mixed-duplicate, duplicate-only, and invalid-portfolio regressions
+3/3. The added regression is included in the current 1328-test full suite.
+
+The complete current native command is:
+
+```text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /tmp --user 0:0 --env ABYSS_GAME_DIR=/game --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; native=final-sol-current-world-native-20260820-b; printf "%s\n" "NATIVE_EVIDENCE_ID=$native"; test -r /game/GameAssembly.dll; test ! -w /game; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat; apt-get update -qq; apt-get install -y -qq curl >/dev/null; curl --retry 8 --retry-delay 3 --retry-all-errors -fsSL https://github.com/SamboyCoding/Cpp2IL/releases/download/2022.1.0-pre-release.21/Cpp2IL-2022.1.0-pre-release.21-Linux -o /tmp/Cpp2IL; chmod +x /tmp/Cpp2IL; /tmp/Cpp2IL --game-path /game --output-to /tmp/$native-diffable --output-as diffable-cs >/tmp/$native-diffable.log 2>&1; /tmp/Cpp2IL --game-path /game --output-to /tmp/$native-isil --output-as isil >/tmp/$native-isil.log 2>&1; printf "%s\n" "CPP2IL_ACQUISITION_EXIT=0" "CPP2IL_DIFFABLE_EXIT=0" "CPP2IL_ISIL_EXIT=0"; grep -m1 "Version" /tmp/$native-diffable.log; grep -m1 "Determined.*unity version" /tmp/$native-diffable.log'
+```
+
+The complete current semantic command is:
+
+```text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --workdir /src --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; semantic=final-sol-current-world-semantic-20260820-k; printf "%s\n" "SEMANTIC_EVIDENCE_ID=$semantic"; test -r /game/GameAssembly.dll; test ! -w /game; apt-get update -qq; apt-get install -y -qq python3 >/dev/null; python3 docs/agents/evidence-backed-strategy-modes-17-semantic-audit.py; printf "%s\n" "SEMANTIC_ANCHOR_TRACKER_AUDIT=PASS"'
+```
+
+The complete current bounded final-audit command is:
+
+```text
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run --rm --network default --workdir /src --user 0:0 --mount type=bind,src=/c/Users/Eden/PixelAbyssX/Abyss-AutoNether,dst=/src,readonly --mount type=bind,src=/c/Users/Eden/PixelAbyssX/dotabyss_x_cl,dst=/game,readonly mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim bash -lc 'set -euo pipefail; audit=final-sol-current-world-audit-20260820-l; printf "%s\n" "FINAL_AUDIT_EVIDENCE_ID=$audit"; test -r /game/GameAssembly.dll; test ! -w /game; sha256sum /game/BepInEx/interop/Project.dll /game/GameAssembly.dll /game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat; git rev-parse HEAD | grep -Fxq b25f8ea36b4a29ac42d7b866e7efd6b14ced9864; git branch --show-current | grep -Fxq logic-overhaul; git remote get-url origin | grep -Fxq https://github.com/ImoutoHeaven/AbyssAutoNether.git; git ls-remote --heads origin logic-overhaul | cut -f1 | grep -Fxq b25f8ea36b4a29ac42d7b866e7efd6b14ced9864; test -z "$(git diff --cached --name-only)"; git diff --name-only >/tmp/changed-paths; test "$(grep -Ec "(^|/)native-decomp-" /tmp/changed-paths || true)" -eq 0; git diff --check >/tmp/diff-check 2>&1; python3 docs/agents/evidence-backed-strategy-modes-17-semantic-audit.py; printf "%s\n" "PATH_REMOTE_ISOLATION_ARTIFACT_AUDIT=PASS" "FINAL_PRESERVATION_PATH_REMOTE_ISOLATION_AUDIT=PASS"'
 ```

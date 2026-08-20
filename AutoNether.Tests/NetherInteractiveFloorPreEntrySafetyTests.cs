@@ -65,7 +65,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
-    public void Recovery_all_safe_tie_preserves_known_safe_loser_through_pre_entry_projection()
+    public void Production_complete_recovery_branch_proof_preserves_known_losers_and_selects_the_only_safe_transform()
     {
         NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
             NetherFloorNodeType.Recovery,
@@ -126,6 +126,50 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             "excluded:recovery-transform-policy=deterministic-recovery-choice-has-value",
             transform.ComparisonRationale
         );
+
+        NetherInteractiveFloorPreEntrySafetyResult transformOnlySafe = Evaluate(Input(
+            NetherFloorNodeType.Recovery,
+            events: [Event(100, 1001, 1002, 1003)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.Heal, parameter1: 100),
+                Part(1002, targetType1: (int)NetherEffectKind.ErosionHeal, parameter1: 10),
+                Part(1003, targetType1: 7, parameter1: 0),
+            ],
+            erosion: 0,
+            hp: 1000,
+            recoveryProofs: CompleteRecoveryProofs(
+                1001,
+                1002,
+                1003,
+                restSafe: false,
+                purificationSafe: false,
+                transformSafe: true,
+                deterministicRecoveryChoicesHaveZeroValue: true,
+                hardExcludedCodes:
+                [
+                    new NetherCodeTransformHardExclusion(
+                        40024,
+                        NetherCodeTransformHardExclusionReason.AdverseErosionAdjustment
+                    ),
+                ]
+            ),
+            requireCompleteRecoveryBranchSafety: true,
+            equipmentRecoveryCodeTransformEnabled: true
+        ));
+
+        Assert.True(transformOnlySafe.IsSafe, transformOnlySafe.PauseReason + ":" + transformOnlySafe.Detail);
+        Assert.Equal(3, transformOnlySafe.SafeOptionNumberByEventId[100]);
+        NetherInteractiveOptionAudit transformSelected = Assert.Single(
+            transformOnlySafe.OptionAudits,
+            audit => audit.Key.EventPartId == 1003
+        );
+        Assert.True(transformSelected.IsKnown);
+        Assert.True(transformSelected.IsSelected);
+        Assert.Equal(NetherInteractiveOptionHardGate.None, transformSelected.FirstFailingHardGate);
+        Assert.Equal(NetherInteractiveOptionSelectionTier.RecoveryTransform, transformSelected.SelectionTier);
+        Assert.Equal(NetherStrategyUnknownReasonCode.None, transformSelected.UnknownReasonCode);
+        Assert.Equal("selected-by-complete-branch-proof", transformSelected.ComparisonRationale);
     }
 
     [Fact]
@@ -554,7 +598,8 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         IReadOnlyList<NetherCodeState>? codes = null,
         IReadOnlyList<NetherInteractivePartialDeathEligibility>? eligibility = null,
         IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>? recoveryProofs = null,
-        bool requireCompleteRecoveryBranchSafety = false
+        bool requireCompleteRecoveryBranchSafety = false,
+        bool equipmentRecoveryCodeTransformEnabled = false
     ) => new(
         FloorKind: kind,
         FloorMasterId: 900,
@@ -571,6 +616,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             MinimumCharacterHpPermille = 300,
             ShopMode = NetherShopMode.Off,
             TreasureMode = NetherTreasureMode.KeyOnly,
+            EquipmentRecoveryCodeTransformEnabled = equipmentRecoveryCodeTransformEnabled,
         }
     )
     {
@@ -587,7 +633,12 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     private static IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> CompleteRecoveryProofs(
         long restPartId,
         long purificationPartId,
-        long transformPartId
+        long transformPartId,
+        bool restSafe = true,
+        bool purificationSafe = true,
+        bool transformSafe = true,
+        bool deterministicRecoveryChoicesHaveZeroValue = false,
+        IReadOnlyList<NetherCodeTransformHardExclusion>? hardExcludedCodes = null
     )
     {
         NetherCodeTransformEligibilityEvidence transformEligibility = new()
@@ -595,8 +646,8 @@ public class NetherInteractiveFloorPreEntrySafetyTests
             IsKnown = true,
             EquipmentOptInEnabled = true,
             IsRecovery = true,
-            DeterministicRecoveryChoicesHaveZeroValue = false,
-            HardExcludedCodes = [],
+            DeterministicRecoveryChoicesHaveZeroValue = deterministicRecoveryChoicesHaveZeroValue,
+            HardExcludedCodes = hardExcludedCodes ?? [],
         };
         return new Dictionary<long, NetherRecoveryBranchSafetyEvidence>
         {
@@ -605,7 +656,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
                 BranchKind = NetherRecoveryBranchKind.Rest,
                 IsKnown = true,
                 IsCompleteVisibleBranch = true,
-                IsNextVisibleBranchSafe = true,
+                IsNextVisibleBranchSafe = restSafe,
                 TransformEligibility = transformEligibility,
             },
             [purificationPartId] = new NetherRecoveryBranchSafetyEvidence
@@ -613,7 +664,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
                 BranchKind = NetherRecoveryBranchKind.Purification,
                 IsKnown = true,
                 IsCompleteVisibleBranch = true,
-                IsNextVisibleBranchSafe = true,
+                IsNextVisibleBranchSafe = purificationSafe,
                 TransformEligibility = transformEligibility,
             },
             [transformPartId] = new NetherRecoveryBranchSafetyEvidence
@@ -621,7 +672,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
                 BranchKind = NetherRecoveryBranchKind.Transform,
                 IsKnown = true,
                 IsCompleteVisibleBranch = true,
-                IsNextVisibleBranchSafe = true,
+                IsNextVisibleBranchSafe = transformSafe,
                 TransformEligibility = transformEligibility,
             },
         };

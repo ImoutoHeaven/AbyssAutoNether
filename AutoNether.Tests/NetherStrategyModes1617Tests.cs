@@ -247,6 +247,38 @@ public sealed class NetherStrategyModes1617Tests
     }
 
     [Fact]
+    public void Invalid_code_portfolio_emits_exactly_one_audit_for_each_presented_candidate()
+    {
+        NetherCodeCandidate invalid = new(1001, NetherCodeFamily.Rush, 1)
+        {
+            IsKnown = false,
+        };
+        NetherCodeCandidate valid = new(1002, NetherCodeFamily.Impact, 1);
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            new NetherCodePortfolio
+            {
+                IsMasterComplete = false,
+                Capacity = 1,
+            },
+            new[] { invalid, valid },
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            new NetherCodePolicyEvidence()
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Pause, decision.Kind);
+        Assert.Equal(2, decision.CandidateAudits.Count);
+        Assert.Equal(new long[] { 1001, 1002 }, decision.CandidateAudits.Select(audit => audit.CodeId));
+        Assert.All(
+            decision.CandidateAudits,
+            audit =>
+            {
+                Assert.Equal(NetherCodeCandidateHardGate.CandidateIdentity, audit.FirstFailingHardGate);
+                Assert.Equal(NetherStrategyUnknownReasonCode.CandidateIdentityInvalid, audit.UnknownReasonCode);
+            }
+        );
+    }
+
+    [Fact]
     public void Detailed_audit_context_identifies_strategy_target_owner_snapshot_and_vector()
     {
         NetherSnapshot snapshot = Snapshot();
@@ -314,6 +346,42 @@ public sealed class NetherStrategyModes1617Tests
         Assert.Equal(2, entries.Count);
         Assert.Contains(entries, entry => entry.Contains("audit=decision"));
         Assert.Contains(entries, entry => entry.Contains("audit=transition"));
+    }
+
+    [Fact]
+    public void Mixed_duplicate_code_options_emit_one_audit_for_every_presented_candidate()
+    {
+        NetherCodeCandidate first = new(1001, NetherCodeFamily.Rush, 1);
+        NetherCodeCandidate duplicate = new(1001, NetherCodeFamily.Rush, 1)
+        {
+            Power = 999999,
+        };
+        NetherCodeCandidate unique = new(1002, NetherCodeFamily.Impact, 1);
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            new NetherCodePortfolio
+            {
+                IsMasterComplete = true,
+                Capacity = 1,
+            },
+            new[] { first, duplicate, unique },
+            new NetherAutoClimbSettings { CodeReloadReserve = 1 },
+            new NetherCodePolicyEvidence()
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Pause, decision.Kind);
+        Assert.Equal(3, decision.CandidateAudits.Count);
+        Assert.Equal(
+            new long[] { 1001, 1001, 1002 },
+            decision.CandidateAudits.Select(audit => audit.CodeId)
+        );
+        Assert.All(
+            decision.CandidateAudits,
+            audit => Assert.Equal(
+                NetherCodeCandidateHardGate.AmbiguousCandidateIdentity,
+                audit.FirstFailingHardGate
+            )
+        );
     }
 
     private static NetherSnapshot Snapshot() => new()

@@ -1152,11 +1152,19 @@ internal sealed class NetherEventPolicy
 
         bool restSafe = rest.RecoveryBranchSafety.IsNextVisibleBranchSafe;
         bool purificationSafe = purification.RecoveryBranchSafety.IsNextVisibleBranchSafe;
-        NetherEventOption? selected = restSafe == purificationSafe
-            ? restSafe
+        bool transformSafe = transform.RecoveryBranchSafety.IsNextVisibleBranchSafe;
+        // Recovery Transform is a server-random last resort. It may be considered only after
+        // complete proof says neither deterministic branch is safe; the ordinary validator below
+        // still owns its Equipment opt-in, zero-value, and hard-exclusion gates.
+        NetherEventOption? selected = restSafe
+            ? purificationSafe
                 ? SelectRecoveryTieBreak(snapshot, settings, rest, purification)
-                : null
-            : restSafe ? rest : purification;
+                : rest
+            : purificationSafe
+                ? purification
+                : transformSafe
+                    ? transform
+                    : null;
         if (selected == null)
         {
             decision = Pause(NetherPauseReason.NoSafeRoute, "no-complete-safe-recovery-branch");
@@ -1173,7 +1181,8 @@ internal sealed class NetherEventPolicy
             modifiers,
             isRecovery: true,
             hardExclusions,
-            strategyEvidence: null
+            strategyEvidence: null,
+            transformEligibilityOptions: options
         );
         return true;
     }
@@ -1206,14 +1215,15 @@ internal sealed class NetherEventPolicy
         IReadOnlyList<NetherErosionModifier> modifiers,
         bool isRecovery,
         NetherCodeTransformHardExclusionEvidence hardExclusions,
-        NetherEventStrategyEvidence? strategyEvidence
+        NetherEventStrategyEvidence? strategyEvidence,
+        IReadOnlyList<NetherEventOption>? transformEligibilityOptions = null
     )
     {
         ValidateInputs(snapshot, options, settings);
         NetherCodeTransformEligibilityEvidence transformEligibility =
             BuildTransformEligibility(
                 snapshot,
-                options,
+                transformEligibilityOptions ?? options,
                 settings,
                 modifiers,
                 isRecovery,
@@ -1859,7 +1869,12 @@ internal sealed class NetherEventPolicy
                     NetherEventOptionHardGate.RecoveryBranchSafety
                 );
             }
-            return CreateSelectedOptionAudit(decision, NetherEventOptionSelectionTier.Recovery);
+            return CreateSelectedOptionAudit(
+                decision,
+                option.RecoveryBranchSafety?.BranchKind == NetherRecoveryBranchKind.Transform
+                    ? NetherEventOptionSelectionTier.RecoveryTransform
+                    : NetherEventOptionSelectionTier.Recovery
+            );
         }).ToArray();
     }
 

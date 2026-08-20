@@ -51,7 +51,7 @@ internal static class NetherLifecycleInteropBindings
     // The native OnEntered UniTaskVoid constructs this state machine directly and calls
     // MoveNext, bypassing the public HandleStartEventByStatusAsync interop wrapper.
     public static NetherInteropPatchBinding StartStatusStateMachineMoveNext { get; } = Instance(
-        "Project.Nether.FloorSelection.SubViewController+_HandleStartEventByStatusAsync_d__37",
+        "Project.Nether.FloorSelection.SubViewController+_HandleStartEventByStatusAsync_d__35",
         "MoveNext",
         Array.Empty<string>(),
         "System.Void"
