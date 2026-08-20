@@ -727,6 +727,36 @@ internal static class NetherAutoClimbController
             return;
         }
 
+        // Fresh native evidence shows that FloorSelection owns both ISubService.Terminate and
+        // the OnFloorClickedEventAsync -> ExecuteCurrentFloorEventSequenceAsync parent.  For an
+        // uncomposed noncombat selection, termination makes that parent unobservable: its bridge
+        // registration has already been cleared by the exact lifecycle callback.  Do not retain a
+        // stale RuntimeFlow owner or misclassify a valid replacement FloorSelection as leaving
+        // Nether.  Reconcile the one unknown outcome only after a fresh entered scene owner.
+        if (State.PendingAction is NetherPlannedAction noncombatSelection
+            && noncombatSelection.Kind == NetherActionKind.SelectFloor
+            && noncombatSelection.BattleProjection == null
+            && noncombatSelection.OwnedPopupKind == NetherRuntimePopupKind.None
+            && (noncombatSelection.OwnedPopupStages?.Count ?? 0) == 0
+            && State.Phase == NetherAutoClimbPhase.ExecutingNativeAction
+            && RuntimeFlow.HasPendingParent)
+        {
+            _bridge.TerminateFloorParent();
+            RuntimeFlow.TerminateParent();
+            _pendingBattleProjection = null;
+            _awaitingReconcileFloorSceneSnapshot = false;
+            FloorSceneReadinessWait.Clear();
+            FloorSceneReadinessDiagnosticGate.Reset();
+            State.ObserveUnknownOutcome();
+            LogDiagnostic(
+                "runtime-lifecycle",
+                new("action", "floor-selection-terminated-for-noncombat-rebind"),
+                new("phase", State.Phase.ToString()),
+                new("floorId", noncombatSelection.FloorId.ToString()),
+                new("ownerReleased", "True")
+            );
+        }
+
         ObserveBattleSettingsLeaseBoundary(
             BattleSettingsLifecycle.OnLeaveNether(),
             "floor-selection-terminated",

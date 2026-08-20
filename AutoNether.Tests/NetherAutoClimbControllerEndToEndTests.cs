@@ -2613,6 +2613,86 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Noncombat_floor_owner_teardown_releases_parent_before_reconcile_and_next_route()
+    {
+        NetherSnapshot before = ScriptedRuntimeBridge.OwnedRouteSnapshot(
+            NetherSessionStatus.Play,
+            NetherFloorNodeType.Shop,
+            floorId: 1,
+            gold: 0
+        );
+        NetherSnapshot applied = before with
+        {
+            CurrentFloorId = 2,
+            CurrentNodeId = 2,
+            FloorLevel = 2,
+            FloorIndex = 2,
+            MapHash = "noncombat-owner-teardown-applied",
+        };
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = before,
+            RouteSafetyOverride = ScriptedRuntimeBridge.InteractiveRouteSafety(),
+            InteractivePreEntryFactory = (snapshot, settings) =>
+                ScriptedRuntimeBridge.OwnedInteractivePreEntry(
+                    snapshot,
+                    settings,
+                    NetherFloorNodeType.Shop,
+                    null
+                ),
+            RequireExplicitFloorParentTerminal = true,
+        };
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update(); // starts the first noncombat SelectFloor parent
+            Assert.Equal(1, bridge.BeginFloorParentCount);
+            Assert.Single(bridge.Invocations, action => action == NetherActionKind.SelectFloor);
+
+            // Fresh native evidence shows that FloorSelection owns both the exact ISubService
+            // lifetime and the async sequence started by OnFloorClickedEventAsync. Once that
+            // owner terminates, the original parent can no longer be polled; wait for a fresh
+            // entered owner and reconcile its server snapshot rather than pausing as NotInNether.
+            bridge.HasRegisteredFloorSelection = false;
+            NetherAutoClimbController.OnNetherFloorSelectionTerminated();
+            NetherAutoClimbController.Update();
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Assert.Equal(NetherAutoClimbPhase.Reconciling, NetherAutoClimbController.Phase);
+            Assert.NotEqual(NetherPauseReason.NotInNether, NetherAutoClimbController.PauseReason);
+
+            bridge.HasRegisteredFloorSelection = true;
+            bridge.CurrentRuntimeGeneration = 2;
+            bridge.CurrentSnapshot = applied;
+            Pump(2); // one GET-only reconciliation reaches the fresh stable boundary.
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Equal(1, bridge.GetOnlyBeginCount);
+            Assert.Equal(1, bridge.GetOnlyPollCount);
+
+            // The next route begins a new parent instead of retaining the terminated owner.
+            NetherAutoClimbController.Update();
+            Assert.Equal(NetherAutoClimbPhase.ExecutingNativeAction, NetherAutoClimbController.Phase);
+            Assert.Equal(2, bridge.BeginFloorParentCount);
+            Assert.Equal(2, bridge.Invocations.Count(action => action == NetherActionKind.SelectFloor));
+            Assert.NotEqual(NetherPauseReason.BindingUnavailable, NetherAutoClimbController.PauseReason);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_keeps_combat_parent_when_floor_owner_dies_before_parent_poll()
     {
         var bridge = new ScriptedRuntimeBridge
