@@ -13,8 +13,6 @@ namespace AutoNether.Services;
 /// </summary>
 internal static class NetherCodePolicyEvidenceAssembler
 {
-    private const int ResearchCompletionPoints = 20_000;
-
     public static NetherRuntimeCodePolicyEvidenceResult Assemble(
         NetherStrategyEvidencePackage package,
         NetherSnapshot snapshot,
@@ -2194,28 +2192,15 @@ internal static class NetherCodePolicyEvidenceAssembler
         IReadOnlyList<NetherStrategyResearchFamilyState>? research
     )
     {
-        if (settings.StrategyMode != NetherStrategyMode.Research || research == null)
+        if (settings.StrategyMode != NetherStrategyMode.Research)
             return NetherCodeFamily.Unknown;
-        if (IsIncomplete(settings.ResearchPrimaryFamily, research))
-            return settings.ResearchPrimaryFamily;
-        if (IsIncomplete(settings.ResearchSecondaryFamily, research))
-            return settings.ResearchSecondaryFamily;
-        return NetherCodeFamily.Unknown;
-    }
-
-    private static bool IsIncomplete(
-        NetherCodeFamily family,
-        IReadOnlyList<NetherStrategyResearchFamilyState> research
-    )
-    {
-        if (family == NetherCodeFamily.Unknown)
-            return false;
-        NetherStrategyResearchFamilyState[] matches = research
-            .Where(row => row.Family == family)
-            .ToArray();
-        return matches.Length == 1
-            && matches[0].IsProjectedNormalSettlementKnown
-            && (long)matches[0].WalletPoints + matches[0].ProjectedNormalSettlementPoints
-                < ResearchCompletionPoints;
+        NetherResearchObjectiveResolution objective = NetherResearchObjectivePolicy.Resolve(
+            settings.ResearchPrimaryFamily,
+            settings.ResearchSecondaryFamily,
+            research
+        );
+        return objective.IsValid && objective.HasIncompleteTargets
+            ? objective.ActiveFamily
+            : NetherCodeFamily.Unknown;
     }
 }

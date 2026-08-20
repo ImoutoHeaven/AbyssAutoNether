@@ -33,7 +33,8 @@ internal sealed record NetherRouteSafetyContext
         { get; init; } = new Dictionary<long, NetherRouteHorizonSafetyEvaluation>();
     /// <summary>
     /// Strategy facts used only after the complete visible horizon passes the hard safety gate.
-    /// A null research state is deliberately not guessed from mode or displayed points.
+    /// Null means the current native client cannot project the future settlement response. Research
+    /// keeps its explicit objective conservatively; null never means completed Research.
     /// </summary>
     public NetherStrategyMode StrategyMode { get; init; } = NetherStrategyMode.Equipment;
     public NetherCodeFamily PrimaryResearchFamily { get; init; } = NetherCodeFamily.Unknown;
@@ -426,31 +427,12 @@ internal sealed class NetherRoutePlanner
             return Pause(reason, "no-safe-frontier", audit);
         }
 
-        if (useVisibleBranchVector
-            && context.StrategyMode == NetherStrategyMode.Research
-            && safeCandidates.Any(candidate => candidate.EncounterVector != null)
-            && context.ResearchIncomplete is null)
-        {
-            audit.Add(new NetherRouteCandidateAudit(
-                currentNodeId,
-                "research-completion-unknown"
-            )
-            {
-                IsCandidate = false,
-                Detail = "native-settlement-does-not-prove-pre-settlement-research-completion",
-                FirstFailingHardGate = NetherRouteCandidateHardGate.ResearchCompletion,
-                UnknownReasonCode = NetherStrategyUnknownReasonCode.ResearchCompletionUnknown,
-            });
-            return Pause(
-                NetherPauseReason.UnknownMasterData,
-                "research-completion-state-unknown-for-visible-route-vector",
-                audit
-            );
-        }
-
-        bool? modeResearchIncomplete = context.StrategyMode == NetherStrategyMode.Research
-            ? context.ResearchIncomplete
-            : false;
+        // The current native client exposes family settlement points only after Result. A missing
+        // pre-settlement projection cannot prove completion, so explicit Research mode keeps the
+        // incomplete-family semantic order. This is conservative priority, not a fabricated point
+        // projection or a transition to a later configured family.
+        bool modeResearchIncomplete = context.StrategyMode == NetherStrategyMode.Research
+            && context.ResearchIncomplete != false;
         Candidate selected = safeCandidates[0];
         for (int index = 1; index < safeCandidates.Count; index++)
         {
@@ -922,25 +904,20 @@ internal sealed class NetherRoutePlanner
         Candidate left,
         Candidate right,
         NetherRouteSafetyContext context,
-        bool? researchIncomplete,
+        bool researchIncomplete,
         out string rationale
     )
     {
         rationale = "all-comparison-keys-equal";
         if (left.EncounterVector != null || right.EncounterVector != null)
         {
-            if (researchIncomplete is not bool knownResearchIncomplete)
-            {
-                rationale = "research-completion-unknown";
-                return 0;
-            }
             if (left.EncounterVector is not { IsKnown: true } leftVector
                 || right.EncounterVector is not { IsKnown: true } rightVector)
             {
                 rationale = "semantic-vector-unknown";
                 return 0;
             }
-            int semantic = leftVector.CompareTo(rightVector, knownResearchIncomplete);
+            int semantic = leftVector.CompareTo(rightVector, researchIncomplete);
             if (semantic != 0)
             {
                 rationale = "semantic-vector";

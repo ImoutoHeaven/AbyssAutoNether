@@ -219,8 +219,12 @@ The live total number of distinct positive-amount Abyss Codes that the run can h
 _Avoid_: Fixed Code limit
 
 **Research Completion Threshold**:
-The point at which the configured primary family's current wallet plus its projected normal Research Settlement reaches the Family Research Wallet's 20,000-point full threshold. It is not a fixed Raw Family Count and must not be inferred from either a family-gauge activation threshold or total Code Capacity.
+The point at which the configured primary family's current wallet plus its projected normal Research Settlement reaches the Family Research Wallet's 20,000-point full threshold. A wallet already at 20,000 proves completion without any future result. It is not a fixed Raw Family Count and must not be inferred from either a family-gauge activation threshold or total Code Capacity.
 _Avoid_: Family gauge level, fixed 22-Code target, total Code Capacity
+
+**Conservative Research Priority**:
+The operational fallback used when the current native client cannot expose projected normal settlement before Result. The earliest configured family whose authoritative wallet is below 20,000 remains active for route, Event, reroll, acquisition, and replacement policy. This fallback does not invent projected points, declare completion, advance to the secondary family, or switch to Equipment ordering; an actually full wallet may still advance because its completion is independently authoritative.
+_Avoid_: Global pause on native result-only evidence, treating unknown as complete, estimating settlement from Code count
 
 **Equipment Run**:
 The default strategy mode, whose objective is to maximize actual combat value and survive a deep climb for equipment.
@@ -247,7 +251,7 @@ A primary or secondary Code family chosen explicitly in configuration for a rese
 _Avoid_: Automatically selected family
 
 **Research Offer Priority**:
-The rule that a valid primary-family offer is preferred until its Research Completion Threshold. The configured secondary family then becomes the target until its own threshold; once both are complete, Actual Combat Value governs. Before the primary threshold, all available rerolls are spent before taking a valid secondary-family offer, and hard exclusions override both targets.
+The rule that a valid primary-family offer is preferred until its Research Completion Threshold. When projected settlement is unavailable and its wallet is below 20,000, Conservative Research Priority keeps that primary active. The configured secondary family then becomes the target only after primary completion is authoritative; once both are complete, Actual Combat Value governs. Before the primary threshold, all available rerolls are spent before taking a valid secondary-family offer, and hard exclusions override both targets.
 _Avoid_: Secondary-before-reroll, family target overriding a hard ban
 
 **Research Reroll Budget**:
@@ -633,3 +637,29 @@ ID; it is not a substituted floor ID. Canonical rank-five status still requires
 the authoritative typed provider, while unresolved Event, Part, Item, or typed
 semantics fail closed locally and known sibling evidence remains usable. This
 implements the existing Treasure Route Priority without a spec deviation.
+
+## Current-world Research unknown-projection authority
+
+This current-world boundary supersedes the historical Research-null pause recorded in the
+2026-08-19 ticket 13–15 section above.
+
+Fresh read-only Docker Cpp2IL evidence under
+`docs/agents/research-unknown-projection-rca/` uses current Project.dll SHA-256
+`033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4`,
+GameAssembly.dll SHA-256
+`f2ad94781c161fe93040463b884c328599a40c78079aecacbe17a9b78edfc767`, and
+`global-metadata.dat` SHA-256
+`d7dffa623675ac493a0a4c7cfe8dc729bc37846b455a5284af94a901c1e25c27`.
+Cpp2IL acquisition, diffable, and ISIL all exited zero.
+
+`NetherResultRequestEntity` carries only Nether ID, map ID, and insurance flag;
+`NetherResultResponseEntity.nether_code_points` remains the first four-family
+settlement outcome. `NetherPointData.SphereSkillPoint`, `SphereAttackPoint`,
+`SphereErosionResistPoint`, and `SphereErosionUpPoint` remain the authoritative
+live wallets. The client therefore still cannot prove a future settlement total,
+but that evidence gap must not make explicit Research mode unusable. Production
+uses Conservative Research Priority while retaining the typed
+`ResearchCompletionUnknown` audit reason: wallet 20,000 proves completion;
+otherwise the earliest configured non-full wallet stays active. Missing or
+malformed wallet rows still fail closed, and Code count, capacity, gauges,
+technology rate, displayed power, and guessed settlement never substitute.

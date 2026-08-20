@@ -1321,14 +1321,19 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
             IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> commitments;
             NetherStrategyVisibleMapEvidence? visibleMap;
+            bool? researchIncomplete;
             lock (_gate)
             {
                 commitments = snapshotFingerprint is NetherSnapshotFingerprint fingerprint
                     ? _routeOwnedEventProcurementProducer.CaptureForSnapshot(fingerprint)
                     : _routeOwnedEventProcurementProducer.Capture();
-                visibleMap = _latestStrategyEvidencePackage?.VisibleMap is { IsKnown: true, Value: not null }
-                    ? _latestStrategyEvidencePackage.VisibleMap.Value
+                NetherStrategyEvidencePackage? package = _latestStrategyEvidencePackage;
+                visibleMap = package?.VisibleMap is { IsKnown: true, Value: not null }
+                    ? package.VisibleMap.Value
                     : null;
+                researchIncomplete = NetherResearchObjectivePolicy.ToRouteIncomplete(
+                    package?.EvidenceAudit
+                );
             }
             return new NetherRuntimeRouteSafetyData
             {
@@ -1340,6 +1345,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     ? _routeOwnedEventProcurementProducer.IdentityForSnapshot(routeFingerprint)
                     : null,
                 VisibleMap = visibleMap,
+                ResearchIncomplete = researchIncomplete,
                 Detail = string.Empty,
             };
         }

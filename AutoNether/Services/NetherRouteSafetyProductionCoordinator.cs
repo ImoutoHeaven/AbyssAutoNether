@@ -474,9 +474,9 @@ internal sealed record NetherRuntimeRouteSafetyData
     /// </summary>
     public NetherStrategyVisibleMapEvidence? VisibleMap { get; init; }
     /// <summary>
-    /// Exact research completion state, when a typed strategy provider has proved both configured
-    /// families. Null is intentional: current native settlement data cannot prove completion
-    /// before the result response, so the route vector must not invent the direct-offer order.
+    /// Exact operational Research priority from the accepted strategy package. Null is retained
+    /// when no package can be correlated; when only the future native settlement result is missing,
+    /// the objective resolver supplies conservative incomplete-family priority instead.
     /// </summary>
     public bool? ResearchIncomplete { get; init; }
     /// <summary>

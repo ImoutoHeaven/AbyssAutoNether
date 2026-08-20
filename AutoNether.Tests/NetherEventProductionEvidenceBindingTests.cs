@@ -747,7 +747,7 @@ public sealed class NetherEventProductionEvidenceBindingTests
     }
 
     [Fact]
-    public void Research_binding_requires_exact_projected_settlement_before_marking_mode_known()
+    public void Research_binding_uses_exact_projected_settlement_when_available()
     {
         NetherEffect offer = new(NetherEffectKind.AbyssCodeOffer, 0);
         NetherRuntimePopupContext popup = Popup(711, 712, offer);
@@ -775,12 +775,12 @@ public sealed class NetherEventProductionEvidenceBindingTests
 
         Assert.NotNull(bound.EventStrategyEvidence);
         Assert.True(bound.EventStrategyEvidence!.IsUsableFor(NetherStrategyMode.Research));
-        Assert.True(bound.EventStrategyEvidence.ResearchIncomplete);
+        Assert.True(bound.EventStrategyEvidence.ResearchIncomplete && Assert.Single(bound.Options).StrategyEvidence!.ResearchIncomplete);
         Assert.Empty(bound.EventStrategyEvidence.UnknownReason);
     }
 
     [Fact]
-    public void Research_binding_fails_closed_when_projected_settlement_is_unknown()
+    public void Research_binding_keeps_primary_priority_when_native_settlement_projection_is_unknown()
     {
         NetherEffect offer = new(NetherEffectKind.AbyssCodeOffer, 0);
         NetherRuntimePopupContext popup = Popup(711, 712, offer);
@@ -808,8 +808,8 @@ public sealed class NetherEventProductionEvidenceBindingTests
             settings
         );
 
-        Assert.False(bound.EventStrategyEvidence!.IsUsableFor(NetherStrategyMode.Research));
-        Assert.Contains("projected-settlement-unknown", bound.EventStrategyEvidence.UnknownReason);
+        Assert.True(bound.EventStrategyEvidence!.IsUsableFor(NetherStrategyMode.Research) && bound.EventStrategyEvidence.ResearchIncomplete && Assert.Single(bound.Options).StrategyEvidence!.ResearchIncomplete);
+        Assert.True(bound.EventStrategyEvidence.UnknownReason.Length == 0 && bound.ExpectedEventCommitments.Count == 1);
     }
 
     [Fact]

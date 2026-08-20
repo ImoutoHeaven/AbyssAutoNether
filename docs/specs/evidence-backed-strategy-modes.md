@@ -34,9 +34,9 @@ Event-Part IDs. Therefore Event/Part IDs are immutable client-side commitment co
 and the production action submits only the native request seam. Because the current native type
 has no freshly proven local Boss/MiniBoss/Normal semantic enum, an exact runtime battle option
 with no typed provider remains option-local unknown rather than being classified from raw `type`
-or `code_drop_ratio`. Likewise, settlement `nether_code_points` and technology
-`SpherePointRatio` do not prove a pre-settlement Research projection; production keeps that
-projection unknown and the policy fails closed until an authoritative projection is supplied.
+or `code_drop_ratio`. Likewise, settlement `nether_code_points` and technology `SpherePointRatio`
+do not prove a pre-settlement Research projection; production never invents completion from Code count, capacity, gauge, technology, or displayed power.
+A wallet already at 20,000 proves completion; otherwise the earliest configured non-full family retains conservative Research priority until authoritative settlement updates the wallet.
 
 ## User Stories
 
@@ -66,9 +66,9 @@ projection unknown and the policy fails closed until an authoritative projection
 
 13. As a Research user, completion is determined from the configured family's persistent wallet plus projected normal settlement reaching 20,000 points.
 
-14. As a Research user, completion is never inferred from a fixed Code count, Code capacity, or category-skill gauge.
+14. As a Research user, completion is never inferred from a fixed Code count, Code capacity, or category-skill gauge; an unavailable future settlement keeps the earliest non-full configured wallet active conservatively instead of stopping the run or treating it as complete.
 
-15. As a Research user, the primary family remains the active target until its projected settlement threshold is met.
+15. As a Research user, the primary family remains the active target until its projected settlement threshold is met or its authoritative wallet already contains 20,000 points.
 
 16. As a Research user, all available offer rerolls are spent before accepting a valid secondary-family fallback while the primary remains incomplete.
 
@@ -336,11 +336,11 @@ Current-version evidence boundary: fresh `Project.dll` SHA-256 `53806a5b4dec1863
 
 21. Compare branches lexicographically through the next terminal map Boss using the active mode's semantic order. Count like-tier encounters across the whole visible branch, prefer fewer Recovery nodes only after semantic equality, then apply erosion, HP, and deterministic-coordinate tie breaks.
 
-Visible-vector comparison is permitted only when the Research completion state required by the
-mode-sensitive order is authoritative. A nullable/native-unknown pre-settlement state is not
-completed Research; Research mode pauses with unknown master data rather than choosing an order.
-Equipment mode follows its explicit Equipment target/order even when the nullable Research state is
-true or unknown. Gold Treasure and eligible late-Shop nodes share one tier: compare their combined
+A nullable/native-unknown pre-settlement state is not completed Research. Because the mode is
+explicit, visible-vector comparison conservatively uses the incomplete-Research order and keeps the
+earliest configured wallet below 20,000 active; it does not invent projected points or advance to a
+later family. Equipment mode follows its explicit Equipment target/order regardless of Research
+state. Gold Treasure and eligible late-Shop nodes share one tier: compare their combined
 count first, then prefer Treasure only when that count ties. Rank-five Treasure classification uses
 the canonical rank-five predicate or an authoritative typed provider; raw Gold/Red rarity is not a
 fallback.
@@ -406,8 +406,9 @@ reward parts remain classifiable and must not be discarded with the whole Event.
 
 15. Add public route-vector regressions for an actual Event-policy selection that rejects a higher
 priority typed battle part while selecting a known sibling, local unknown battle invalidation,
-Equipment mode with Research completion true and null, Research true/false/null behavior, and
-noncanonical Gold/Red Treasure rows that must not receive rank-five value.
+Equipment mode with Research completion true and null, Research true/false behavior, conservative
+Research-null behavior, and noncanonical Gold/Red Treasure rows that must not receive rank-five
+value.
 
 ## Out of Scope
 

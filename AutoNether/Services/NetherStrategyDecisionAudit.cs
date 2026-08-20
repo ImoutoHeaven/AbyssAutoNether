@@ -232,100 +232,33 @@ internal sealed record NetherStrategyEvidenceAudit
             };
         }
 
-        if (TryResolve(primary, research.Value.Families, out NetherResearchTargetState primaryState,
-                out string primaryReason))
-        {
-            if (primaryState == NetherResearchTargetState.Unknown)
-            {
-                return audit with
-                {
-                    UnknownReasonCode = NetherStrategyUnknownReasonCode.ResearchCompletionUnknown,
-                    UnknownReason = primaryReason,
-                };
-            }
-            if (primaryState == NetherResearchTargetState.Active)
-            {
-                return audit with
-                {
-                    ActiveResearchFamily = primary,
-                    ResearchTargetState = NetherResearchTargetState.Active,
-                };
-            }
-        }
-        else if (primary != NetherCodeFamily.Unknown)
+        NetherResearchObjectiveResolution objective = NetherResearchObjectivePolicy.Resolve(
+            primary,
+            secondary,
+            research.Value.Families
+        );
+        if (!objective.IsValid)
         {
             return audit with
             {
                 UnknownReasonCode = NetherStrategyUnknownReasonCode.ResearchTargetConfigurationUnknown,
-                UnknownReason = primaryReason,
+                UnknownReason = objective.Detail,
             };
         }
+        if (!objective.HasIncompleteTargets)
+            return audit with { ResearchTargetState = NetherResearchTargetState.Complete };
 
-        if (TryResolve(secondary, research.Value.Families, out NetherResearchTargetState secondaryState,
-                out string secondaryReason))
+        return audit with
         {
-            if (secondaryState == NetherResearchTargetState.Unknown)
-            {
-                return audit with
-                {
-                    UnknownReasonCode = NetherStrategyUnknownReasonCode.ResearchCompletionUnknown,
-                    UnknownReason = secondaryReason,
-                };
-            }
-            if (secondaryState == NetherResearchTargetState.Active)
-            {
-                return audit with
-                {
-                    ActiveResearchFamily = secondary,
-                    ResearchTargetState = NetherResearchTargetState.Active,
-                };
-            }
-        }
-        else if (secondary != NetherCodeFamily.Unknown)
-        {
-            return audit with
-            {
-                UnknownReasonCode = NetherStrategyUnknownReasonCode.ResearchTargetConfigurationUnknown,
-                UnknownReason = secondaryReason,
-            };
-        }
-
-        return audit with { ResearchTargetState = NetherResearchTargetState.Complete };
-    }
-
-    private static bool TryResolve(
-        NetherCodeFamily family,
-        IReadOnlyList<NetherStrategyResearchFamilyState> research,
-        out NetherResearchTargetState state,
-        out string reason
-    )
-    {
-        state = NetherResearchTargetState.Complete;
-        reason = string.Empty;
-        if (family == NetherCodeFamily.Unknown)
-            return true;
-        NetherStrategyResearchFamilyState[] matches = new List<NetherStrategyResearchFamilyState>(research)
-            .FindAll(row => row.Family == family)
-            .ToArray();
-        if (matches.Length != 1)
-        {
-            state = NetherResearchTargetState.Unknown;
-            reason = "research-target-family-row-unavailable";
-            return false;
-        }
-        NetherStrategyResearchFamilyState row = matches[0];
-        if (!row.IsProjectedNormalSettlementKnown)
-        {
-            state = NetherResearchTargetState.Unknown;
-            reason = string.IsNullOrWhiteSpace(row.ProjectionUnknownReason)
-                ? "research-completion-projection-unknown"
-                : row.ProjectionUnknownReason;
-            return true;
-        }
-        state = (long)row.WalletPoints + row.ProjectedNormalSettlementPoints < 20_000
-            ? NetherResearchTargetState.Active
-            : NetherResearchTargetState.Complete;
-        return true;
+            ActiveResearchFamily = objective.ActiveFamily,
+            ResearchTargetState = NetherResearchTargetState.Active,
+            // Preserve the exact native evidence gap in diagnostics while keeping the explicit
+            // Research objective actionable. This records a conservative priority, not completion.
+            UnknownReasonCode = objective.UsesConservativePriority
+                ? NetherStrategyUnknownReasonCode.ResearchCompletionUnknown
+                : NetherStrategyUnknownReasonCode.None,
+            UnknownReason = objective.UsesConservativePriority ? objective.Detail : string.Empty,
+        };
     }
 }
 

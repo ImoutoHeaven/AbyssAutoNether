@@ -930,14 +930,20 @@ internal sealed class NetherCodePolicy
         return right.RemoveCodeId.CompareTo(left.RemoveCodeId);
     }
 
-    private const int ResearchCompletionPoints = 20_000;
-
     private static bool AreConfiguredResearchTargetsComplete(
         NetherAutoClimbSettings settings,
         NetherCodePolicyEvidence evidence
-    ) => settings.StrategyMode == NetherStrategyMode.Research
-        && IsResearchFamilyComplete(settings.ResearchPrimaryFamily, evidence)
-        && IsResearchFamilyComplete(settings.ResearchSecondaryFamily, evidence);
+    )
+    {
+        if (settings.StrategyMode != NetherStrategyMode.Research)
+            return false;
+        NetherResearchObjectiveResolution objective = NetherResearchObjectivePolicy.Resolve(
+            settings.ResearchPrimaryFamily,
+            settings.ResearchSecondaryFamily,
+            evidence.Research
+        );
+        return objective.IsValid && !objective.HasIncompleteTargets;
+    }
 
     private static NetherCodeFamily ResolveEffectiveResearchFamily(
         NetherCodePortfolio portfolio,
@@ -978,20 +984,7 @@ internal sealed class NetherCodePolicy
     private static bool IsResearchFamilyComplete(
         NetherCodeFamily family,
         NetherCodePolicyEvidence evidence
-    )
-    {
-        if (family == NetherCodeFamily.Unknown)
-            return true;
-        if (evidence.Research == null)
-            return false;
-        NetherStrategyResearchFamilyState[] matches = evidence.Research
-            .Where(row => row.Family == family)
-            .ToArray();
-        return matches.Length == 1
-            && matches[0].IsProjectedNormalSettlementKnown
-            && (long)matches[0].WalletPoints + matches[0].ProjectedNormalSettlementPoints
-                >= ResearchCompletionPoints;
-    }
+    ) => NetherResearchObjectivePolicy.IsFamilyComplete(family, evidence.Research);
 
     private static bool CanResearchRemove(
         NetherCodePortfolio portfolio,

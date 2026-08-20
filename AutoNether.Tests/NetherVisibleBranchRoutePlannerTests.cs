@@ -298,7 +298,7 @@ public class NetherVisibleBranchRoutePlannerTests
     }
 
     [Fact]
-    public void Unknown_research_completion_pauses_instead_of_using_completed_equipment_order()
+    public void Unknown_native_settlement_projection_keeps_research_priority_instead_of_pausing()
     {
         NetherFloorNode current = Node(1, 80, NetherFloorNodeType.Recovery);
         NetherFloorNode directOffer = Node(2, 81, NetherFloorNodeType.Event, 1);
@@ -321,9 +321,9 @@ public class NetherVisibleBranchRoutePlannerTests
             )
         );
 
-        Assert.False(plan.HasSelection);
-        Assert.Equal(NetherPauseReason.UnknownMasterData, plan.PauseReason);
-        Assert.Equal("research-completion-state-unknown-for-visible-route-vector", plan.PauseDetail);
+        Assert.True(plan.HasSelection, plan.PauseReason + ":" + plan.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.SelectedNode).NodeId);
+        Assert.Equal(NetherRouteSemanticTier.DirectCodeOffer, plan.SelectionEvidence!.SelectedSemanticTier);
     }
 
     [Fact]

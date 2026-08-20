@@ -3417,6 +3417,99 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         Assert.Equal(held.CodeId, decision.RemoveCodeId);
     }
 
+    [Fact]
+    public void Production_assembler_keeps_primary_actionable_when_native_projection_is_unknown()
+    {
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate primary = Candidate(88006, NetherCodeFamily.Rush, power: 1);
+        NetherStrategyEvidencePackage package = Package(snapshot, primaryWallet: 0, primaryProjection: 0);
+        package = package with
+        {
+            Research = NetherStrategyEvidenceComponent<NetherStrategyResearchEvidence>.Known(
+                new NetherStrategyResearchEvidence(package.Research.Value!.Families
+                    .Select(row => row.Family == NetherCodeFamily.Rush
+                        ? row with
+                        {
+                            IsProjectedNormalSettlementKnown = false,
+                            ProjectionUnknownReason =
+                                "normal-result-nether-code-points-not-server-authoritative-before-settlement",
+                        }
+                        : row)
+                    .ToArray())
+            ),
+        };
+        NetherAutoClimbSettings settings = new()
+        {
+            StrategyMode = NetherStrategyMode.Research,
+            ResearchPrimaryFamily = NetherCodeFamily.Rush,
+            ResearchSecondaryFamily = NetherCodeFamily.Safe,
+            CodeReloadReserve = 99,
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [primary],
+            [ForceChainMechanic(primary.CodeId)],
+            settings,
+            SafeRouteEvidence()
+        );
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [primary],
+            settings,
+            captured.Evidence!
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCodeFamily.Rush, captured.Evidence!.ActiveResearchFamily);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(primary.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Full_authoritative_wallet_advances_to_secondary_even_when_future_settlement_is_unknown()
+    {
+        NetherSnapshot snapshot = Snapshot();
+        NetherStrategyEvidencePackage package = Package(
+            snapshot,
+            primaryWallet: 20_000,
+            primaryProjection: 0
+        );
+        package = package with
+        {
+            Research = NetherStrategyEvidenceComponent<NetherStrategyResearchEvidence>.Known(
+                new NetherStrategyResearchEvidence(package.Research.Value!.Families
+                    .Select(row => row.Family == NetherCodeFamily.Rush
+                        ? row with
+                        {
+                            IsProjectedNormalSettlementKnown = false,
+                            ProjectionUnknownReason =
+                                "normal-result-nether-code-points-not-server-authoritative-before-settlement",
+                        }
+                        : row)
+                    .ToArray())
+            ),
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [Candidate(88007, NetherCodeFamily.Safe, power: 1)],
+            [ForceChainMechanic(88007)],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Rush,
+                ResearchSecondaryFamily = NetherCodeFamily.Safe,
+            },
+            SafeRouteEvidence()
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCodeFamily.Safe, captured.Evidence!.ActiveResearchFamily);
+    }
+
     private static NetherCodePolicyRouteEvidence SafeRouteEvidence() => new()
     {
         IsKnown = true,

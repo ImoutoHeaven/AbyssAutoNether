@@ -13,8 +13,6 @@ namespace AutoNether.Services;
 /// </summary>
 internal static class NetherEventProductionEvidenceBinding
 {
-    private const int ResearchCompletionPoints = 20_000;
-
     public static NetherRuntimePopupContext Bind(
         NetherRuntimePopupContext popup,
         NetherStrategyEvidencePackage? package,
@@ -62,6 +60,7 @@ internal static class NetherEventProductionEvidenceBinding
                 exactInteractive,
                 settings,
                 researchFactsKnown,
+                researchIncomplete,
                 researchError
             ))
             .ToArray();
@@ -131,6 +130,7 @@ internal static class NetherEventProductionEvidenceBinding
         NetherRuntimeInteractivePreEntryInputsResult? interactive,
         NetherAutoClimbSettings settings,
         bool researchFactsKnown,
+        bool researchIncomplete,
         string researchError
     )
     {
@@ -239,8 +239,7 @@ internal static class NetherEventProductionEvidenceBinding
         {
             IsKnown = known && floorId > 0 && nodeId > 0,
             Mode = settings.StrategyMode,
-            ResearchIncomplete = !researchFactsKnown ||
-                partialProof?.ExactTreasureRank is > 0 and < 5,
+            ResearchIncomplete = researchIncomplete,
             HasRankFiveTreasureObjective = (option.IsMandatoryRankFiveKeyObjective
                 || rankFiveCommitment != null
                 || rankFiveObjective.HasValue
@@ -356,35 +355,20 @@ internal static class NetherEventProductionEvidenceBinding
             return false;
         }
 
-        bool IsComplete(NetherCodeFamily family)
+        NetherResearchObjectiveResolution objective = NetherResearchObjectivePolicy.Resolve(
+            settings.ResearchPrimaryFamily,
+            settings.ResearchSecondaryFamily,
+            package.Research.Value.Families
+        );
+        if (!objective.IsValid)
         {
-            if (family == NetherCodeFamily.Unknown)
-                return true;
-            NetherStrategyResearchFamilyState[] rows = package.Research.Value.Families
-                .Where(row => row.Family == family)
-                .ToArray();
-            if (rows.Length != 1 || !rows[0].IsProjectedNormalSettlementKnown)
-                return false;
-            return (long)rows[0].WalletPoints + rows[0].ProjectedNormalSettlementPoints
-                >= ResearchCompletionPoints;
-        }
-
-        bool primaryKnown = settings.ResearchPrimaryFamily == NetherCodeFamily.Unknown
-            || package.Research.Value.Families.Count(row => row.Family == settings.ResearchPrimaryFamily) == 1
-                && package.Research.Value.Families.Single(row => row.Family == settings.ResearchPrimaryFamily)
-                    .IsProjectedNormalSettlementKnown;
-        bool secondaryKnown = settings.ResearchSecondaryFamily == NetherCodeFamily.Unknown
-            || package.Research.Value.Families.Count(row => row.Family == settings.ResearchSecondaryFamily) == 1
-                && package.Research.Value.Families.Single(row => row.Family == settings.ResearchSecondaryFamily)
-                    .IsProjectedNormalSettlementKnown;
-        if (!primaryKnown || !secondaryKnown)
-        {
-            error = "event-research-projected-settlement-unknown";
+            error = "event-research-objective:" + objective.Detail;
             return false;
         }
 
-        incomplete = !IsComplete(settings.ResearchPrimaryFamily)
-            || !IsComplete(settings.ResearchSecondaryFamily);
+        // A missing future result never proves completion. Keep the explicit Research objective
+        // pending so exact route/resource/semantic evidence can still authorize this popup.
+        incomplete = objective.HasIncompleteTargets;
         return true;
     }
 

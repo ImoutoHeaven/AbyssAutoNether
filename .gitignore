@@ -14,3 +14,7 @@ release/
 # Ephemeral full Cpp2IL trees; commit only the selected native evidence anchors.
 docs/agents/native-decomp-rerun-*/
 docs/agents/native-decomp-standards-*/
+
+# Agent-generated evidence and scratch artifacts are local-only.
+docs/agents/*
+/.scratch/

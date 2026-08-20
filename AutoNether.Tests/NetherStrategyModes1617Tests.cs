@@ -41,7 +41,7 @@ public sealed class NetherStrategyModes1617Tests
     }
 
     [Fact]
-    public void Unknown_research_completion_is_typed_and_does_not_select_a_target()
+    public void Unknown_native_settlement_projection_keeps_primary_active_with_typed_fallback_audit()
     {
         NetherSnapshot snapshot = Snapshot();
         NetherStrategyEvidenceMapResult mapped = NetherStrategyEvidenceMapper.Map(
@@ -56,12 +56,13 @@ public sealed class NetherStrategyModes1617Tests
 
         Assert.True(mapped.IsMapped, mapped.Detail);
         NetherStrategyEvidenceAudit audit = mapped.Package!.EvidenceAudit;
-        Assert.Equal(NetherResearchTargetState.Unknown, audit.ResearchTargetState);
-        Assert.Equal(NetherCodeFamily.Unknown, audit.ActiveResearchFamily);
+        Assert.Equal(NetherResearchTargetState.Active, audit.ResearchTargetState);
+        Assert.Equal(NetherCodeFamily.Rush, audit.ActiveResearchFamily);
         Assert.Equal(
             NetherStrategyUnknownReasonCode.ResearchCompletionUnknown,
             audit.UnknownReasonCode
         );
+        Assert.Equal("native-settlement-not-known", audit.UnknownReason);
     }
 
     [Fact]

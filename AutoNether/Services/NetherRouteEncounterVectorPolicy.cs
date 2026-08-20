@@ -377,13 +377,10 @@ internal static class NetherRouteEncounterVectorPolicy
         {
             StrategyMode = context.StrategyMode,
         };
-        if (settings.StrategyMode == NetherStrategyMode.Research
-            && context.ResearchIncomplete is not bool researchIncomplete)
-        {
-            return RouteEncounterKind.None;
-        }
+        // Native settlement points are unavailable until Result. Unknown projection therefore
+        // retains the explicit Research priority; it never authorizes completed/Equipment order.
         bool incomplete = settings.StrategyMode == NetherStrategyMode.Research
-            && context.ResearchIncomplete == true;
+            && context.ResearchIncomplete != false;
         NetherEventStrategyEvidence strategyEvidence = new()
         {
             IsKnown = true,
