@@ -2282,7 +2282,11 @@ internal static class NetherAutoClimbController
             new NetherDetailedAuditField("owner", popup.OwnerAction.ToString()),
             new NetherDetailedAuditField("generation", popup.OwnerGeneration.ToString()),
             new NetherDetailedAuditField("sequence", popup.Sequence.ToString()),
-            new NetherDetailedAuditField("floorId", snapshot.CurrentFloorId.ToString())
+            new NetherDetailedAuditField("floorId", snapshot.CurrentFloorId.ToString()),
+            // The node identity that scopes every per-node evidence join for this popup. Zero
+            // means no node was proven, so key-only joins stay fail-closed on shared event rows.
+            new NetherDetailedAuditField("routeOwnedNodeId", popup.RouteOwnedNodeId.ToString()),
+            new NetherDetailedAuditField("popupNodeId", popup.NodeId.ToString())
         );
 
         NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(

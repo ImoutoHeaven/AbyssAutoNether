@@ -663,3 +663,30 @@ uses Conservative Research Priority while retaining the typed
 otherwise the earliest configured non-full wallet stays active. Missing or
 malformed wallet rows still fail closed, and Code count, capacity, gauges,
 technology rate, displayed power, and guessed settlement never substitute.
+
+## Node-scoped visible evidence for floor-event popups (2026-08-21)
+
+Fresh read-only Docker Cpp2IL evidence under
+`.scratch/recovery-route-projection-rca/` uses the current-world hashes above:
+GameAssembly.dll `f2ad94781c161fe93040463b884c328599a40c78079aecacbe17a9b78edfc767`,
+`global-metadata.dat` `d7dffa623675ac493a0a4c7cfe8dc729bc37846b455a5284af94a901c1e25c27`,
+and Project.dll `033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4`;
+Cpp2IL `2022.1.0-pre-release.21+58fc404ac503f4e512055cafc48c03088fc6e224`,
+diffable exit 0.
+
+`NetherFloorModel` retains per-node `MNetherMapFloorId` and `ExtendId` only, and
+`MNetherFloorEvents` is keyed by `id` with a separate `m_nether_map_floor_id`, so
+one event row is legitimately exposed by several rendered map nodes at once.
+`NetherRecoverPopupController` keeps only `_netherDataStore`, `_mNetherEvents`,
+`_mNetherEventPartsArray` and `_onConfirm`: its node identity arrives as the
+`InitializeView(long mNetherMapFloorId, long extendId, Action<...>)` argument and
+is never retained, so a live popup exposes no node coordinate.
+
+The production visible map therefore publishes one content row per rendered node,
+and an `(event, part, option)` key alone matches every sibling node. Every
+per-option evidence join in `NetherEventProductionEvidenceBinding` - pre-entry
+projection, visible option row, dependent Item/Battle rows, reward, and battle -
+is scoped to a single proven node: the route-owned node when the route committed
+one (including the recovered current-node identity of an already-open ownerless
+popup), otherwise the node a uniquely resolved projection proves. With no proven
+node the legacy key-only join remains, and it stays fail-closed on ambiguity.

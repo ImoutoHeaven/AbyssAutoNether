@@ -157,8 +157,15 @@ internal static class NetherEventProductionEvidenceBinding
         NetherStrategyVisibleMapEvidence? visible = package?.VisibleMap is { IsKnown: true, Value: not null }
             ? package.VisibleMap.Value
             : null;
-        bool hasVisible = TryFindVisibleOption(visible, option, out NetherStrategyVisibleContentRow? visibleRow, out NetherStrategyVisibleEventOptionEvidence? visibleOption);
-        bool dependentRows = hasVisible && HasExactDependentRows(visible, option);
+        long evidenceNodeId = ResolveEvidenceNodeId(popup, projection, projectionNodeId);
+        bool hasVisible = TryFindVisibleOption(
+            visible,
+            option,
+            evidenceNodeId,
+            out NetherStrategyVisibleContentRow? visibleRow,
+            out NetherStrategyVisibleEventOptionEvidence? visibleOption
+        );
+        bool dependentRows = hasVisible && HasExactDependentRows(visible, option, evidenceNodeId);
         NetherInteractivePartialDeathEligibility? partialProof = option.PartialDeathEligibility
             ?? projection?.PartialDeathEligibility;
         NetherRankFiveKeyProcurementCommitment? rankFiveCommitment =
@@ -232,8 +239,13 @@ internal static class NetherEventProductionEvidenceBinding
             : option.UnknownReason;
         NetherEventRewardEvidence? reward = option.RewardEvidence
             ?? projection?.Reward
-            ?? FindReward(visible, option.EventId, option.EventPartId);
-        NetherEventBattleEvidence? battle = ResolveBattleEvidence(option, projection, visible);
+            ?? FindReward(visible, option.EventId, option.EventPartId, evidenceNodeId);
+        NetherEventBattleEvidence? battle = ResolveBattleEvidence(
+            option,
+            projection,
+            visible,
+            evidenceNodeId
+        );
         long floorId = projection?.FloorId > 0
             ? projection.FloorId
             : package?.Server?.CurrentFloorId > 0
@@ -402,13 +414,6 @@ internal static class NetherEventProductionEvidenceBinding
     private static bool TryFindProjection(
         NetherRuntimeInteractivePreEntryInputsResult? interactive,
         NetherEventOption option,
-        out NetherInteractiveOptionProjection? projection,
-        out long nodeId
-    ) => TryFindProjection(interactive, option, routeOwnedNodeId: 0, out projection, out nodeId);
-
-    private static bool TryFindProjection(
-        NetherRuntimeInteractivePreEntryInputsResult? interactive,
-        NetherEventOption option,
         long routeOwnedNodeId,
         out NetherInteractiveOptionProjection? projection,
         out long nodeId
@@ -558,9 +563,38 @@ internal static class NetherEventProductionEvidenceBinding
         return hasExactCurrentOption ? currentNodeId : 0;
     }
 
+    /// <summary>
+    /// The map node whose published rows are this option's evidence. The route-owned node is the
+    /// strongest identity; when the route owns nothing, a projection that resolved to exactly one
+    /// captured node proves the same node from the option key alone. Zero means no node identity
+    /// was proven, which keeps the legacy key-only join and its fail-closed ambiguity.
+    /// </summary>
+    private static long ResolveEvidenceNodeId(
+        NetherRuntimePopupContext popup,
+        NetherInteractiveOptionProjection? projection,
+        long projectionNodeId
+    ) => popup.RouteOwnedNodeId > 0
+        ? popup.RouteOwnedNodeId
+        : projection?.NodeId > 0
+            ? projection.NodeId
+            : projectionNodeId;
+
+    /// <summary>
+    /// The production visible map publishes one content row per rendered map node, and one
+    /// <c>MNetherFloorEvents</c> row is legitimately shared by several nodes, so an
+    /// (event, part, option) key alone matches every sibling. Once the route — or the recovered
+    /// current-node identity — proves which node this popup belongs to, only that node's rows are
+    /// its evidence. Zero keeps the legacy key-only join, which stays fail-closed on ambiguity.
+    /// </summary>
+    private static bool OwnsVisibleRow(
+        NetherStrategyVisibleContentRow row,
+        long routeOwnedNodeId
+    ) => routeOwnedNodeId <= 0 || row.NodeId == routeOwnedNodeId;
+
     private static bool TryFindVisibleOption(
         NetherStrategyVisibleMapEvidence? visible,
         NetherEventOption option,
+        long routeOwnedNodeId,
         out NetherStrategyVisibleContentRow? row,
         out NetherStrategyVisibleEventOptionEvidence? visibleOption
     )
@@ -572,7 +606,8 @@ internal static class NetherEventProductionEvidenceBinding
         NetherStrategyVisibleContentRow[] rows = visible.ContentRows
             .Where(candidate => candidate.Kind == NetherStrategyVisibleContentKind.Event
                 && candidate.EventId == option.EventId
-                && candidate.EventPartId == option.EventPartId)
+                && candidate.EventPartId == option.EventPartId
+                && OwnsVisibleRow(candidate, routeOwnedNodeId))
             .ToArray();
         if (rows.Length != 1 || !rows[0].IsKnown)
             return false;
@@ -624,7 +659,8 @@ internal static class NetherEventProductionEvidenceBinding
 
     private static bool HasExactDependentRows(
         NetherStrategyVisibleMapEvidence? visible,
-        NetherEventOption option
+        NetherEventOption option,
+        long routeOwnedNodeId
     )
     {
         if (visible == null)
@@ -642,7 +678,8 @@ internal static class NetherEventProductionEvidenceBinding
             NetherStrategyVisibleContentRow[] rows = visible.ContentRows
                 .Where(row => row.Kind == kind
                     && row.EventId == option.EventId
-                    && row.EventPartId == option.EventPartId)
+                    && row.EventPartId == option.EventPartId
+                    && OwnsVisibleRow(row, routeOwnedNodeId))
                 .ToArray();
             if (rows.Length != 1 || !rows[0].IsKnown)
                 return false;
@@ -683,7 +720,8 @@ internal static class NetherEventProductionEvidenceBinding
     private static NetherEventBattleEvidence? ResolveBattleEvidence(
         NetherEventOption option,
         NetherInteractiveOptionProjection? projection,
-        NetherStrategyVisibleMapEvidence? visible
+        NetherStrategyVisibleMapEvidence? visible,
+        long routeOwnedNodeId
     )
     {
         NetherEventBattleEvidence? optionEvidence = option.BattleEvidence;
@@ -705,7 +743,7 @@ internal static class NetherEventProductionEvidenceBinding
             }
             return optionEvidence
                 ?? projection?.Battle
-                ?? FindBattle(visible, option.EventId, option.EventPartId);
+                ?? FindBattle(visible, option.EventId, option.EventPartId, routeOwnedNodeId);
         }
 
         bool IsExactKnown(NetherEventBattleEvidence? evidence) =>
@@ -719,7 +757,8 @@ internal static class NetherEventProductionEvidenceBinding
         NetherEventBattleEvidence? visibleEvidence = FindBattle(
             visible,
             option.EventId,
-            option.EventPartId
+            option.EventPartId,
+            routeOwnedNodeId
         );
         if (IsExactKnown(visibleEvidence))
             return visibleEvidence;
@@ -785,7 +824,7 @@ internal static class NetherEventProductionEvidenceBinding
                     option,
                     popup.RouteOwnedNodeId,
                     out NetherInteractiveOptionProjection? projection,
-                    out _
+                    out long projectionNodeId
                 )
                 || projection == null
                 || !projection.IsKnown
@@ -798,6 +837,7 @@ internal static class NetherEventProductionEvidenceBinding
                 || !TryFindVisibleOption(
                     package.VisibleMap.Value,
                     option,
+                    ResolveEvidenceNodeId(popup, projection, projectionNodeId),
                     out _,
                     out _
                 )
@@ -811,9 +851,19 @@ internal static class NetherEventProductionEvidenceBinding
                 continue;
             }
             NetherEventRewardEvidence? reward = projection.Reward
-                ?? FindReward(package.VisibleMap.Value, projection.EventId, projection.EventPartId);
+                ?? FindReward(
+                    package.VisibleMap.Value,
+                    projection.EventId,
+                    projection.EventPartId,
+                    ResolveEvidenceNodeId(popup, projection, projectionNodeId)
+                );
             NetherEventBattleEvidence? battle = projection.Battle
-                ?? FindBattle(package.VisibleMap.Value, projection.EventId, projection.EventPartId);
+                ?? FindBattle(
+                    package.VisibleMap.Value,
+                    projection.EventId,
+                    projection.EventPartId,
+                    ResolveEvidenceNodeId(popup, projection, projectionNodeId)
+                );
             if (projection.ExpectedEffects.Any(effect => effect.Kind == NetherEffectKind.Item)
                     && (reward == null || !reward.IsKnown)
                 || projection.ExpectedEffects.Any(effect => effect.Kind == NetherEffectKind.Battle)
@@ -859,7 +909,8 @@ internal static class NetherEventProductionEvidenceBinding
     private static NetherEventRewardEvidence? FindReward(
         NetherStrategyVisibleMapEvidence? visible,
         long eventId,
-        long eventPartId
+        long eventPartId,
+        long routeOwnedNodeId
     )
     {
         NetherStrategyVisibleContentRow? row = visible?.ContentRows.FirstOrDefault(candidate =>
@@ -867,6 +918,7 @@ internal static class NetherEventProductionEvidenceBinding
             && candidate.EventId == eventId
             && candidate.EventPartId == eventPartId
             && candidate.IsKnown
+            && OwnsVisibleRow(candidate, routeOwnedNodeId)
         );
         if (row is not NetherStrategyVisibleContentRow exact
             || !NetherCanonicalRewardTierProvider.TryGetTypedRewardEvidence(
@@ -882,7 +934,8 @@ internal static class NetherEventProductionEvidenceBinding
     private static NetherEventBattleEvidence? FindBattle(
         NetherStrategyVisibleMapEvidence? visible,
         long eventId,
-        long eventPartId
+        long eventPartId,
+        long routeOwnedNodeId
     )
     {
         NetherStrategyVisibleContentRow? row = visible?.ContentRows.FirstOrDefault(candidate =>
@@ -890,6 +943,7 @@ internal static class NetherEventProductionEvidenceBinding
             && candidate.EventId == eventId
             && candidate.EventPartId == eventPartId
             && candidate.IsKnown
+            && OwnsVisibleRow(candidate, routeOwnedNodeId)
         );
         if (row is not NetherStrategyVisibleContentRow exact
             || exact.MasterRowId <= 0

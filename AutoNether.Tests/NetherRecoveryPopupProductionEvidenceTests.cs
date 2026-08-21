@@ -160,6 +160,130 @@ public sealed class NetherRecoveryPopupProductionEvidenceTests
         Assert.Equal(PurificationPartId, decision.Action.EventPartId);
     }
 
+    /// <summary>
+    /// Production repro of the live pause
+    /// <c>popup-option:Recovery:0:1:354:402:1 ... detail=event-option-route-evidence-unavailable</c>.
+    /// The visible map is produced by the real <see cref="NetherStrategyVisibleEvidenceMapper"/>
+    /// over the four sibling Recovery nodes that shared event row 354, exactly as the live
+    /// FloorSelection map did. The mapper emits one Event row per node, so the popup's key-only
+    /// visible join sees four rows for (354, part) and cannot pick its own.
+    /// </summary>
+    [Fact]
+    public void Ownerless_recovery_popup_resolves_its_own_visible_row_when_siblings_share_the_event_master_row()
+    {
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            Status = NetherSessionStatus.Wait,
+            CurrentFloorId = SelectedFloorId,
+            CurrentNodeId = SelectedNodeId,
+        };
+        NetherStrategyEvidencePackage package = ProductionMappedPackage(snapshot);
+        // The live map published the same event row on every sibling node.
+        Assert.Equal(
+            SiblingNodeIds.Length,
+            package.VisibleMap.Value!.ContentRows.Count(row =>
+                row.Kind == NetherStrategyVisibleContentKind.Event
+                && row.EventId == EventId
+                && row.EventPartId == PurificationPartId
+            )
+        );
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            NativeRecoveryPopup() with
+            {
+                OwnerAction = NetherActionKind.None,
+                HasRecoveredFloorEventTaskEvidence = true,
+            },
+            package,
+            InteractiveSiblingRecoveryNodes(
+                snapshot,
+                new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
+            ),
+            Settings()
+        );
+
+        Assert.Equal(SelectedNodeId, bound.RouteOwnedNodeId);
+        NetherEventOption purification = bound.Options.Single(option =>
+            option.EventPartId == PurificationPartId
+        );
+        Assert.Equal(string.Empty, purification.UnknownReason);
+
+        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
+            snapshot,
+            bound,
+            Settings(),
+            NoActiveErosion()
+        );
+
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, decision.Kind);
+        Assert.Equal(NetherActionKind.SelectEventOption, decision.Action.Kind);
+        Assert.Equal(PurificationPartId, decision.Action.EventPartId);
+    }
+
+    /// <summary>
+    /// Without an owned node the shared visible row stays genuinely ambiguous and must fail closed.
+    /// </summary>
+    [Fact]
+    public void Recovery_popup_without_an_owned_node_keeps_a_shared_visible_row_unknown()
+    {
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            Status = NetherSessionStatus.Wait,
+            CurrentFloorId = SelectedFloorId,
+            CurrentNodeId = SelectedNodeId,
+        };
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            NativeRecoveryPopup() with { OwnerAction = NetherActionKind.None },
+            ProductionMappedPackage(snapshot),
+            InteractiveSiblingRecoveryNodes(
+                snapshot,
+                new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
+            ),
+            Settings()
+        );
+
+        Assert.Equal(0, bound.RouteOwnedNodeId);
+        Assert.All(bound.Options, option => Assert.False(option.StrategyEvidence!.IsKnown));
+    }
+
+    /// <summary>
+    /// Same shared-visible-row fault reached without a recovered owned node: only one sibling is
+    /// pre-entry safe, so the option key resolves to exactly one projection, while the visible map
+    /// still publishes the shared event row on all four siblings. The uniquely projected node is
+    /// the popup's node, so its own visible row must be the evidence.
+    /// </summary>
+    [Fact]
+    public void Recovery_popup_uses_the_visible_row_of_its_uniquely_projected_node()
+    {
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            Status = NetherSessionStatus.Wait,
+            CurrentFloorId = SelectedFloorId,
+            CurrentNodeId = SelectedNodeId,
+        };
+        NetherRuntimeInteractivePreEntryInputsResult interactive = OnlySelectedSiblingIsSafe(
+            InteractiveSiblingRecoveryNodes(
+                snapshot,
+                new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
+            )
+        );
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            NativeRecoveryPopup() with { OwnerAction = NetherActionKind.None },
+            ProductionMappedPackage(snapshot),
+            interactive,
+            Settings()
+        );
+
+        Assert.Equal(0, bound.RouteOwnedNodeId);
+        NetherEventOption purification = bound.Options.Single(option =>
+            option.EventPartId == PurificationPartId
+        );
+        Assert.Equal(SelectedNodeId, purification.NodeId);
+        Assert.Equal(string.Empty, purification.UnknownReason);
+    }
+
     [Fact]
     public void Ownerless_recovery_popup_without_the_native_parent_evidence_does_not_borrow_snapshot_node()
     {
@@ -403,6 +527,28 @@ public sealed class NetherRecoveryPopupProductionEvidenceTests
         return NetherRuntimeInteractivePreEntryInputsResult.Success(captures, snapshot.Fingerprint);
     }
 
+    /// <summary>
+    /// Keeps only <see cref="SelectedNodeId"/> pre-entry safe; the other siblings stay captured but
+    /// unsafe, exactly as an erosion/HP-bound sibling floor does in production.
+    /// </summary>
+    private static NetherRuntimeInteractivePreEntryInputsResult OnlySelectedSiblingIsSafe(
+        NetherRuntimeInteractivePreEntryInputsResult interactive
+    ) => interactive with
+    {
+        ByFloorNodeId = interactive.ByFloorNodeId.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Key == SelectedNodeId
+                ? entry.Value
+                : entry.Value with
+                {
+                    Safety = NetherInteractiveFloorPreEntrySafetyResult.Pause(
+                        NetherPauseReason.UnsafeErosion,
+                        "sibling-floor-erosion-bound"
+                    ),
+                }
+        ),
+    };
+
     private static NetherInteractiveOptionProjection Projection(
         NetherEventOption option,
         long floorId,
@@ -469,6 +615,70 @@ public sealed class NetherRecoveryPopupProductionEvidenceTests
             },
             VisibleMap = NetherStrategyEvidenceComponent<NetherStrategyVisibleMapEvidence>.Known(
                 new NetherStrategyVisibleMapEvidence([], rows)
+            ),
+        };
+    }
+
+    /// <summary>
+    /// Visible-map evidence produced by the real production mapper over the four sibling Recovery
+    /// nodes of the live map, all resolving to the same <c>MNetherFloorEvents</c> row 354 through
+    /// their native <c>ExtendId</c>.
+    /// </summary>
+    private static NetherStrategyEvidencePackage ProductionMappedPackage(NetherSnapshot snapshot)
+    {
+        NetherFloorNode[] floors = SiblingNodeIds
+            .Select((nodeId, index) => new NetherFloorNode(
+                SelectedFloorId,
+                35,
+                index,
+                NetherFloorNodeType.Recovery
+            )
+            {
+                NodeId = nodeId,
+                IsUnlocked = true,
+            })
+            .ToArray();
+        NetherStrategyVisibleEvidenceCaptureResult mapped = NetherStrategyVisibleEvidenceMapper.Map(
+            new NetherStrategyVisibleEvidenceCaptureRequest(
+                floors,
+                [],
+                [],
+                // Native option order: part 402 -> option 1, 102 -> option 2, 700 -> option 3.
+                [new NetherFloorEventMasterRow(
+                    EventId,
+                    SelectedFloorId,
+                    1,
+                    PurificationPartId,
+                    RestPartId,
+                    TransformPartId,
+                    0
+                )],
+                [
+                    // Raw MNetherFloorEventParts.target_type_1 values 4/1/7.
+                    new NetherFloorEventPartMasterRow(PurificationPartId, 4, 30, 0, 0, 0, 0, 0, 0, 0),
+                    new NetherFloorEventPartMasterRow(RestPartId, 1, 300, 0, 0, 0, 0, 0, 0, 0),
+                    new NetherFloorEventPartMasterRow(TransformPartId, 7, 0, 0, 0, 0, 0, 0, 0, 0),
+                ],
+                []
+            )
+            {
+                ExtendIdByNodeId = SiblingNodeIds.ToDictionary(nodeId => nodeId, _ => EventId),
+            }
+        );
+        Assert.True(mapped.IsSuccess, mapped.Detail);
+        return new NetherStrategyEvidencePackage
+        {
+            Identity = new NetherStrategyEvidenceIdentity(1, 1, 1, snapshot.Fingerprint),
+            Server = new NetherStrategyServerEvidence
+            {
+                CurrentFloorId = snapshot.CurrentFloorId,
+                CurrentNodeId = snapshot.CurrentNodeId,
+                NetherGold = snapshot.NetherGold,
+                TreasureKeyCount = snapshot.TreasureKeyCount,
+                ErosionPoint = snapshot.ErosionPoint,
+            },
+            VisibleMap = NetherStrategyEvidenceComponent<NetherStrategyVisibleMapEvidence>.Known(
+                mapped.Evidence!
             ),
         };
     }
