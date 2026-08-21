@@ -2362,6 +2362,77 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_waits_for_late_boss_result_code_offer_when_first_post_clear_snapshot_is_unchanged()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            AutoCompleteBattleResultContinuation = false,
+            BattleResultRebound = false,
+            ObserveBattleResultOnBattleClear = false,
+            CodeCandidates = SafeCodeCandidates(30024),
+            BattleResultCodePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                OwnerAction = NetherActionKind.BattleSettlement,
+                OwnerGeneration = 9,
+                Sequence = 20,
+            },
+        };
+        // Fresh live evidence shows a clear lifecycle edge can precede the result controller
+        // and still expose the pre-battle Nether snapshot. The eventual result-owned popup,
+        // not a replayed battle request, is the next native owner.
+        bridge.BattleSettlementSnapshotOverride = bridge.BattleSnapshot;
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+            Pump(3);
+            NetherAutoClimbController.OnBattleSettingsAccessorRegistered();
+
+            NetherAutoClimbController.Update(); // acquire battle settings
+            NetherAutoClimbController.Update(); // native clear arrives before result view
+            NetherAutoClimbController.Update(); // one GET-only refresh begins
+            NetherAutoClimbController.Update(); // same Battle snapshot: wait, never pause/replay
+
+            Assert.Equal(NetherAutoClimbPhase.AwaitingBattleSettlement, NetherAutoClimbController.Phase);
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.Empty(bridge.BattleResultCodeActions);
+            int getOnlyBeginsAtResultGap = bridge.GetOnlyBeginCount;
+            int getOnlyPollsAtResultGap = bridge.GetOnlyPollCount;
+            Assert.True(getOnlyBeginsAtResultGap >= 1);
+            Assert.True(getOnlyPollsAtResultGap >= 1);
+
+            bridge.CurrentSnapshot = bridge.AfterBattle; // native result response becomes authoritative
+            bridge.HasObservedNetherBattleResult = true; // native result view and its Code Offer register
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(
+                NetherAutoClimbPhase.AwaitingBattleResultContinuation,
+                NetherAutoClimbController.Phase
+            );
+            Assert.Equal(
+                new[] { NetherActionKind.SelectCode },
+                bridge.BattleResultCodeActions.Select(action => action.Kind)
+            );
+            Assert.Equal(0, bridge.BattleResultNextInvokeCount);
+            Assert.Equal(getOnlyBeginsAtResultGap, bridge.GetOnlyBeginCount);
+            Assert.Equal(getOnlyPollsAtResultGap, bridge.GetOnlyPollCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_settles_segment_boss_to_sleep_before_selecting_result_code()
     {
         var bridge = new ScriptedRuntimeBridge();
@@ -5087,6 +5158,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public int BattleStartCancelCount { get; private set; }
         public int BattleResultNextInvokeCount { get; private set; }
         public bool HasObservedNetherBattleResult { get; set; }
+        public bool ObserveBattleResultOnBattleClear { get; set; } = true;
         public bool AutoCompleteBattleResultContinuation { get; set; } = true;
         public bool BattleResultRebound { get; set; } = true;
         public bool BattleResultReboundSceneEntered { get; set; } = true;
@@ -6010,7 +6082,7 @@ public class NetherAutoClimbControllerEndToEndTests
             // code popup are presented.  Keep the production E2E seam faithful to that lifecycle
             // so the result-owned flow cannot accidentally depend on a stale map controller.
             HasRegisteredFloorSelection = false;
-            HasObservedNetherBattleResult = true;
+            HasObservedNetherBattleResult = ObserveBattleResultOnBattleClear;
             _battleResultNextInvoked = false;
             _battleResultContinuationCompleted = false;
             _battleClearAvailable = true;

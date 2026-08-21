@@ -5,9 +5,10 @@ using System;
 namespace AutoNether.Services;
 
 /// <summary>
-/// Native battle task observation is distinct from settlement authority.  Clear/close task
-/// terminal evidence starts exactly one GET-only refresh; only its target-specific snapshot
-/// can settle the pending battle contract.
+/// Native battle task observation is distinct from settlement authority. Clear/close terminal
+/// evidence starts exactly one GET-only refresh. Its target-specific snapshot settles immediately;
+/// an unchanged entry Battle snapshot instead waits for the native result owner, whose fresh
+/// datastore-backed transition snapshot settles the retained contract before Code mutation.
 /// </summary>
 internal interface INetherBattleSettlementDriver
 {
@@ -32,6 +33,12 @@ internal enum NetherBattleSettlementStepKind
 {
     AwaitingBattle,
     AwaitingSettlement,
+    /// <summary>
+    /// The clear/close task and its one GET-only refresh completed before the native result
+    /// controller published its authoritative transition snapshot. The pending battle contract
+    /// remains live, but no second request is issued while the result-owned Code Offer appears.
+    /// </summary>
+    AwaitingResultView,
     Settled,
     Unchanged,
     WrongTarget,
@@ -69,6 +76,7 @@ internal sealed class NetherBattleSettlementCoordinator
     private NetherPlannedAction? _action;
     private NetherSnapshot? _before;
     private bool _settlementObserved;
+    private bool _awaitingResultView;
 
     public NetherBattleSettlementCoordinator(
         INetherBattleSettlementDriver battle,
@@ -82,6 +90,13 @@ internal sealed class NetherBattleSettlementCoordinator
     }
 
     public bool IsActive => _action != null;
+
+    /// <summary>
+    /// True only after the one permitted post-clear GET proved that the presentation model is
+    /// still the entry Battle snapshot. The controller must wait for the result owner, then pass
+    /// its fresh datastore-backed transition snapshot to <see cref="SettleFromResultView"/>.
+    /// </summary>
+    public bool IsAwaitingResultView => _awaitingResultView;
 
     public bool Begin(NetherPlannedAction action, NetherSnapshot before)
     {
@@ -104,6 +119,7 @@ internal sealed class NetherBattleSettlementCoordinator
         _action = action;
         _before = before;
         _settlementObserved = false;
+        _awaitingResultView = false;
         _reconcile.Reset();
         return true;
     }
@@ -112,6 +128,15 @@ internal sealed class NetherBattleSettlementCoordinator
     {
         if (_action is not NetherPlannedAction action || _before == null)
             return NetherBattleSettlementStep.Create(NetherBattleSettlementStepKind.BindingUnavailable, detail: "missing-battle-settlement-contract");
+
+        if (_awaitingResultView)
+        {
+            return NetherBattleSettlementStep.Create(
+                NetherBattleSettlementStepKind.AwaitingResultView,
+                NetherActionOutcome.NotApplied,
+                detail: "battle-settlement-unchanged-awaiting-native-result-view"
+            );
+        }
 
         if (_settlementObserved)
             return PumpSettlement(action, _before);
@@ -140,6 +165,41 @@ internal sealed class NetherBattleSettlementCoordinator
     public NetherBattleSettlementStep TerminateForSceneLoss() =>
         Terminate(NetherBattleSettlementStepKind.SceneLost, detail: "nether-battle-scene-lost");
 
+    /// <summary>
+    /// Settles the retained battle contract from the exact result-owned transition snapshot.
+    /// This path is used only after the fresh result controller has registered; it never starts
+    /// another request and runs before a result-owned Code Offer can mutate the Code portfolio.
+    /// </summary>
+    public NetherBattleSettlementStep SettleFromResultView(NetherSnapshot? snapshot)
+    {
+        if (!_awaitingResultView
+            || _action is not NetherPlannedAction action
+            || _before == null)
+        {
+            return NetherBattleSettlementStep.Create(
+                NetherBattleSettlementStepKind.BindingUnavailable,
+                detail: "missing-deferred-battle-settlement-contract"
+            );
+        }
+        if (snapshot == null)
+        {
+            return NetherBattleSettlementStep.Create(
+                NetherBattleSettlementStepKind.AwaitingResultView,
+                NetherActionOutcome.NotApplied,
+                detail: "missing-result-owned-settlement-snapshot"
+            );
+        }
+
+        _awaitingResultView = false;
+        NetherActionOutcome outcome = NetherActionReconcilePolicy.Evaluate(action, _before, snapshot);
+        return outcome switch
+        {
+            NetherActionOutcome.Applied => SettleAuthoritativeProjection(action, _before, snapshot, outcome),
+            NetherActionOutcome.NotApplied => Terminate(NetherBattleSettlementStepKind.Unchanged, outcome, snapshot),
+            _ => Terminate(NetherBattleSettlementStepKind.WrongTarget, outcome, snapshot),
+        };
+    }
+
     private NetherBattleSettlementStep PumpSettlement(NetherPlannedAction action, NetherSnapshot before)
     {
         NetherReadOnlyReconcileStep refresh = _reconcile.Pump();
@@ -154,9 +214,25 @@ internal sealed class NetherBattleSettlementCoordinator
         return outcome switch
         {
             NetherActionOutcome.Applied => SettleAuthoritativeProjection(action, before, refresh.Snapshot, outcome),
-            NetherActionOutcome.NotApplied => Terminate(NetherBattleSettlementStepKind.Unchanged, outcome, refresh.Snapshot),
+            // A real battle result is published asynchronously after the clear/close task. A
+            // byte-for-byte unchanged Battle snapshot therefore proves only that this GET won
+            // the race. Keep the immutable contract until the result-owned transition snapshot
+            // exists; never replay the battle or issue a speculative second refresh.
+            NetherActionOutcome.NotApplied => AwaitResultView(refresh.Snapshot),
             _ => Terminate(NetherBattleSettlementStepKind.WrongTarget, outcome, refresh.Snapshot),
         };
+    }
+
+    private NetherBattleSettlementStep AwaitResultView(NetherSnapshot preResultSnapshot)
+    {
+        _awaitingResultView = true;
+        _reconcile.Reset();
+        return NetherBattleSettlementStep.Create(
+            NetherBattleSettlementStepKind.AwaitingResultView,
+            NetherActionOutcome.NotApplied,
+            preResultSnapshot,
+            "battle-settlement-unchanged-awaiting-native-result-view"
+        );
     }
 
     private NetherBattleSettlementStep SettleAuthoritativeProjection(
@@ -199,6 +275,7 @@ internal sealed class NetherBattleSettlementCoordinator
         _action = null;
         _before = null;
         _settlementObserved = false;
+        _awaitingResultView = false;
         _reconcile.Reset();
         return NetherBattleSettlementStep.Create(kind, outcome, snapshot, detail, pauseReason);
     }

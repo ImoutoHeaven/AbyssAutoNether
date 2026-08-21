@@ -41,6 +41,9 @@ internal static class NetherAutoClimbController
         NetherBattleSettingsLease.Instance
     );
     private static readonly NetherNativeWaitGate BattleAccessorWait = new(maximumMissingPolls: 3600);
+    // A clear/close lifecycle edge can race the result-owned view. Bound that gap without
+    // issuing a second endpoint request or treating the entry Battle snapshot as failure.
+    private static readonly NetherNativeWaitGate BattleResultSettlementWait = new(maximumMissingPolls: 600);
     private static readonly NetherNativeWaitGate ExistingCheckpointWait = new(maximumMissingPolls: 600);
     private static readonly NetherNativeWaitGate FloorSceneReadinessWait = new(maximumMissingPolls: 600);
     private static readonly NetherPopupReadinessGate ActivePopupReadiness = new(maximumPendingPolls: 600);
@@ -132,6 +135,7 @@ internal static class NetherAutoClimbController
         _deferredEnableRemainingUpdates = 0;
         _awaitingReconcileFloorSceneSnapshot = false;
         BattleAccessorWait.Clear();
+        BattleResultSettlementWait.Clear();
         ExistingCheckpointWait.Clear();
         FloorSceneReadinessWait.Clear();
         ActivePopupReadiness.Clear();
@@ -597,6 +601,7 @@ internal static class NetherAutoClimbController
         _deferredEnableRemainingUpdates = 0;
         _awaitingReconcileFloorSceneSnapshot = false;
         BattleAccessorWait.Clear();
+        BattleResultSettlementWait.Clear();
         ExistingCheckpointWait.Clear();
         FloorSceneReadinessWait.Clear();
         ActivePopupReadiness.Clear();
@@ -1324,25 +1329,120 @@ internal static class NetherAutoClimbController
                     return;
                 }
                 return;
+            case NetherBattleSettlementStepKind.AwaitingResultView:
+                if (!_bridge.HasObservedNetherBattleResult)
+                {
+                    NetherNativeActionResult wait = BattleResultSettlementWait.AwaitRegistration(
+                        "battle-result-view"
+                    );
+                    Audit(
+                        NetherDetailedAuditKind.Battle,
+                        "result-view-settlement:" + wait.Kind + ":" + wait.Detail,
+                        new NetherDetailedAuditField("step", step.Kind.ToString()),
+                        new NetherDetailedAuditField("result", wait.Kind.ToString()),
+                        new NetherDetailedAuditField("detail", wait.Detail),
+                        new NetherDetailedAuditField("pending", State.PendingAction?.Kind.ToString() ?? "none")
+                    );
+                    if (wait.Kind == NetherNativeActionResultKind.Started)
+                        return;
+                    FailClosedTerminal(
+                        NetherPauseReason.BattleSettlementUnchanged,
+                        "battle-settlement-unchanged-result-view:" + wait.Detail
+                    );
+                    return;
+                }
+
+                // Fresh native result characters and the datastore transition state are the
+                // first post-clear authority. Capture them before this result-owned Code Offer
+                // can change the Code portfolio used by battle-projection calibration.
+                NetherRuntimeSnapshotResult resultSnapshot = _bridge.TryCaptureBattleResultCodeSnapshot();
+                if (!resultSnapshot.IsSuccess || resultSnapshot.Snapshot == null)
+                {
+                    NetherNativeActionResult wait = BattleResultSettlementWait.AwaitRegistration(
+                        "battle-result-settlement-snapshot"
+                    );
+                    Audit(
+                        NetherDetailedAuditKind.Battle,
+                        "result-view-settlement-snapshot:" + wait.Kind + ":" + resultSnapshot.Detail,
+                        new NetherDetailedAuditField("step", step.Kind.ToString()),
+                        new NetherDetailedAuditField("result", wait.Kind.ToString()),
+                        new NetherDetailedAuditField("detail", resultSnapshot.Detail),
+                        new NetherDetailedAuditField("pending", State.PendingAction?.Kind.ToString() ?? "none")
+                    );
+                    if (wait.Kind == NetherNativeActionResultKind.Started)
+                        return;
+                    FailClosedTerminal(
+                        NetherPauseReason.BindingUnavailable,
+                        "battle-result-settlement-snapshot:" + resultSnapshot.Detail + ":" + wait.Detail
+                    );
+                    return;
+                }
+
+                BattleResultSettlementWait.ObserveRegistration();
+                NetherBattleSettlementStep resultSettlement = BattleSettlementFlow.SettleFromResultView(
+                    resultSnapshot.Snapshot
+                );
+                Audit(
+                    NetherDetailedAuditKind.Battle,
+                    "result-view-settlement:" + resultSettlement.Kind + ":" + resultSettlement.Detail,
+                    new NetherDetailedAuditField("step", resultSettlement.Kind.ToString()),
+                    new NetherDetailedAuditField("detail", resultSettlement.Detail),
+                    new NetherDetailedAuditField("pending", State.PendingAction?.Kind.ToString() ?? "none")
+                );
+                switch (resultSettlement.Kind)
+                {
+                    case NetherBattleSettlementStepKind.Settled:
+                        BeginBattleResultContinuation();
+                        return;
+                    case NetherBattleSettlementStepKind.Unchanged:
+                        FailClosedTerminal(
+                            NetherPauseReason.BattleSettlementUnchanged,
+                            "battle-result-settlement-unchanged:" + resultSettlement.Detail
+                        );
+                        return;
+                    case NetherBattleSettlementStepKind.WrongTarget:
+                        FailClosedTerminal(
+                            NetherPauseReason.BattleSettlementWrongTarget,
+                            "battle-result-settlement-wrong-target:" + resultSettlement.Detail
+                        );
+                        return;
+                    case NetherBattleSettlementStepKind.ProjectionUnknown:
+                        FailClosedTerminal(
+                            resultSettlement.PauseReason == NetherPauseReason.None
+                                ? NetherPauseReason.BattleProjectionUnknown
+                                : resultSettlement.PauseReason,
+                            "battle-result-projection-unknown:" + resultSettlement.Detail
+                        );
+                        return;
+                    case NetherBattleSettlementStepKind.ProjectionDrift:
+                        FailClosedTerminal(
+                            resultSettlement.PauseReason == NetherPauseReason.None
+                                ? NetherPauseReason.BattleProjectionDrift
+                                : resultSettlement.PauseReason,
+                            "battle-result-projection-drift:" + resultSettlement.Detail
+                        );
+                        return;
+                    case NetherBattleSettlementStepKind.BindingUnavailable:
+                        FailClosedTerminal(
+                            NetherPauseReason.BindingUnavailable,
+                            "battle-result-settlement-binding:" + resultSettlement.Detail
+                        );
+                        return;
+                    default:
+                        FailClosedTerminal(
+                            NetherPauseReason.BattleLifecycleFault,
+                            "battle-result-settlement-fault:" + resultSettlement.Detail
+                        );
+                        return;
+                }
             case NetherBattleSettlementStepKind.Settled:
                 if (step.Snapshot == null)
                 {
                     FailClosedTerminal(NetherPauseReason.BattleSettlementWrongTarget, "battle-settlement-missing-authoritative-snapshot");
                     return;
                 }
-                BattleResultCodeFlow.Reset();
-                BattleResultDiagnosticGate.Reset();
-                if (!State.BeginBattleResultContinuation())
-                {
-                    FailClosedTerminal(
-                        NetherPauseReason.BattleLifecycleFault,
-                        "could-not-enter-battle-result-continuation"
-                    );
-                    return;
-                }
-                // Pump immediately: on a fully initialized result view this clicks Next in the
-                // same main-thread update; otherwise it only records a bounded AwaitingView.
-                ObserveBattleResultContinuation();
+                BattleResultSettlementWait.Clear();
+                BeginBattleResultContinuation();
                 return;
             case NetherBattleSettlementStepKind.Unchanged:
                 FailClosedTerminal(NetherPauseReason.BattleSettlementUnchanged, "battle-settlement-unchanged:" + step.Detail);
@@ -1375,6 +1475,23 @@ internal static class NetherAutoClimbController
                 FailClosedTerminal(NetherPauseReason.BattleLifecycleFault, "battle-lifecycle-fault:" + step.Detail);
                 return;
         }
+    }
+
+    private static void BeginBattleResultContinuation()
+    {
+        BattleResultCodeFlow.Reset();
+        BattleResultDiagnosticGate.Reset();
+        if (!State.BeginBattleResultContinuation())
+        {
+            FailClosedTerminal(
+                NetherPauseReason.BattleLifecycleFault,
+                "could-not-enter-battle-result-continuation"
+            );
+            return;
+        }
+        // Pump immediately: on a fully initialized result view this selects/keeps the Code
+        // before Next; otherwise the result owner has its own bounded readiness wait.
+        ObserveBattleResultContinuation();
     }
 
     /// <summary>
@@ -2841,6 +2958,7 @@ internal static class NetherAutoClimbController
         }
         _pendingBattleProjection = null;
         BattleAccessorWait.Clear();
+        BattleResultSettlementWait.Clear();
         LogAction("await-battle-settlement", snapshot, action.BattleSettlement.ProjectionIdentity);
     }
 
@@ -3060,6 +3178,7 @@ internal static class NetherAutoClimbController
     private static void FailClosed(NetherPauseReason reason, string detail)
     {
         _awaitingReconcileFloorSceneSnapshot = false;
+        BattleResultSettlementWait.Clear();
         ActivePopupReadiness.Clear();
         if (State.Phase != NetherAutoClimbPhase.Paused)
             State.Pause(reason, detail);
@@ -3090,6 +3209,7 @@ internal static class NetherAutoClimbController
         BattleIngressFlow.Reset();
         BattleSettlementFlow.TerminateForSceneLoss();
         BattleAccessorWait.Clear();
+        BattleResultSettlementWait.Clear();
         ActivePopupReadiness.Clear();
         State.TerminatePendingAndPause(reason, detail);
         ProjectionCalibration.Clear();
@@ -4066,6 +4186,7 @@ internal static class NetherAutoClimbController
             NetherAutoClimbController._lastTransition = _lastTransition;
             NetherAutoClimbController._awaitingReconcileFloorSceneSnapshot =
                 _awaitingReconcileFloorSceneSnapshot;
+            BattleResultSettlementWait.Clear();
             ActivePopupReadiness.Clear();
         }
     }

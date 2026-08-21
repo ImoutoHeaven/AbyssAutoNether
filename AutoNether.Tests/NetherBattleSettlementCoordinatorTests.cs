@@ -32,7 +32,47 @@ public class NetherBattleSettlementCoordinatorTests
     }
 
     [Fact]
-    public void Unchanged_battle_snapshot_is_named_unsettled_not_applied()
+    public void Unchanged_pre_result_snapshot_waits_for_result_view_then_settles_from_its_fresh_snapshot()
+    {
+        NetherSnapshot before = BattleSnapshot();
+        var driver = new FakeDriver(
+            lifecycle: new[] { NetherNativeActionResult.Completed("battle-close-parent-terminal") },
+            clearObserved: false,
+            closeObserved: true,
+            appliedSnapshot: before
+        );
+        var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
+
+        Assert.True(coordinator.Begin(Action(), before));
+        Assert.Equal(NetherBattleSettlementStepKind.AwaitingSettlement, coordinator.Pump().Kind);
+        Assert.Equal(NetherBattleSettlementStepKind.AwaitingSettlement, coordinator.Pump().Kind);
+
+        NetherBattleSettlementStep waiting = coordinator.Pump();
+
+        Assert.Equal(NetherBattleSettlementStepKind.AwaitingResultView, waiting.Kind);
+        Assert.Equal(NetherActionOutcome.NotApplied, waiting.Outcome);
+        Assert.True(coordinator.IsAwaitingResultView);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(
+            NetherBattleSettlementStepKind.AwaitingResultView,
+            coordinator.Pump().Kind
+        );
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+
+        NetherBattleSettlementStep settled = coordinator.SettleFromResultView(
+            Snapshot(NetherSessionStatus.Play, mapId: 2, floorId: 10)
+        );
+
+        Assert.Equal(NetherBattleSettlementStepKind.Settled, settled.Kind);
+        Assert.Equal(NetherActionOutcome.Applied, settled.Outcome);
+        Assert.False(coordinator.IsActive);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
+    public void Result_view_snapshot_that_remains_unchanged_is_named_unsettled_not_applied()
     {
         NetherSnapshot before = BattleSnapshot();
         var driver = new FakeDriver(
@@ -46,11 +86,13 @@ public class NetherBattleSettlementCoordinatorTests
         Assert.True(coordinator.Begin(Action(), before));
         coordinator.Pump();
         coordinator.Pump();
+        Assert.Equal(NetherBattleSettlementStepKind.AwaitingResultView, coordinator.Pump().Kind);
 
-        NetherBattleSettlementStep result = coordinator.Pump();
+        NetherBattleSettlementStep result = coordinator.SettleFromResultView(before);
 
         Assert.Equal(NetherBattleSettlementStepKind.Unchanged, result.Kind);
         Assert.Equal(NetherActionOutcome.NotApplied, result.Outcome);
+        Assert.False(coordinator.IsActive);
     }
 
     [Fact]
