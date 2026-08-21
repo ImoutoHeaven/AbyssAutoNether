@@ -59,6 +59,7 @@ internal interface INetherBattleResultCodeDriver
 internal enum NetherBattleResultCodeStepKind
 {
     AwaitingPopup,
+    AwaitingSnapshot,
     AwaitingNative,
     ReloadReady,
     Completed,
@@ -84,6 +85,7 @@ internal sealed class NetherBattleResultCodeCoordinator
 {
     private readonly NetherCodePolicy _policy = new();
     private readonly NetherPopupReadinessGate _popupWait;
+    private readonly NetherNativeWaitGate _snapshotWait;
     private readonly NetherActionKind _expectedOwnerAction;
     private bool _nativeInFlight;
     private bool _completed;
@@ -102,6 +104,7 @@ internal sealed class NetherBattleResultCodeCoordinator
             throw new ArgumentOutOfRangeException(nameof(expectedOwnerAction));
         }
         _popupWait = new NetherPopupReadinessGate(maximumPopupPolls);
+        _snapshotWait = new NetherNativeWaitGate(maximumPopupPolls);
         _expectedOwnerAction = expectedOwnerAction;
     }
 
@@ -280,11 +283,40 @@ internal sealed class NetherBattleResultCodeCoordinator
         NetherRuntimeSnapshotResult snapshotResult = driver.TryCaptureBattleResultCodeSnapshot();
         if (!snapshotResult.IsSuccess)
         {
+            // FloorSelection is destroyed before the result-owned code popup. A cache miss can
+            // therefore be the bounded scene-registration gap, not proof that the popup belongs
+            // to a different run. Wait only for that exact recoverable condition; every other
+            // snapshot failure remains fail-closed.
+            if (string.Equals(
+                    snapshotResult.Detail,
+                    "missing-cached-floor-selection-snapshot",
+                    StringComparison.Ordinal
+                ))
+            {
+                NetherNativeActionResult wait = _snapshotWait.AwaitRegistration(
+                    "battle-result-code-snapshot"
+                );
+                if (wait.Kind == NetherNativeActionResultKind.Started)
+                {
+                    return new(
+                        NetherBattleResultCodeStepKind.AwaitingSnapshot,
+                        snapshotResult.Detail + ":" + wait.Detail,
+                        _lockedLane
+                    );
+                }
+
+                return Terminate(
+                    NetherBattleResultCodeStepKind.BindingUnavailable,
+                    "battle-result-code-snapshot:" + snapshotResult.Detail + ":" + wait.Detail
+                );
+            }
+
             return Terminate(
                 NetherBattleResultCodeStepKind.BindingUnavailable,
                 "battle-result-code-snapshot:" + snapshotResult.Detail
             );
         }
+        _snapshotWait.ObserveRegistration();
         NetherSnapshot snapshot = snapshotResult.Snapshot!;
         NetherRuntimeCodePolicyEvidenceResult policyEvidence =
             driver.TryCaptureCodePolicyEvidence(snapshot, candidates, settings);
@@ -360,6 +392,7 @@ internal sealed class NetherBattleResultCodeCoordinator
         _cancelAfterInFlight = false;
         _lockedLane = null;
         _popupWait.Clear();
+        _snapshotWait.Clear();
     }
 
     private NetherBattleResultCodeStep Terminate(
@@ -371,6 +404,7 @@ internal sealed class NetherBattleResultCodeCoordinator
         _completed = false;
         _cancelAfterInFlight = false;
         _popupWait.Clear();
+        _snapshotWait.Clear();
         return new(kind, detail ?? string.Empty, _lockedLane);
     }
 

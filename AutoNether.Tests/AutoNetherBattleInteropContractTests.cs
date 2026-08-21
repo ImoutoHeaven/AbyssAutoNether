@@ -50,6 +50,26 @@ public sealed class AutoNetherBattleInteropContractTests
     }
 
     [Fact]
+    public void Authoritative_floor_scene_registration_primes_the_transition_cache_for_result_owned_code()
+    {
+        // Fresh current-game Cpp2IL: FloorSelection.SubViewController owns
+        // HandleStartEventByStatusAsync, while NetherQuestBattleResultViewController and
+        // AbyssCodeSelectPopupController are separate result-owned native controllers. The graph
+        // must therefore be captured at the authoritative FloorSelection scene boundary.
+        string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+        string coordinator = Read("AutoNether", "Services", "NetherBattleResultCodeCoordinator.cs");
+
+        Assert.Contains("if (authoritativeSceneRegistration)", runtime, StringComparison.Ordinal);
+        Assert.Contains(
+            "PrimeTransitionSnapshotCacheFromAuthoritativeScene(generation, source);",
+            runtime,
+            StringComparison.Ordinal
+        );
+        Assert.Contains("floor-selection-authoritative-prime", runtime, StringComparison.Ordinal);
+        Assert.Contains("missing-cached-floor-selection-snapshot", coordinator, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Battle_result_code_policy_uses_the_result_owned_popup_party_not_a_torn_down_floor_scene()
     {
         // Fresh current-game Cpp2IL: AbyssCodeSelectPopupController.InitializeView receives and

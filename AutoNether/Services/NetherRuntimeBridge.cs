@@ -4689,6 +4689,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("source", source),
             new("sceneAuthoritative", authoritativeSceneRegistration.ToString())
         );
+        if (authoritativeSceneRegistration)
+            PrimeTransitionSnapshotCacheFromAuthoritativeScene(generation, source);
         if (settledContinueBySceneTransition)
         {
             NetherAutoClimbController.LogDiagnostic(
@@ -4700,6 +4702,26 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 new("source", source)
             );
         }
+    }
+
+    /// <summary>
+    /// Caches the authoritative FloorSelection graph before the native Result scene owns the
+    /// code popup. This intentionally runs independently of AutoClimb enablement: a user may
+    /// enable at a result popup, after the FloorSelection controller has already been torn down.
+    /// Failed early lifecycle captures do not overwrite an earlier successful cache; Refresh and
+    /// OnEntered provide later authoritative retries.
+    /// </summary>
+    private void PrimeTransitionSnapshotCacheFromAuthoritativeScene(long generation, string source)
+    {
+        NetherRuntimeSnapshotResult primed = TryCaptureSnapshot();
+        NetherAutoClimbController.LogDiagnostic(
+            "transition-snapshot-prime",
+            new("action", "floor-selection-authoritative-prime"),
+            new("generation", generation.ToString()),
+            new("source", source),
+            new("outcome", primed.IsSuccess ? "cached" : "not-ready"),
+            new("detail", primed.Detail)
+        );
     }
 
     /// <summary>

@@ -1448,6 +1448,7 @@ internal static class NetherAutoClimbController
         {
             case NetherRecoveredCodeOfferStepKind.NoOffer:
             case NetherRecoveredCodeOfferStepKind.AwaitingPopup:
+            case NetherRecoveredCodeOfferStepKind.AwaitingSnapshot:
             case NetherRecoveredCodeOfferStepKind.AwaitingNative:
             case NetherRecoveredCodeOfferStepKind.ReloadReady:
             case NetherRecoveredCodeOfferStepKind.AwaitingParent:
@@ -1563,6 +1564,7 @@ internal static class NetherAutoClimbController
         switch (codeStep.Kind)
         {
             case NetherBattleResultCodeStepKind.AwaitingPopup:
+            case NetherBattleResultCodeStepKind.AwaitingSnapshot:
             case NetherBattleResultCodeStepKind.AwaitingNative:
             case NetherBattleResultCodeStepKind.ReloadReady:
                 return;

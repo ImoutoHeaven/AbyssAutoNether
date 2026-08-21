@@ -65,6 +65,32 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     }
 
     [Fact]
+    public void Missing_cached_floor_snapshot_waits_for_a_late_authoritative_prime_then_selects_code()
+    {
+        var driver = new Driver
+        {
+            Snapshot = Snapshot(),
+            Candidates = Candidates(30024),
+            Popup = ResultPopup(),
+        };
+        driver.SnapshotResults.Enqueue(
+            NetherRuntimeSnapshotResult.Failure("missing-cached-floor-selection-snapshot")
+        );
+        var flow = new NetherBattleResultCodeCoordinator(maximumPopupPolls: 2);
+
+        NetherBattleResultCodeStep waiting = flow.Pump(driver, Settings(), null, allowInvoke: true);
+
+        Assert.Equal(NetherBattleResultCodeStepKind.AwaitingSnapshot, waiting.Kind);
+        Assert.Contains("missing-cached-floor-selection-snapshot", waiting.Detail);
+        Assert.Empty(driver.InvokedActions);
+
+        NetherBattleResultCodeStep invoked = flow.Pump(driver, Settings(), null, allowInvoke: true);
+
+        Assert.Equal(NetherBattleResultCodeStepKind.AwaitingNative, invoked.Kind);
+        Assert.Equal(NetherActionKind.SelectCode, Assert.Single(driver.InvokedActions).Kind);
+    }
+
+    [Fact]
     public void Reload_ready_redecides_same_result_popup_then_selects_once()
     {
         var driver = new Driver
@@ -487,9 +513,12 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         public NetherCodePolicyEvidence? PolicyEvidence { get; set; }
         public List<NetherPlannedAction> InvokedActions { get; } = new();
         public Queue<NetherBattleResultCodeNativeStep> NativeSteps { get; } = new();
+        public Queue<NetherRuntimeSnapshotResult> SnapshotResults { get; } = new();
 
         public NetherRuntimeSnapshotResult TryCaptureBattleResultCodeSnapshot() =>
-            NetherRuntimeSnapshotResult.Success(Snapshot);
+            SnapshotResults.Count > 0
+                ? SnapshotResults.Dequeue()
+                : NetherRuntimeSnapshotResult.Success(Snapshot);
 
         public NetherRuntimeCodeCandidatesResult TryGetCodeCandidates() => Candidates;
 

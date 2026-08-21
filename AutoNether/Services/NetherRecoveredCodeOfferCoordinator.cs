@@ -101,6 +101,7 @@ internal enum NetherRecoveredCodeOfferStepKind
 {
     NoOffer,
     AwaitingPopup,
+    AwaitingSnapshot,
     AwaitingNative,
     ReloadReady,
     AwaitingParent,
@@ -315,6 +316,8 @@ internal sealed class NetherRecoveredCodeOfferCoordinator
         {
             case NetherBattleResultCodeStepKind.AwaitingPopup:
                 return Step(NetherRecoveredCodeOfferStepKind.AwaitingPopup, code);
+            case NetherBattleResultCodeStepKind.AwaitingSnapshot:
+                return Step(NetherRecoveredCodeOfferStepKind.AwaitingSnapshot, code);
             case NetherBattleResultCodeStepKind.AwaitingNative:
                 return Step(NetherRecoveredCodeOfferStepKind.AwaitingNative, code);
             case NetherBattleResultCodeStepKind.ReloadReady:
