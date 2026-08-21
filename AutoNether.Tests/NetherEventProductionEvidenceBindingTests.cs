@@ -7,6 +7,8 @@ using Xunit;
 
 namespace AutoNether.Tests;
 
+// Drives the NetherRuntimeBridge singleton; shares the serialized runtime collection.
+[Collection("nether-managed-popup-runtime")]
 public sealed class NetherEventProductionEvidenceBindingTests
 {
     [Fact]

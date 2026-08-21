@@ -65,3 +65,18 @@ namespace Project.Nether.NetherEventPopup
         }
     }
 }
+
+namespace Project.Nether.NetherRecoverPopup
+{
+    /// <summary>
+    /// Stands in for the native <c>NetherRecoverPopupController</c>. The real controller keeps only
+    /// its MNetherFloorEvents row and event-part array, so like this stub it exposes no node
+    /// identity to the popup registration seam.
+    /// </summary>
+    public sealed class NetherRecoverPopupController
+    {
+        public void SetupPopupEvent(object popup, object close)
+        {
+        }
+    }
+}

@@ -2239,6 +2239,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             NetherAutoClimbSettings? strategySettings;
             NetherRankFiveKeyProcurementDecision? rankFiveKeyProcurement;
             bool requireCompleteRecoveryBranchSafety;
+            IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryBranchSafetyByPartId;
+            NetherRouteBranchIdentity? routeBranchIdentity;
             lock (_gate)
             {
                 strategyPackage = _latestStrategyEvidencePackage;
@@ -2246,6 +2248,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 strategySettings = _latestStrategySettings;
                 rankFiveKeyProcurement = _pendingRankFiveKeyProcurement;
                 requireCompleteRecoveryBranchSafety = _requireCompleteRecoveryBranchSafety;
+                recoveryBranchSafetyByPartId =
+                    new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(
+                        _pendingRecoveryBranchSafetyByPartId
+                    );
+                routeBranchIdentity =
+                    authoritativeSnapshotFingerprint is NetherSnapshotFingerprint routeFingerprint
+                        ? _routeOwnedEventProcurementProducer.IdentityForSnapshot(routeFingerprint)
+                        : null;
             }
             if (authoritativeSnapshotFingerprint is not NetherSnapshotFingerprint currentPackageFingerprint
                 || strategyPackage?.Identity.SnapshotFingerprint != currentPackageFingerprint)
@@ -2267,6 +2277,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 {
                     RankFiveKeyProcurement = rankFiveKeyProcurement,
                     RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,
+                    RecoveryBranchSafetyByPartId = recoveryBranchSafetyByPartId,
+                    // The native controllers keep no node identity, so the route's own committed
+                    // entry node is what correlates this popup with its pre-entry capture.
+                    RouteOwnedNodeId = context.NodeId > 0
+                        ? context.NodeId
+                        : routeBranchIdentity?.SelectedNodeId ?? 0,
                     ShopProcurementCommitment = shopProcurementCommitment,
                 },
                 strategyPackage,

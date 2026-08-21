@@ -51,6 +51,10 @@ internal static class NetherEventProductionEvidenceBinding
             HasMatchingInteractiveSnapshot(package, interactive)
                 ? interactive
                 : null;
+        popup = popup with
+        {
+            RouteOwnedNodeId = ResolveRouteOwnedNodeId(popup, package, exactInteractive),
+        };
 
         NetherEventOption[] boundOptions = popup.Options
             .Select(option => BindOption(
@@ -64,7 +68,15 @@ internal static class NetherEventProductionEvidenceBinding
                 researchError
             ))
             .ToArray();
-        NetherRuntimePopupContext boundPopup = popup with { Options = boundOptions };
+        NetherRuntimePopupContext boundPopup = popup with
+        {
+            Options = boundOptions,
+            // Scope the fail-closed complete Recovery policy to a native row that actually owns one
+            // of the bound part proofs. A row the route deferred past an unsettled Battle carries no
+            // proof yet and must keep option-local scoring instead of terminating the climb.
+            RequireCompleteRecoveryBranchSafety = popup.RequireCompleteRecoveryBranchSafety
+                && boundOptions.Any(option => option.RecoveryBranchSafety != null),
+        };
         NetherEventStrategyEvidence evidence = AggregateStrategyEvidence(
             boundOptions,
             settings,
@@ -138,6 +150,7 @@ internal static class NetherEventProductionEvidenceBinding
         bool hasProjection = TryFindProjection(
             interactive,
             option,
+            popup.RouteOwnedNodeId,
             out NetherInteractiveOptionProjection? projection,
             out long projectionNodeId
         );
@@ -253,11 +266,25 @@ internal static class NetherEventProductionEvidenceBinding
             AllowsPartialActiveDeaths = projection?.AllowsPartialActiveDeaths == true,
             UnknownReason = reason,
         };
+        // The native Recovery popup exposes only its local action. Its exact continuation proof was
+        // produced by the route decision and keyed by EventPartId; carry it across the popup seam so
+        // the complete three-option policy has the evidence it is required to evaluate.
+        NetherRecoveryBranchSafetyEvidence? recoveryBranchSafety = option.RecoveryBranchSafety;
+        if (recoveryBranchSafety == null
+            && popup.Kind == NetherRuntimePopupKind.Recovery
+            && option.EventPartId > 0)
+        {
+            popup.RecoveryBranchSafetyByPartId.TryGetValue(
+                option.EventPartId,
+                out recoveryBranchSafety
+            );
+        }
         return option with
         {
             RequiresExactBinding = exact,
             FloorId = floorId,
             NodeId = nodeId,
+            RecoveryBranchSafety = recoveryBranchSafety,
             BattleEvidence = battle,
             RewardEvidence = reward,
             HasRouteSafetyEvidence = projection?.HasRouteSafetyEvidence == true,
@@ -377,6 +404,14 @@ internal static class NetherEventProductionEvidenceBinding
         NetherEventOption option,
         out NetherInteractiveOptionProjection? projection,
         out long nodeId
+    ) => TryFindProjection(interactive, option, routeOwnedNodeId: 0, out projection, out nodeId);
+
+    private static bool TryFindProjection(
+        NetherRuntimeInteractivePreEntryInputsResult? interactive,
+        NetherEventOption option,
+        long routeOwnedNodeId,
+        out NetherInteractiveOptionProjection? projection,
+        out long nodeId
     )
     {
         projection = null;
@@ -387,6 +422,11 @@ internal static class NetherEventProductionEvidenceBinding
         var matches = new List<(long NodeId, NetherInteractiveOptionProjection Projection)>();
         foreach (KeyValuePair<long, NetherRuntimeInteractivePreEntryCaptureResult> entry in interactive.ByFloorNodeId)
         {
+            // One MNetherFloorEvents row is shared by several map nodes, so the option key alone is
+            // ambiguous whenever the frontier exposes sibling floors of the same kind. The node the
+            // route committed to enter is the only floor this popup can belong to.
+            if (routeOwnedNodeId > 0 && entry.Key != routeOwnedNodeId)
+                continue;
             NetherInteractiveFloorPreEntrySafetyResult safety = entry.Value.Safety;
             if (!safety.IsSafe)
                 continue;
@@ -449,6 +489,74 @@ internal static class NetherEventProductionEvidenceBinding
         && interactive.IsSuccess
         && interactive.SnapshotFingerprint is NetherSnapshotFingerprint fingerprint
         && fingerprint == package.Identity.SnapshotFingerprint;
+
+    /// <summary>
+    /// Recovers node ownership only for an already-open, ownerless native floor-event popup.
+    /// The native Recovery controller persists the resolved event row and callback but not the
+    /// map-node coordinate.  Before F12 owns a route, the matching authoritative snapshot's
+    /// current node is therefore the sole safe fallback—but only after the same snapshot's
+    /// captured native floor and an exact visible popup option both confirm that identity.
+    /// </summary>
+    private static long ResolveRouteOwnedNodeId(
+        NetherRuntimePopupContext popup,
+        NetherStrategyEvidencePackage? package,
+        NetherRuntimeInteractivePreEntryInputsResult? interactive
+    )
+    {
+        if (popup.RouteOwnedNodeId > 0)
+            return popup.RouteOwnedNodeId;
+        if (popup.OwnerAction != NetherActionKind.None
+            || !popup.HasRecoveredFloorEventTaskEvidence
+            || !HasMatchingInteractiveSnapshot(package, interactive)
+            || package?.Server is not NetherStrategyServerEvidence server
+            || interactive == null)
+        {
+            return 0;
+        }
+
+        long currentNodeId = server.CurrentNodeId;
+        long currentFloorId = server.CurrentFloorId;
+        NetherFloorNodeType expectedKind = popup.Kind switch
+        {
+            NetherRuntimePopupKind.Event => NetherFloorNodeType.Event,
+            NetherRuntimePopupKind.Recovery => NetherFloorNodeType.Recovery,
+            NetherRuntimePopupKind.Treasure => NetherFloorNodeType.Treasure,
+            _ => default,
+        };
+        if (currentNodeId <= 0
+            || currentFloorId <= 0
+            || !interactive.ByFloorNodeId.TryGetValue(
+                currentNodeId,
+                out NetherRuntimeInteractivePreEntryCaptureResult? currentCapture
+            )
+            || !currentCapture.IsCaptured
+            || currentCapture.Input is not NetherInteractiveFloorPreEntrySafetyInput currentInput
+            || currentInput.FloorNodeId != currentNodeId
+            || currentInput.FloorMasterId != currentFloorId
+            || currentInput.FloorKind != expectedKind)
+        {
+            return 0;
+        }
+
+        // A shared MNetherFloorEvents row may be exposed by several map nodes.  At least one
+        // exact native option must resolve exclusively against the captured current node before
+        // it can substitute for a route-owned node.  Otherwise a stale or unrelated popup stays
+        // fail-closed instead of borrowing the snapshot's identity.
+        bool hasExactCurrentOption = popup.Options.Any(option =>
+            TryFindProjection(
+                interactive,
+                option,
+                currentNodeId,
+                out NetherInteractiveOptionProjection? projection,
+                out long projectionNodeId
+            )
+            && projection != null
+            && projectionNodeId == currentNodeId
+            && projection.NodeId == currentNodeId
+            && projection.FloorId == currentFloorId
+        );
+        return hasExactCurrentOption ? currentNodeId : 0;
+    }
 
     private static bool TryFindVisibleOption(
         NetherStrategyVisibleMapEvidence? visible,
@@ -675,6 +783,7 @@ internal static class NetherEventProductionEvidenceBinding
                 || !TryFindProjection(
                     interactive,
                     option,
+                    popup.RouteOwnedNodeId,
                     out NetherInteractiveOptionProjection? projection,
                     out _
                 )

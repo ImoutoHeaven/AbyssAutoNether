@@ -65,6 +65,21 @@ internal sealed record NetherRuntimePopupContext
     /// <summary>Exact rendered floor/node identity correlated with the Event popup.</summary>
     public long FloorId { get; init; }
     public long NodeId { get; init; }
+    /// <summary>
+    /// Node the route committed to enter immediately before this popup opened. The native
+    /// Event/Recovery/Treasure controllers keep only their MNetherFloorEvents row, and one such row
+    /// is legitimately shared by several map nodes, so the (event, part, option) key alone cannot
+    /// identify which captured floor this popup belongs to. This is that missing identity; zero
+    /// leaves the legacy key-only join in place.
+    /// </summary>
+    public long RouteOwnedNodeId { get; init; }
+    /// <summary>
+    /// Exact pre-Battle Recovery continuation proofs keyed by EventPartId, carried from the same
+    /// route decision that produced <see cref="RequireCompleteRecoveryBranchSafety"/>. Without
+    /// these the complete Recovery policy has nothing to evaluate and can only fail closed.
+    /// </summary>
+    public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> RecoveryBranchSafetyByPartId { get; init; } =
+        new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
     public int RawFloorType { get; init; }
     public IReadOnlyList<NetherEventOption> Options { get; init; } = Array.Empty<NetherEventOption>();
     public IReadOnlyList<NetherShopContent> ShopContents { get; init; } = Array.Empty<NetherShopContent>();
@@ -72,7 +87,11 @@ internal sealed record NetherRuntimePopupContext
     public NetherShopProcurementCommitment? ShopProcurementCommitment { get; init; }
     /// <summary>Exact selected-branch rank-five procurement decision carried into popup policy.</summary>
     public NetherRankFiveKeyProcurementDecision? RankFiveKeyProcurement { get; init; }
-    /// <summary>Production captures must not score a Recovery popup without complete branch proof.</summary>
+    /// <summary>
+    /// Production captures must not score a Recovery popup without complete branch proof. This is
+    /// scoped to a native row that owns one of <see cref="RecoveryBranchSafetyByPartId"/>; a row
+    /// the route deferred past an unsettled Battle keeps option-local scoring.
+    /// </summary>
     public bool RequireCompleteRecoveryBranchSafety { get; init; }
     /// <summary>
     /// Optional route commitment captured before the native popup was opened. A live popup must
