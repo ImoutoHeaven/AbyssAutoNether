@@ -218,6 +218,47 @@ public class NetherRuntimeFlowCoordinatorTests
     }
 
     [Fact]
+    public void Failed_owned_popup_dispatch_releases_parent_before_the_next_floor_owner_is_registered()
+    {
+        var driver = new FakeDriver();
+        var coordinator = new NetherRuntimeFlowCoordinator(driver);
+        var failedFloor = new NetherPlannedAction(NetherActionKind.SelectFloor)
+        {
+            FloorId = 19,
+            FloorLevel = 5,
+        };
+        var successorFloor = new NetherPlannedAction(NetherActionKind.SelectFloor)
+        {
+            FloorId = 23,
+            FloorLevel = 6,
+        };
+
+        Assert.True(coordinator.BeginFloorParent(failedFloor));
+        driver.Popup = new NetherRuntimePopupContext
+        {
+            Kind = NetherRuntimePopupKind.Shop,
+            OwnerAction = NetherActionKind.SelectFloor,
+            OwnerGeneration = coordinator.Generation,
+            Sequence = 4,
+        };
+
+        NetherRuntimeParentPollResult faulted = coordinator.Poll(
+            _ => NetherNativeActionResult.BindingUnavailable(
+                "owned-popup-policy:UnknownMasterData:invalid-shop-content"
+            )
+        );
+
+        Assert.Equal(NetherRuntimeParentPollKind.Faulted, faulted.Kind);
+        Assert.Equal(
+            "owned-popup:owned-popup-policy:UnknownMasterData:invalid-shop-content",
+            faulted.Detail
+        );
+        Assert.Equal(0, driver.ParentPollCount);
+        Assert.False(coordinator.HasPendingParent);
+        Assert.True(coordinator.BeginFloorParent(successorFloor));
+    }
+
+    [Fact]
     public void Registered_popup_mapping_failure_is_terminal_and_preserves_the_exact_reason()
     {
         var driver = new FakeDriver

@@ -138,7 +138,11 @@ internal sealed class NetherRuntimeFlowCoordinator
                     dispatchedOwnedPopup = true;
                 }
                 else
-                    return NetherRuntimeParentPollResult.Faulted("owned-popup:" + child.Detail);
+                {
+                    // The controller decides whether this child failure pauses immediately or
+                    // reconciles read-only, but either path must start without this stale parent.
+                    return Fail("owned-popup:" + child.Detail);
+                }
             }
         }
 
