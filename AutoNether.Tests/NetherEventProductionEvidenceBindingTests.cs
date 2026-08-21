@@ -893,6 +893,84 @@ public sealed class NetherEventProductionEvidenceBindingTests
     }
 
     [Fact]
+    public void Research_dispatch_cannot_reselect_an_uncommitted_erosion_increase_offer()
+    {
+        // Captured current-game event 31 at floor 12: part 20002 is +40 erosion plus
+        // content_type=160 (Code Offer); part 20003 spends 30 Gold and heals 100 HP.
+        NetherEventOption riskOffer = new(2,
+        [
+            new NetherEffect(NetherEffectKind.Erosion, 40),
+            new NetherEffect(NetherEffectKind.AbyssCodeOffer, 0),
+        ])
+        {
+            EventId = 31,
+            EventPartId = 20002,
+            RequiresExactBinding = true,
+        };
+        NetherEventOption safeChoice = new(3,
+        [
+            new NetherEffect(NetherEffectKind.NetherGoldUsed, 30),
+            new NetherEffect(NetherEffectKind.Heal, 100),
+        ])
+        {
+            EventId = 31,
+            EventPartId = 20003,
+            RequiresExactBinding = true,
+        };
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            CurrentFloorId = 58,
+            CurrentNodeId = 55834574850,
+            ErosionPoint = 45,
+            NetherGold = 160,
+        };
+        NetherAutoClimbSettings settings = new()
+        {
+            StrategyMode = NetherStrategyMode.Research,
+            ResearchPrimaryFamily = NetherCodeFamily.Risk,
+            ResearchSecondaryFamily = NetherCodeFamily.Impact,
+        };
+        NetherStrategyResearchFamilyState[] families =
+        [
+            Research(NetherCodeFamily.Risk, projectedKnown: true),
+            Research(NetherCodeFamily.Impact, projectedKnown: true),
+        ];
+        NetherRuntimePopupContext popup = new()
+        {
+            Kind = NetherRuntimePopupKind.Event,
+            RawFloorType = (int)NetherFloorNodeType.Event,
+            TargetCharacterId = 101,
+            Options = [riskOffer, safeChoice],
+        };
+
+        NetherRuntimeInteractivePreEntryInputsResult interactive =
+            InteractiveFloorTwelveAtErosionFortyFive(snapshot, settings);
+        NetherInteractiveFloorPreEntrySafetyResult preEntry = Assert.Single(
+            interactive.ByFloorNodeId
+        ).Value.Safety;
+        Assert.Equal(3, preEntry.SafeOptionNumberByEventId[31]);
+        Assert.False(preEntry.OptionProjectionByKey[
+            new NetherInteractiveEventOptionKey(31, 20002, 2)
+        ].IsSelected);
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            popup,
+            PackageWithOptions(snapshot, families, [riskOffer, safeChoice]),
+            interactive,
+            settings
+        );
+        NetherPopupDispatchDecision decision = NetherPopupDispatchPolicy.Decide(
+            snapshot,
+            bound,
+            settings
+        );
+
+        Assert.False(bound.Options[0].StrategyEvidence!.IsUsableFor(NetherStrategyMode.Research));
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, decision.Kind);
+        Assert.Equal(3, decision.Action.OptionNumber);
+    }
+
+    [Fact]
     public void Production_binding_rejects_an_interactive_snapshot_mismatch_before_commitment()
     {
         NetherEffect item = new(NetherEffectKind.Item, 1)
@@ -1607,6 +1685,48 @@ public sealed class NetherEventProductionEvidenceBindingTests
                             [new NetherInteractiveEventOptionKey(selected.EventId, selected.EventPartId, selected.OptionNumber)] = projection,
                         }
                     ),
+                },
+            },
+            snapshot.Fingerprint
+        );
+    }
+
+    private static NetherRuntimeInteractivePreEntryInputsResult InteractiveFloorTwelveAtErosionFortyFive(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings
+    )
+    {
+        var input = new NetherInteractiveFloorPreEntrySafetyInput(
+            NetherFloorNodeType.Event,
+            snapshot.CurrentFloorId,
+            [new NetherFloorMasterBoundsRow(snapshot.CurrentFloorId, 0, 100)],
+            [new NetherFloorEventMasterRow(31, snapshot.CurrentFloorId, 1, 20001, 20002, 20003, 0)],
+            [
+                new NetherFloorEventPartMasterRow(20001, 2, 100, 0, 0, 0, 0, 31, 210002, 1),
+                new NetherFloorEventPartMasterRow(20002, 3, 40, 0, 0, 0, 0, 160, 0, 1),
+                new NetherFloorEventPartMasterRow(20003, 5, 30, 1, 100, 0, 0, 0, 0, 0),
+            ],
+            snapshot.ErosionPoint,
+            [1000],
+            snapshot.NetherGold,
+            snapshot.TreasureKeyCount,
+            settings
+        )
+        {
+            FloorExtendId = 31,
+            FloorNodeId = snapshot.CurrentNodeId,
+            CodeCapacity = 5,
+        };
+        NetherInteractiveFloorPreEntrySafetyResult safety = new NetherInteractiveFloorPreEntrySafety()
+            .Evaluate(input);
+        return NetherRuntimeInteractivePreEntryInputsResult.Success(
+            new Dictionary<long, NetherRuntimeInteractivePreEntryCaptureResult>
+            {
+                [snapshot.CurrentNodeId] = new NetherRuntimeInteractivePreEntryCaptureResult
+                {
+                    IsCaptured = true,
+                    Input = input,
+                    Safety = safety,
                 },
             },
             snapshot.Fingerprint

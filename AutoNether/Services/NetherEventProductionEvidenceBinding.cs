@@ -391,8 +391,31 @@ internal static class NetherEventProductionEvidenceBinding
             if (!safety.IsSafe)
                 continue;
             NetherInteractiveOptionProjection? candidate = null;
+            int committedOptionNumber = 0;
+            NetherInteractiveOptionProjection? committedProjection = null;
+            bool hasCommittedSelection = safety.SafeOptionNumberByEventId.TryGetValue(
+                    key.EventId,
+                    out committedOptionNumber
+                )
+                && safety.SafeOptionProjectionByEventId.TryGetValue(
+                    key.EventId,
+                    out committedProjection
+                )
+                && committedProjection != null
+                && committedProjection.OptionNumber == committedOptionNumber;
+
+            bool isExactCommittedOption = hasCommittedSelection
+                && key.OptionNumber == committedOptionNumber
+                && key.EventPartId == committedProjection!.EventPartId;
+
+            // A route with an exact selected option is justified by that option alone. Other
+            // individually legal siblings are not interchangeable: their resource/erosion
+            // outcomes did not justify entering this floor and must not be re-selected by popup
+            // semantics. Legacy partial evidence without a selected projection retains its
+            // existing option-local behavior.
             if (safety.OptionProjectionByKey.TryGetValue(key, out NetherInteractiveOptionProjection? exact)
-                && exact != null)
+                && exact != null
+                && (!hasCommittedSelection || isExactCommittedOption))
             {
                 candidate = exact;
             }
