@@ -451,7 +451,7 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
-    public void Same_master_floor_event_rejects_partial_server_selected_hp_update_and_combined_effects()
+    public void Same_master_floor_event_accepts_authoritative_server_selected_hp_update_and_combined_effects()
     {
         NetherSnapshot before = Snapshot(floorId: 364, floorLevel: 77, gold: 20) with
         {
@@ -519,11 +519,11 @@ public class NetherActionReconcilePolicyTests
             ],
         };
 
-        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, after));
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
     }
 
     [Fact]
-    public void Floor_94_event_rejects_partial_server_selected_damage_even_with_item_reward()
+    public void Floor_94_event_accepts_authoritative_server_selected_damage_with_item_reward()
     {
         NetherSnapshot before = Snapshot(floorId: 430, floorLevel: 93, gold: 25) with
         {
@@ -593,7 +593,7 @@ public class NetherActionReconcilePolicyTests
             ],
         };
 
-        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, after));
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
     }
 
     [Fact]
@@ -811,7 +811,7 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
-    public void Composed_event_damage_requires_exact_partywide_scope_and_rejects_mixed_delta()
+    public void Composed_event_damage_accepts_authoritative_subset_scope_and_rejects_out_of_bound_delta()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -833,7 +833,7 @@ public class NetherActionReconcilePolicyTests
             },
             CharacterHpHash = "101:900:1;102:1000:1;103:0:0",
         };
-        NetherSnapshot wrongTarget = exact with
+        NetherSnapshot otherServerSelectedSubset = exact with
         {
             Characters = new[]
             {
@@ -852,6 +852,16 @@ public class NetherActionReconcilePolicyTests
                 new NetherCharacterState(103, 0, IsActive: false),
             },
             CharacterHpHash = "101:900:1;102:900:1;103:0:0",
+        };
+        NetherSnapshot noDamageApplied = exact with
+        {
+            Characters =
+            [
+                new NetherCharacterState(101, 1000),
+                new NetherCharacterState(102, 1000),
+                new NetherCharacterState(103, 0, IsActive: false),
+            ],
+            CharacterHpHash = "101:1000:1;102:1000:1;103:0:0",
         };
         NetherSnapshot mixedDelta = exact with
         {
@@ -901,11 +911,110 @@ public class NetherActionReconcilePolicyTests
             },
         };
 
-        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, exact));
-        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, wrongTarget));
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, exact));
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, otherServerSelectedSubset));
         Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, partyWide));
+        Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(
+            action,
+            before,
+            noDamageApplied
+        ));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, mixedDelta));
         Assert.Equal(NetherActionOutcome.Ambiguous, NetherActionReconcilePolicy.Evaluate(action, before, inactiveChanged));
+    }
+
+    [Fact]
+    public void Event_damage_with_native_server_selected_survivor_subset_reconciles_the_completed_parent()
+    {
+        NetherSnapshot before = Snapshot(
+            floorId: 75,
+            floorLevel: 18,
+            codeReload: 0,
+            mapId: 1,
+            ticketCount: 33,
+            gold: 70,
+            codeHash: "code-v2:"
+        ) with
+        {
+            TreasureKeyCount = 0,
+            Characters =
+            [
+                new NetherCharacterState(1300003, 1000),
+                new NetherCharacterState(1300007, 1000),
+                new NetherCharacterState(1300008, 1000),
+                new NetherCharacterState(1300011, 1000),
+                new NetherCharacterState(1300018, 1000),
+                new NetherCharacterState(1300019, 1000),
+                new NetherCharacterState(1300024, 1000),
+                new NetherCharacterState(1300026, 1000),
+                new NetherCharacterState(1300041, 1000),
+                new NetherCharacterState(1300052, 1000),
+            ],
+            CharacterHpHash = "1300003:1000:1;1300007:1000:1;1300008:1000:1;1300011:1000:1;1300018:1000:1;1300019:1000:1;1300024:1000:1;1300026:1000:1;1300041:1000:1;1300052:1000:1",
+            Codes = Array.Empty<NetherCodeState>(),
+        };
+        NetherSnapshot after = Snapshot(
+            floorId: 94,
+            floorLevel: 19,
+            codeReload: 0,
+            mapId: 1,
+            ticketCount: 33,
+            gold: 70,
+            codeHash: "code-v2:"
+        ) with
+        {
+            TreasureKeyCount = 0,
+            Characters =
+            [
+                new NetherCharacterState(1300003, 600),
+                new NetherCharacterState(1300007, 600),
+                new NetherCharacterState(1300008, 600),
+                new NetherCharacterState(1300011, 1000),
+                new NetherCharacterState(1300018, 600),
+                new NetherCharacterState(1300019, 600),
+                new NetherCharacterState(1300024, 600),
+                new NetherCharacterState(1300026, 600),
+                new NetherCharacterState(1300041, 1000),
+                new NetherCharacterState(1300052, 1000),
+            ],
+            CharacterHpHash = "1300003:600:1;1300007:600:1;1300008:600:1;1300011:1000:1;1300018:600:1;1300019:600:1;1300024:600:1;1300026:600:1;1300041:1000:1;1300052:1000:1",
+            Codes = Array.Empty<NetherCodeState>(),
+        };
+        NetherEffect[] effects =
+        [
+            new NetherEffect(NetherEffectKind.Damage, 400),
+            new NetherEffect(NetherEffectKind.AbyssCodeOffer, 1),
+        ];
+        NetherPlannedAction action = ComposedFloor(
+            NetherRuntimePopupKind.CodeOffer,
+            NetherActionKind.KeepCode
+        ) with
+        {
+            FloorId = 94,
+            FloorLevel = 19,
+            FloorIndex = 0,
+            OwnedPopupStages =
+            [
+                new NetherFloorPopupStage(
+                    NetherRuntimePopupKind.Event,
+                    NetherActionKind.SelectEventOption,
+                    OwnerGeneration: 2,
+                    Sequence: 1,
+                    ExpectedAfterStatus: NetherSessionStatus.Play,
+                    OptionNumber: 1,
+                    ExpectedEffects: effects,
+                    ContentId: 0,
+                    ContentAmount: 0,
+                    GoldCost: 0,
+                    CodeId: 0,
+                    ReplaceCodeId: 0,
+                    TargetCharacterId: 1300026
+                ),
+                CodeStage(NetherActionKind.KeepCode, epoch: 0),
+            ],
+        };
+
+        Assert.Equal(NetherActionOutcome.Applied, NetherActionReconcilePolicy.Evaluate(action, before, after));
     }
 
     [Fact]
@@ -1059,7 +1168,7 @@ public class NetherActionReconcilePolicyTests
     }
 
     [Fact]
-    public void Live_floor_event_damage_and_erosion_heal_reject_one_character_update()
+    public void Live_floor_event_damage_and_erosion_heal_accepts_authoritative_subset_update()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -1114,13 +1223,13 @@ public class NetherActionReconcilePolicyTests
         };
 
         Assert.Equal(
-            NetherActionOutcome.Ambiguous,
+            NetherActionOutcome.Applied,
             NetherActionReconcilePolicy.Evaluate(action, before, after)
         );
     }
 
     [Fact]
-    public void Server_selected_subset_event_damage_is_rejected_when_another_living_character_is_unchanged()
+    public void Server_selected_subset_event_damage_reconciles_when_another_living_character_is_unchanged()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -1151,13 +1260,13 @@ public class NetherActionReconcilePolicyTests
         };
 
         Assert.Equal(
-            NetherActionOutcome.Ambiguous,
+            NetherActionOutcome.Applied,
             NetherActionReconcilePolicy.Evaluate(action, before, after)
         );
     }
 
     [Fact]
-    public void Ordinary_event_damage_rejects_partial_party_damage_when_every_living_character_is_committed()
+    public void Ordinary_event_damage_accepts_authoritative_subset_when_every_living_character_stays_safe()
     {
         NetherSnapshot before = Snapshot(floorId: 10) with
         {
@@ -1188,7 +1297,7 @@ public class NetherActionReconcilePolicyTests
         };
 
         Assert.Equal(
-            NetherActionOutcome.Ambiguous,
+            NetherActionOutcome.Applied,
             NetherActionReconcilePolicy.Evaluate(action, before, after)
         );
     }

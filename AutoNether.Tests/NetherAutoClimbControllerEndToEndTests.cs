@@ -3653,6 +3653,61 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_continues_after_native_server_selected_event_damage_subset()
+    {
+        NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
+            NetherSessionStatus.Play,
+            NetherFloorNodeType.Event,
+            floorId: 2,
+            gold: 10,
+            hp: 1000
+        ) with
+        {
+            Characters = new[]
+            {
+                new NetherCharacterState(1, 600),
+                new NetherCharacterState(2, 1000),
+            },
+            CharacterHpHash = "1:600:1;2:1000:1",
+        };
+
+        RunOwnedFloorTransaction(
+            NetherFloorNodeType.Event,
+            new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.Event,
+                RawFloorType = (int)NetherFloorNodeType.Event,
+                TargetCharacterId = 1,
+                Options = new[]
+                {
+                    new NetherEventOption(1, new[] { new NetherEffect(NetherEffectKind.Damage, 400) }),
+                },
+            },
+            new NetherFloorEventPartMasterRow(
+                20045,
+                (int)NetherEffectKind.Damage,
+                400,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ),
+            after,
+            NetherActionKind.SelectEventOption,
+            startHp: 1000,
+            assertNextRoute: true,
+            startCharacters: new[]
+            {
+                new NetherCharacterState(1, 1000),
+                new NetherCharacterState(2, 1000),
+            }
+        );
+    }
+
+    [Fact]
     public void Production_controller_continues_after_party_wide_event_damage_with_saturated_erosion_heal()
     {
         NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(

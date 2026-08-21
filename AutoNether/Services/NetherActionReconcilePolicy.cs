@@ -378,7 +378,7 @@ internal static class NetherActionReconcilePolicy
                 && partialDeathEligibility != null
                 && (partialDeathEligibility.AllowsTreasureHpPayment
                     || partialDeathEligibility.AllowsHpPaidEventKey);
-            if (hasHpEffect && !HasExactHpDelta(
+            if (hasHpEffect && !HasAuthoritativeEventHpDelta(
                     before,
                     after,
                     hpDelta,
@@ -787,7 +787,13 @@ internal static class NetherActionReconcilePolicy
     private static bool AcquiredItemsChanged(NetherSnapshot before, NetherSnapshot after) =>
         !string.Equals(CreateItemIdentity(before), CreateItemIdentity(after), StringComparison.Ordinal);
 
-    private static bool HasExactHpDelta(
+    // The native Event request has no character target and its response supplies the complete
+    // character-status array. Route planning uses the declared HP amount as the worst-case
+    // safety bound for every living party member; reconciliation must prove the authoritative
+    // result stayed within that bound rather than inventing an exact client-side target set.
+    // At least one active member must still reflect the effect. Partial-death commitments keep
+    // their narrower exact and death-state contract below.
+    private static bool HasAuthoritativeEventHpDelta(
         NetherSnapshot before,
         NetherSnapshot after,
         int expectedDelta,
@@ -833,9 +839,7 @@ internal static class NetherActionReconcilePolicy
                 }
 
                 if (character.IsActive)
-                {
                     hasActiveCharacter = true;
-                }
 
                 if (!character.IsActive)
                 {
@@ -858,26 +862,26 @@ internal static class NetherActionReconcilePolicy
                 }
                 hasActiveSurvivor = true;
 
-                // An explicitly authorized partial-death commitment may vary the active set, but
-                // an ordinary Event commitment must prove exact projected HP for every living
-                // character. The native response is authoritative by character ID; a server-
-                // selected subset is not sufficient proof for the ordinary route.
-                if (!allowPartialActiveDeaths)
+                if (allowPartialActiveDeaths)
                 {
-                    if (expectedDelta < 0 && expectedHp <= 0)
+                    if (observed.HpPermille == expectedHp)
+                    {
+                        observedAppliedEffect |= !saturated;
+                        continue;
+                    }
+                    if (observed.HpPermille != character.HpPermille)
                         return false;
-                    if (observed.IsActive != character.IsActive || observed.HpPermille != expectedHp)
-                        return false;
-                    observedAppliedEffect |= !saturated;
                     continue;
                 }
-                if (observed.HpPermille == expectedHp)
-                {
-                    observedAppliedEffect |= !saturated;
-                    continue;
-                }
-                if (observed.HpPermille != character.HpPermille)
+
+                if (expectedDelta < 0 && expectedHp <= 0)
                     return false;
+                if (observed.HpPermille < Math.Min(character.HpPermille, expectedHp)
+                    || observed.HpPermille > Math.Max(character.HpPermille, expectedHp))
+                {
+                    return false;
+                }
+                observedAppliedEffect |= observed.HpPermille != character.HpPermille;
             }
 
             return (observedAppliedEffect
