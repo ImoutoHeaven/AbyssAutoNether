@@ -1,7 +1,0 @@
-DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorEvents.cs
-DiffableCs/Project/Project/Master/NoaMessagePack/MNetherFloorEventsArray.cs
-DiffableCs/Project/Project/Master/NoaMessagePack/MNetherMapFloors.cs
-DiffableCs/Project/Project/Master/NoaMessagePack/MNetherMapFloorsArray.cs
-DiffableCs/Project/Project/Nether/FloorSelection/NetherFloorModel.cs
-DiffableCs/Project/Project/Nether/FloorSelection/NetherTreasureFloorEventFlow.cs
-DiffableCs/Project/Project/Nether/NetherFloorMasterResolver.cs

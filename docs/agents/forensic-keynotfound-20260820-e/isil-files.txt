@@ -1,5 +1,0 @@
-native-isil/selected/treasure-array-formatter.txt
-native-isil/selected/treasure-formatter.txt
-native-isil/IsilDump/Project/Project/Master/MasterDataStore.txt
-native-isil/IsilDump/Project/Project/Master/NoaMessagePack/MNetherFloorTreasures.txt
-native-isil/IsilDump/Project/Project/Master/NoaMessagePack/MNetherFloorTreasuresArray.txt

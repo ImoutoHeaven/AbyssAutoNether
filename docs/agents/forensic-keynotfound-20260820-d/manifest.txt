@@ -1,7 +1,0 @@
-evidence_id=forensic-keynotfound-20260820-d
-created_utc=2026-08-20T12:48:40Z
-project_path=/game/BepInEx/interop/Project.dll
-gameassembly_path=/game/GameAssembly.dll
-metadata_path=/game/ドットアビスX_Data/il2cpp_data/Metadata/global-metadata.dat
-log_relevant_lines=13
-log_distinct_lines=13
