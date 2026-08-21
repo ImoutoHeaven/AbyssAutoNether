@@ -933,6 +933,82 @@ public class NetherRouteSafetyProductionCoordinatorTests
     }
 
     [Fact]
+    public void Production_omits_downstream_recovery_proofs_until_the_prior_battle_replans()
+    {
+        // A fresh native Battle result supplies party HP only after the first selected Battle.
+        // This Recovery is downstream of that pending result, so it must not publish a stale-HP
+        // proof that would poison the currently selectable Battle's final pre-entry capture.
+        NetherFloorNode[] floors =
+        [
+            Floor(1, 31, NetherFloorNodeType.Battle, previous: Array.Empty<long>()),
+            Floor(2, 32, NetherFloorNodeType.Battle, previous: new[] { 1L }),
+            Floor(3, 33, NetherFloorNodeType.Recovery, previous: new[] { 2L }),
+            Floor(4, 34, NetherFloorNodeType.MiniBoss, previous: new[] { 3L }),
+            Floor(5, 35, NetherFloorNodeType.Boss, previous: new[] { 4L }),
+        ];
+        NetherSnapshot snapshot = SnapshotWithHp(55, 1000, floors) with
+        {
+            CurrentNodeId = 1,
+        };
+        NetherAutoClimbSettings settings = Settings();
+        NetherInteractiveOptionProjection rest = Projection(
+            354, 102, 2, 3, 3, 0, [new NetherEffect(NetherEffectKind.Heal, 300)]
+        );
+        NetherInteractiveOptionProjection purification = Projection(
+            354, 402, 1, 3, 3, -30, [new NetherEffect(NetherEffectKind.ErosionHeal, 30)]
+        );
+        NetherInteractiveOptionProjection transform = Projection(
+            354, 700, 3, 3, 3, 0, [new NetherEffect(NetherEffectKind.AbyssCodeTransform, 0)]
+        );
+        NetherRuntimeInteractivePreEntryInputsResult capture = InteractiveCapture(
+            snapshot,
+            settings,
+            new Dictionary<long, NetherInteractiveFloorPreEntryCaptureSpec>
+            {
+                [3] = new(
+                    NetherFloorNodeType.Recovery,
+                    NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                        new Dictionary<long, int> { [354] = 1 },
+                        new Dictionary<long, NetherInteractiveOptionProjection> { [354] = purification },
+                        new NetherInteractiveWorstCaseProjection(-30, 0),
+                        new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                        {
+                            [new NetherInteractiveEventOptionKey(354, 102, 2)] = rest,
+                            [new NetherInteractiveEventOptionKey(354, 402, 1)] = purification,
+                            [new NetherInteractiveEventOptionKey(354, 700, 3)] = transform,
+                        }
+                    )
+                ),
+            }
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            settings,
+            Runtime(
+                snapshot,
+                hpPermille: 1000,
+                bounds: new Dictionary<long, NetherFloorMasterBounds>
+                {
+                    [2] = Bounds(2, 0, 0),
+                    [4] = Bounds(4, 0, 0),
+                    [5] = Bounds(5, 0, 0),
+                }
+            ),
+            capture
+        );
+
+        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
+        Assert.False(plan.Context.IsHardSafe(3));
+        Assert.Equal("combat-preentry-hp-unavailable:4", plan.Context.HorizonRejection(3));
+        Assert.DoesNotContain(102, plan.RecoveryBranchSafetyByPartId.Keys);
+        Assert.DoesNotContain(402, plan.RecoveryBranchSafetyByPartId.Keys);
+        Assert.DoesNotContain(700, plan.RecoveryBranchSafetyByPartId.Keys);
+    }
+
+    [Fact]
     public void Production_final_recapture_preserves_carried_sibling_recovery_proofs()
     {
         // Fresh native decomp e: the Recovery controller binds one selected callback, so its

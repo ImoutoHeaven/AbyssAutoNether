@@ -2618,9 +2618,9 @@ internal static class NetherAutoClimbController
             );
             interactivePreEntry = _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
         }
-        // The provisional route is only the source of the selected-horizon proof. Publish both
-        // exact decisions before the mandatory fresh capture; the second capture must either
-        // carry every Recovery part proof and the selected rank-five commitment or fail closed.
+        // The provisional route is only the source of pre-Battle Recovery proofs. Publish both
+        // exact decisions before the mandatory fresh capture; each bound Recovery row and the
+        // selected rank-five commitment must survive unchanged or fail closed.
         _bridge.BindRecoveryBranchSafetyProofs(preliminaryRoute.RecoveryBranchSafetyByPartId);
         _bridge.BindRankFiveKeyProcurement(preliminaryRoute.RankFiveKeyProcurement);
         interactivePreEntry = _bridge.TryCaptureInteractivePreEntryInputs(snapshot, settings);
@@ -2640,9 +2640,9 @@ internal static class NetherAutoClimbController
             runtimeSafety,
             interactivePreEntry
         );
-        // Carry the provisional selected branch into one final native capture. The capture must
-        // carry the exact deterministic Recovery proofs and rank-five decision that produced this
-        // route; a changed/missing proof is a stale branch, not permission to reuse the old action.
+        // Carry the provisional selected branch into one final native capture. Every Recovery
+        // reachable before a new Battle must carry its exact deterministic proof and rank-five
+        // decision; Recovery rows after a Battle are deferred to that Battle's fresh replan.
         // A known-unavailable random Transform remains option-local unless it is the selected exit.
         _bridge.BindRecoveryBranchSafetyProofs(routeDecision.RecoveryBranchSafetyByPartId);
         _bridge.BindRankFiveKeyProcurement(routeDecision.RankFiveKeyProcurement);
@@ -2810,14 +2810,27 @@ internal static class NetherAutoClimbController
     {
         if (snapshot?.Floors == null || route?.SelectedPathNodeIds == null)
             return false;
-        HashSet<long> selectedFutureIds = route.SelectedPathNodeIds.Skip(1).ToHashSet();
-        return snapshot.Floors.Any(floor =>
-            floor != null
-            && selectedFutureIds.Contains(floor.NodeId)
-            && floor.NodeType is NetherFloorNodeType.Event
-                or NetherFloorNodeType.Recovery
-                or NetherFloorNodeType.Shop
-                or NetherFloorNodeType.Treasure);
+        return route.SelectedPathNodeIds.Skip(1).Any(nodeId =>
+        {
+            NetherFloorNode? floor = snapshot.Floors.FirstOrDefault(candidate =>
+                candidate != null && candidate.NodeId == nodeId
+            );
+            return floor != null
+                && floor.NodeType is (
+                    NetherFloorNodeType.Event
+                    or NetherFloorNodeType.Recovery
+                    or NetherFloorNodeType.Shop
+                    or NetherFloorNodeType.Treasure
+                )
+                // Only Recovery requires a branch proof. Other interactive rows retain their
+                // existing final-capture handoff even when a Battle precedes them.
+                && (floor.NodeType != NetherFloorNodeType.Recovery
+                    || !NetherRecoveryBranchProofScope.IsDeferredUntilBattleReplan(
+                        snapshot,
+                        route,
+                        nodeId
+                    ));
+        });
     }
 
     private static bool InteractiveHandoffCarriesSelectedProof(
@@ -2845,6 +2858,14 @@ internal static class NetherAutoClimbController
             if (!floors.TryGetValue(nodeId, out NetherFloorNode? floor)
                 || floor.NodeType != NetherFloorNodeType.Recovery)
                 continue;
+            if (NetherRecoveryBranchProofScope.IsDeferredUntilBattleReplan(
+                    snapshot,
+                    expected.Route,
+                    nodeId
+                ))
+            {
+                continue;
+            }
             if (!actual.ByFloorNodeId.TryGetValue(nodeId, out NetherRuntimeInteractivePreEntryCaptureResult? capture)
                 || capture.Input == null
                 || capture.Input.FloorNodeId != nodeId

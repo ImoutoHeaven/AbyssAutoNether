@@ -131,16 +131,16 @@ internal sealed record NetherInteractiveFloorPreEntrySafetyInput(
     public IReadOnlyList<NetherInteractivePartialDeathEligibility> PartialDeathEligibility { get; init; } =
         Array.Empty<NetherInteractivePartialDeathEligibility>();
     /// <summary>
-    /// Exact selected-horizon Recovery continuation proofs keyed by EventPartId. Production sets
-    /// <see cref="RequireCompleteRecoveryBranchSafety"/> after binding the selected route; missing
-    /// proofs then pause the complete Recovery popup instead of using local scoring.
+    /// Exact pre-Battle Recovery continuation proofs keyed by EventPartId. Production enables
+    /// <see cref="RequireCompleteRecoveryBranchSafety"/> only for the native row owning a bound
+    /// part; a Recovery beyond an unsettled Battle is re-evaluated after that Battle settles.
     /// </summary>
     public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> RecoveryBranchSafetyByPartId { get; init; } =
         new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
     /// <summary>
-    /// Production capture sets this after the selected route horizon has been bound. When true,
-    /// the complete three-option Recovery policy is authoritative and missing proofs pause rather
-    /// than falling back to local option scoring.
+    /// Production capture sets this only when this exact native Recovery row has a bound
+    /// pre-Battle proof. When true, the complete three-option policy is authoritative and a
+    /// missing proof pauses rather than falling back to local option scoring.
     /// </summary>
     public bool RequireCompleteRecoveryBranchSafety { get; init; }
     /// <summary>Exact selected-branch rank-five procurement decision bound before capture.</summary>

@@ -426,8 +426,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _pendingRecoveryBranchSafetyByPartId = proofs == null
                 ? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
                 : new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(proofs);
-            // Once production asks for a second capture, no Recovery popup may use the legacy
-            // local scorer. An empty map is intentionally meaningful: it pauses on absent proof.
+            // A second capture evaluates the complete policy only for a native Recovery row that
+            // owns one of these exact part proofs. Rows beyond an unsettled Battle remain local
+            // until that Battle's authoritative replan supplies their own proof.
             _requireCompleteRecoveryBranchSafety = true;
         }
     }
@@ -1461,32 +1462,48 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 if (!TryReadRuntimeFloorNodeIdentity(floor, out long runtimeNodeId, out string identityError))
                     return NetherRuntimeInteractivePreEntryInputsResult.Failure(identityError);
 
-                NetherRuntimeInteractivePreEntryCaptureResult result = InteractivePreEntryInputCapture.Capture(
-                    new NetherRuntimeInteractivePreEntryCaptureRequest(
-                        FloorModel: floor,
-                        MapFloorRows: mapRows,
-                        EventRows: eventRows,
-                        EventPartRows: eventPartRows,
-                        CurrentErosion: snapshot.ErosionPoint,
-                        ActiveHpPermille: activeHp,
-                        CurrentNetherGold: snapshot.NetherGold,
-                        CurrentTreasureKeys: snapshot.TreasureKeyCount,
-                        Settings: settings,
-                        CanCloseShop: canCloseShop
-                    )
+                var request = new NetherRuntimeInteractivePreEntryCaptureRequest(
+                    FloorModel: floor,
+                    MapFloorRows: mapRows,
+                    EventRows: eventRows,
+                    EventPartRows: eventPartRows,
+                    CurrentErosion: snapshot.ErosionPoint,
+                    ActiveHpPermille: activeHp,
+                    CurrentNetherGold: snapshot.NetherGold,
+                    CurrentTreasureKeys: snapshot.TreasureKeyCount,
+                    Settings: settings,
+                    CanCloseShop: canCloseShop
+                )
+                {
+                    CurrentCodes = snapshot.Codes ?? Array.Empty<NetherCodeState>(),
+                    CodeCapacity = snapshot.CodeCapacity,
+                    FloorNodeId = runtimeNodeId,
+                    ItemRows = itemRows,
+                    BattleRows = battleRows,
+                    CommittedProcurementByOption = committedProcurement,
+                    RecoveryBranchSafetyByPartId = recoveryBranchSafetyByPartId,
+                    // Scope the complete policy to this native Recovery row. A proof for an
+                    // earlier route-owned Recovery must not make a later post-Battle Recovery use
+                    // stale current HP during this capture.
+                    RequireCompleteRecoveryBranchSafety = false,
+                    RankFiveKeyProcurement = rankFiveKeyProcurement,
+                    TypedSemanticProvider = typedSemanticProvider,
+                };
+                NetherRuntimeInteractivePreEntryCaptureResult result =
+                    InteractivePreEntryInputCapture.Capture(request);
+                if (requireCompleteRecoveryBranchSafety
+                    && result.IsCaptured
+                    && result.Input != null
+                    && NetherRecoveryBranchProofScope.RequiresCompleteProofForCapturedFloor(
+                        result.Input,
+                        recoveryBranchSafetyByPartId
+                    ))
+                {
+                    result = InteractivePreEntryInputCapture.Capture(request with
                     {
-                        CurrentCodes = snapshot.Codes ?? Array.Empty<NetherCodeState>(),
-                        CodeCapacity = snapshot.CodeCapacity,
-                        FloorNodeId = runtimeNodeId,
-                        ItemRows = itemRows,
-                        BattleRows = battleRows,
-                        CommittedProcurementByOption = committedProcurement,
-                        RecoveryBranchSafetyByPartId = recoveryBranchSafetyByPartId,
-                        RequireCompleteRecoveryBranchSafety = requireCompleteRecoveryBranchSafety,
-                        RankFiveKeyProcurement = rankFiveKeyProcurement,
-                        TypedSemanticProvider = typedSemanticProvider,
-                    }
-                );
+                        RequireCompleteRecoveryBranchSafety = true,
+                    });
+                }
                 if (!result.IsCaptured || result.Input == null)
                 {
                     return NetherRuntimeInteractivePreEntryInputsResult.Failure(

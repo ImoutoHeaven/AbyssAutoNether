@@ -1865,6 +1865,46 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_selects_the_safe_battle_before_a_downstream_recovery_replan()
+    {
+        NetherSnapshot routeStart = ScriptedRuntimeBridge.DeferredRecoveryProofRouteSnapshot(
+            NetherSessionStatus.Play
+        );
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = routeStart,
+            BindRouteSafetyHpToCurrentSnapshot = true,
+            InteractivePreEntryFactory = (snapshot, settings) =>
+                ScriptedRuntimeBridge.CompleteInteractivePreEntry(
+                    snapshot,
+                    settings,
+                    provideCompleteRecoveryBranchEvidence: true
+                ),
+        };
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            new NetherBattleSettingsLeaseControllerLifecycle(new RecordingLeaseDriver(), retryIntervalUpdates: 1)
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(NetherAutoClimbPhase.ExecutingNativeAction, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.True(bridge.RecoveryBranchSafetyBindCount >= 2);
+            Assert.Empty(bridge.BoundRecoveryBranchSafetyByPartId);
+            Assert.Single(bridge.Invocations, action => action == NetherActionKind.SelectFloor);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_keeps_safe_deterministic_recovery_when_transform_is_known_unavailable_during_final_handoff()
     {
         NetherSnapshot routeStart = ScriptedRuntimeBridge.RecoveryProofRouteSnapshot(NetherSessionStatus.Play);
@@ -6757,6 +6797,26 @@ public class NetherAutoClimbControllerEndToEndTests
                     Floor(1, 1, NetherFloorNodeType.Event),
                     Floor(2, 2, NetherFloorNodeType.Recovery, new[] { 1L }),
                     Floor(3, 3, NetherFloorNodeType.Boss, new[] { 2L }),
+                },
+            };
+
+        internal static NetherSnapshot DeferredRecoveryProofRouteSnapshot(NetherSessionStatus status) =>
+            InteractiveRouteSnapshot(status, floorId: 1, gold: 0) with
+            {
+                CurrentNodeId = 1,
+                CurrentFloorId = 1,
+                FloorLevel = 31,
+                FloorIndex = 1,
+                ErosionPoint = 55,
+                Characters = new[] { new NetherCharacterState(1, 1000) },
+                CharacterHpHash = "character:1:1000",
+                Floors = new[]
+                {
+                    Floor(1, 31, NetherFloorNodeType.Battle),
+                    Floor(2, 32, NetherFloorNodeType.Battle, new[] { 1L }),
+                    Floor(3, 33, NetherFloorNodeType.Recovery, new[] { 2L }),
+                    Floor(4, 34, NetherFloorNodeType.MiniBoss, new[] { 3L }),
+                    Floor(5, 35, NetherFloorNodeType.Boss, new[] { 4L }),
                 },
             };
 
