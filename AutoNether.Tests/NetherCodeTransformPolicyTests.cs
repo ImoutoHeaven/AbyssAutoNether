@@ -97,6 +97,27 @@ public sealed class NetherCodeTransformPolicyTests
     }
 
     [Fact]
+    public void Empty_known_portfolio_is_a_known_unavailable_transform_not_master_data_failure()
+    {
+        NetherCodeTransformDecision decision = new NetherCodeTransformPolicy().Decide(
+            [],
+            capacity: 5,
+            new NetherCodeTransformEligibilityEvidence
+            {
+                StrategyMode = NetherStrategyMode.Equipment,
+                EquipmentOptInEnabled = true,
+                IsRecovery = true,
+                DeterministicRecoveryChoicesHaveZeroValue = true,
+                HardExcludedCodes = [],
+            }
+        );
+
+        Assert.False(decision.CanTransform);
+        Assert.Equal(NetherPauseReason.NoSafeRoute, decision.PauseReason);
+        Assert.Equal("no-owned-code-for-native-transform", decision.Detail);
+    }
+
+    [Fact]
     public void Invalid_or_duplicate_portfolio_fails_closed()
     {
         Assert.Equal(

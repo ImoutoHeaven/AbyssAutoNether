@@ -173,6 +173,108 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
+    public void Complete_recovery_selects_safe_purification_when_transform_portfolio_is_unavailable()
+    {
+        Dictionary<long, NetherRecoveryBranchSafetyEvidence> proofs =
+            CompleteRecoveryProofs(1001, 1002, 1003).ToDictionary(pair => pair.Key, pair => pair.Value);
+        proofs[1003] = new NetherRecoveryBranchSafetyEvidence
+        {
+            BranchKind = NetherRecoveryBranchKind.Transform,
+            IsKnown = false,
+            IsCompleteVisibleBranch = true,
+            IsNextVisibleBranchSafe = false,
+            UnknownReason = "invalid-code-transform-portfolio",
+            TransformEligibility = new NetherCodeTransformEligibilityEvidence
+            {
+                IsKnown = false,
+                UnknownReason = "invalid-code-transform-portfolio",
+                IsRecovery = true,
+            },
+        };
+
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Recovery,
+            events: [Event(354, 1001, 1002, 1003)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.Heal, parameter1: 300),
+                Part(1002, targetType1: (int)NetherEffectKind.ErosionHeal, parameter1: 30),
+                Part(1003, targetType1: 7, parameter1: 0),
+            ],
+            erosion: 50,
+            hp: 1000,
+            codes: [Code(40024, NetherCodeFamily.Risk)],
+            recoveryProofs: proofs,
+            requireCompleteRecoveryBranchSafety: true
+        ));
+
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(2, result.SafeOptionNumberByEventId[354]);
+        Assert.True(Assert.Single(result.OptionAudits, audit => audit.Key.EventPartId == 1002).IsSelected);
+
+        NetherInteractiveOptionAudit transform = Assert.Single(
+            result.OptionAudits,
+            audit => audit.Key.EventPartId == 1003
+        );
+        Assert.False(transform.IsKnown);
+        Assert.False(transform.IsSelected);
+        Assert.Equal(NetherInteractiveOptionHardGate.RecoveryTransformPolicy, transform.FirstFailingHardGate);
+        Assert.Equal("invalid-code-transform-portfolio", transform.Detail);
+    }
+
+    [Fact]
+    public void Complete_recovery_selects_safe_purification_when_transform_has_no_owned_code()
+    {
+        Dictionary<long, NetherRecoveryBranchSafetyEvidence> proofs =
+            CompleteRecoveryProofs(1001, 1002, 1003).ToDictionary(pair => pair.Key, pair => pair.Value);
+        proofs[1003] = new NetherRecoveryBranchSafetyEvidence
+        {
+            BranchKind = NetherRecoveryBranchKind.Transform,
+            IsKnown = false,
+            IsCompleteVisibleBranch = true,
+            IsNextVisibleBranchSafe = false,
+            UnknownReason = "no-owned-code-for-native-transform",
+            TransformEligibility = new NetherCodeTransformEligibilityEvidence
+            {
+                IsKnown = true,
+                StrategyMode = NetherStrategyMode.Equipment,
+                EquipmentOptInEnabled = true,
+                IsRecovery = true,
+                HardExcludedCodes = [],
+            },
+        };
+
+        NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
+            NetherFloorNodeType.Recovery,
+            events: [Event(354, 1001, 1002, 1003)],
+            parts:
+            [
+                Part(1001, targetType1: (int)NetherEffectKind.Heal, parameter1: 300),
+                Part(1002, targetType1: (int)NetherEffectKind.ErosionHeal, parameter1: 30),
+                Part(1003, targetType1: 7, parameter1: 0),
+            ],
+            erosion: 50,
+            hp: 1000,
+            codes: [],
+            recoveryProofs: proofs,
+            requireCompleteRecoveryBranchSafety: true
+        ));
+
+        Assert.True(result.IsSafe, result.PauseReason + ":" + result.Detail);
+        Assert.Equal(2, result.SafeOptionNumberByEventId[354]);
+        Assert.True(Assert.Single(result.OptionAudits, audit => audit.Key.EventPartId == 1002).IsSelected);
+
+        NetherInteractiveOptionAudit transform = Assert.Single(
+            result.OptionAudits,
+            audit => audit.Key.EventPartId == 1003
+        );
+        Assert.True(transform.IsKnown);
+        Assert.False(transform.IsSelected);
+        Assert.Equal(NetherInteractiveOptionHardGate.RecoveryTransformPolicy, transform.FirstFailingHardGate);
+        Assert.Equal("no-owned-code-for-native-transform", transform.Detail);
+    }
+
+    [Fact]
     public void Map_generation_erosion_range_is_not_an_interactive_action_cost()
     {
         NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
@@ -390,7 +492,7 @@ public class NetherInteractiveFloorPreEntrySafetyTests
     }
 
     [Fact]
-    public void Transform_option_without_any_current_code_fails_before_floor_click()
+    public void Transform_option_without_any_current_code_is_known_unavailable_before_floor_click()
     {
         NetherInteractiveFloorPreEntrySafetyResult result = Evaluate(Input(
             NetherFloorNodeType.Event,
@@ -400,8 +502,8 @@ public class NetherInteractiveFloorPreEntrySafetyTests
         ));
 
         Assert.False(result.IsSafe);
-        Assert.Equal(NetherPauseReason.UnknownMasterData, result.PauseReason);
-        Assert.Contains("invalid-code-transform-portfolio", result.Detail);
+        Assert.Equal(NetherPauseReason.NoSafeRoute, result.PauseReason);
+        Assert.Contains("no-owned-code-for-native-transform", result.Detail);
     }
 
     [Fact]

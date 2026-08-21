@@ -198,7 +198,6 @@ internal sealed class NetherCodeTransformPolicy
     {
         if (codes == null
             || capacity < 1
-            || codes.Count is < 1
             || codes.Count > capacity
             || codes.Any(code => code == null
                 || !code.IsKnown
@@ -210,6 +209,13 @@ internal sealed class NetherCodeTransformPolicy
             || codes.Select(code => code.CodeId).Distinct().Count() != codes.Count)
         {
             return Pause(NetherPauseReason.UnknownMasterData, "invalid-code-transform-portfolio");
+        }
+
+        // The native possession enumerable filters to Amount > 0. An empty, successfully read
+        // list is therefore a known absence of a sacrifice candidate, not corrupt master data.
+        if (codes.Count == 0)
+        {
+            return Pause(NetherPauseReason.NoSafeRoute, "no-owned-code-for-native-transform");
         }
 
         if (evidence == null || !evidence.IsKnown)

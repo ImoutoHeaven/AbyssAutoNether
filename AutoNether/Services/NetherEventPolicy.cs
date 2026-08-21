@@ -285,8 +285,9 @@ internal enum NetherRecoveryBranchKind
 /// <summary>
 /// Exact proof for one Recovery option's complete visible continuation. The native Recovery
 /// popup supplies only the local action; route policy may use this record only after the complete
-/// next visible branch has been captured. An absent proof preserves compatibility with legacy
-/// callers, while a supplied but invalid proof is fail-closed.
+/// next visible branch has been captured. An absent or invalid deterministic-branch proof is
+/// fail-closed. An invalid Transform proof remains option-local until Transform is the only
+/// remaining possible safe exit.
 /// </summary>
 internal sealed record NetherRecoveryBranchSafetyEvidence
 {
@@ -1133,51 +1134,67 @@ internal sealed class NetherEventPolicy
         NetherEventOption rest = rests[0];
         NetherEventOption purification = purifications[0];
         NetherEventOption transform = transforms[0];
-        NetherRecoveryBranchSafetyEvidence?[] proofs =
-        [
-            rest.RecoveryBranchSafety,
-            purification.RecoveryBranchSafety,
-            transform.RecoveryBranchSafety,
-        ];
-        bool anyProof = proofs.Any(proof => proof != null);
+        NetherRecoveryBranchSafetyEvidence? restProof = rest.RecoveryBranchSafety;
+        NetherRecoveryBranchSafetyEvidence? purificationProof = purification.RecoveryBranchSafety;
+        NetherRecoveryBranchSafetyEvidence? transformProof = transform.RecoveryBranchSafety;
+        bool anyProof = restProof != null || purificationProof != null || transformProof != null;
         if (!anyProof)
             return false;
-        if (proofs.Any(proof => proof == null || !proof.IsAuthoritative))
+
+        // Rest and Purification are deterministic exits. Their complete branch proof is always
+        // required before either may be selected. Transform is server-random and can never poison
+        // a proven deterministic exit merely because its own held-Code portfolio is unavailable.
+        if (restProof == null || !restProof.IsAuthoritative
+            || purificationProof == null || !purificationProof.IsAuthoritative)
         {
             decision = Pause(
                 NetherPauseReason.UnknownMasterData,
-                proofs.FirstOrDefault(proof => proof != null && !proof.IsAuthoritative)?.UnknownReason
+                new[] { restProof, purificationProof }
+                    .FirstOrDefault(proof => proof != null && !proof.IsAuthoritative)?.UnknownReason
                     ?? "recovery-complete-visible-branch-unavailable"
             );
             return true;
         }
-        if (rest.RecoveryBranchSafety!.BranchKind != NetherRecoveryBranchKind.Rest
-            || purification.RecoveryBranchSafety!.BranchKind != NetherRecoveryBranchKind.Purification
-            || transform.RecoveryBranchSafety!.BranchKind != NetherRecoveryBranchKind.Transform)
+        if (restProof.BranchKind != NetherRecoveryBranchKind.Rest
+            || purificationProof.BranchKind != NetherRecoveryBranchKind.Purification)
         {
             decision = Pause(NetherPauseReason.UnknownMasterData, "recovery-branch-kind-mismatch");
             return true;
         }
 
-        bool restSafe = rest.RecoveryBranchSafety.IsNextVisibleBranchSafe;
-        bool purificationSafe = purification.RecoveryBranchSafety.IsNextVisibleBranchSafe;
-        bool transformSafe = transform.RecoveryBranchSafety.IsNextVisibleBranchSafe;
-        // Recovery Transform is a server-random last resort. It may be considered only after
-        // complete proof says neither deterministic branch is safe; the ordinary validator below
-        // still owns its Equipment opt-in, zero-value, and hard-exclusion gates.
+        bool restSafe = restProof.IsNextVisibleBranchSafe;
+        bool purificationSafe = purificationProof.IsNextVisibleBranchSafe;
         NetherEventOption? selected = restSafe
             ? purificationSafe
                 ? SelectRecoveryTieBreak(snapshot, settings, rest, purification)
                 : rest
             : purificationSafe
                 ? purification
-                : transformSafe
-                    ? transform
-                    : null;
+                : null;
         if (selected == null)
         {
-            decision = Pause(NetherPauseReason.NoSafeRoute, "no-complete-safe-recovery-branch");
-            return true;
+            // Recovery Transform is a server-random last resort. It is considered only when no
+            // deterministic branch is safe, and then it still needs its own complete proof plus
+            // the ordinary Equipment opt-in, zero-value, and hard-exclusion gates below.
+            if (transformProof == null || !transformProof.IsAuthoritative)
+            {
+                decision = Pause(
+                    NetherPauseReason.UnknownMasterData,
+                    transformProof?.UnknownReason ?? "recovery-transform-branch-proof-unavailable"
+                );
+                return true;
+            }
+            if (transformProof.BranchKind != NetherRecoveryBranchKind.Transform)
+            {
+                decision = Pause(NetherPauseReason.UnknownMasterData, "recovery-branch-kind-mismatch");
+                return true;
+            }
+            if (!transformProof.IsNextVisibleBranchSafe)
+            {
+                decision = Pause(NetherPauseReason.NoSafeRoute, "no-complete-safe-recovery-branch");
+                return true;
+            }
+            selected = transform;
         }
 
         // Re-run the ordinary public-effect validator on the selected option only. This keeps the
