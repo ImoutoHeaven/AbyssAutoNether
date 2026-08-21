@@ -859,7 +859,16 @@ internal sealed class NetherEventPolicy
         // EquipmentBags ignores those known non-item rows; ItemId is required only for an
         // actual equipment candidate, never as a blanket validity condition for the popup.
         if (contents.Any(content => !content.Known || content.ContentId <= 0 || content.Amount <= 0 || content.Price < 0))
-            return Finish(new NetherShopDecision { Kind = NetherShopDecisionKind.Pause, PauseReason = NetherPauseReason.UnknownMasterData, Detail = "invalid-shop-content" });
+        {
+            // Unknown inventory is never purchase authority, but the registered native close
+            // callback is a non-mutating exit. Leave it instead of faulting the floor parent
+            // and allowing a later route to advance behind the still-visible Shop popup.
+            return Finish(new NetherShopDecision
+            {
+                Kind = NetherShopDecisionKind.Leave,
+                Detail = "invalid-shop-content-no-purchase",
+            });
+        }
 
         if (commitment is { IsKnown: true })
         {

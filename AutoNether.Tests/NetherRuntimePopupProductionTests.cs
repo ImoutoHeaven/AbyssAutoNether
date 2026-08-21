@@ -484,7 +484,7 @@ public sealed class NetherRuntimePopupProductionTests
     }
 
     [Fact]
-    public void Managed_shop_dto_unknown_sibling_invalidates_typed_late_shop_route_and_policy()
+    public void Managed_shop_dto_unknown_sibling_invalidates_typed_late_shop_route_but_leaves_popup()
     {
         NetherRuntimeBridge bridge = NetherRuntimeBridge.Instance;
         try
@@ -504,7 +504,7 @@ public sealed class NetherRuntimePopupProductionTests
             );
             Assert.False(unknown.IsKnown);
             Assert.Equal(
-                NetherShopDecisionKind.Pause,
+                NetherShopDecisionKind.Leave,
                 new NetherEventPolicy().DecideShop(
                     captured.Snapshot,
                     popup.ShopContents,

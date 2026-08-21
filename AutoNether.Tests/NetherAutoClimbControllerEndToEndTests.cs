@@ -3954,22 +3954,51 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
-    public void Production_controller_reconciles_owned_shop_leave_with_exact_parent_contract()
+    public void Production_controller_closes_unknown_owned_shop_before_replanning()
     {
-        NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
-            NetherSessionStatus.Play,
-            NetherFloorNodeType.Shop,
-            floorId: 2,
-            gold: 10
-        );
+        NetherShopMode previous = AutoNether.Config.NetherAutoClimbShopMode.Value;
+        AutoNether.Config.NetherAutoClimbShopMode.Value = NetherShopMode.EquipmentBags;
+        try
+        {
+            NetherSnapshot after = ScriptedRuntimeBridge.OwnedRouteSnapshot(
+                NetherSessionStatus.Play,
+                NetherFloorNodeType.Shop,
+                floorId: 2,
+                gold: 10
+            );
 
-        RunOwnedFloorTransaction(
-            NetherFloorNodeType.Shop,
-            new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.Shop },
-            null,
-            after,
-            NetherActionKind.LeaveShop
-        );
+            ScriptedRuntimeBridge bridge = RunOwnedFloorTransaction(
+                NetherFloorNodeType.Shop,
+                new NetherRuntimePopupContext
+                {
+                    Kind = NetherRuntimePopupKind.Shop,
+                    ShopContents =
+                    [
+                        new NetherShopContent(
+                            contentId: 42,
+                            itemId: 42,
+                            itemType: 91,
+                            rarity: NetherRewardRarity.Gold,
+                            price: 300,
+                            usesNetherGold: true,
+                            amount: 1,
+                            known: false
+                        ),
+                    ],
+                },
+                null,
+                after,
+                NetherActionKind.LeaveShop
+            );
+
+            Assert.Equal(1, bridge.ShopLeaveInvokeCount);
+            Assert.Equal(0, bridge.ShopCloseInvokeCount);
+            Assert.Single(bridge.OwnedPopupActions, action => action.Kind == NetherActionKind.LeaveShop);
+        }
+        finally
+        {
+            AutoNether.Config.NetherAutoClimbShopMode.Value = previous;
+        }
     }
 
     [Fact]
@@ -4953,6 +4982,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public List<NetherPlannedAction> OwnedPopupActions { get; } = new();
         public int BeginFloorParentCount { get; private set; }
         public int OwnedPopupInvokeCount { get; private set; }
+        public int ShopLeaveInvokeCount { get; private set; }
         public int ShopCloseInvokeCount { get; private set; }
         public int CodeReloadInvokeCount { get; private set; }
         public int CodeKeepInvokeCount { get; private set; }
@@ -5637,9 +5667,15 @@ public class NetherAutoClimbControllerEndToEndTests
                 popup,
                 action,
                 DispatchScriptedNonStagePopup,
-                () => DispatchScriptedNonStagePopup(new NetherPlannedAction(NetherActionKind.LeaveShop)),
+                DispatchScriptedLeaveShop,
                 DispatchScriptedNonStagePopup
             );
+        }
+
+        private NetherNativeActionResult DispatchScriptedLeaveShop()
+        {
+            ShopLeaveInvokeCount++;
+            return DispatchScriptedNonStagePopup(new NetherPlannedAction(NetherActionKind.LeaveShop));
         }
 
         private NetherNativeActionResult DispatchScriptedNonStagePopup(NetherPlannedAction action)

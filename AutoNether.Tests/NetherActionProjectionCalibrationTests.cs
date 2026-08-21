@@ -30,7 +30,7 @@ public class NetherActionProjectionCalibrationTests
     }
 
     [Fact]
-    public void Ordinary_event_projection_requires_exact_hp_for_every_living_character()
+    public void Ordinary_event_projection_allows_an_untouched_living_character_when_damage_stays_within_authoritative_bounds()
     {
         NetherSnapshot before = Snapshot(erosion: 20, hp: 1000) with
         {
@@ -51,8 +51,8 @@ public class NetherActionProjectionCalibrationTests
             ],
         });
 
-        Assert.True(observation.IsDrift);
-        Assert.Equal(NetherPauseReason.UnsafeHp, observation.PauseReason);
+        Assert.False(observation.IsDrift);
+        Assert.Equal(NetherPauseReason.None, observation.PauseReason);
     }
 
     [Fact]

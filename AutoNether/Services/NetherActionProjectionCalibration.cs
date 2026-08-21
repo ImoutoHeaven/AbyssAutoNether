@@ -8,8 +8,8 @@ namespace AutoNether.Services;
 
 /// <summary>
 /// Holds an effect prediction only across the one native action that produced it.  The next
-/// authoritative snapshot validates erosion and every living-character HP projection exactly
-/// (unless code changed, which requires a rebaseline).
+/// authoritative snapshot validates erosion exactly and every living character against the
+/// safe per-character HP bound (unless code changed, which requires a rebaseline).
 /// </summary>
 internal readonly record struct NetherProjectionObservation(
     bool IsDrift,
@@ -18,12 +18,19 @@ internal readonly record struct NetherProjectionObservation(
     string Detail
 );
 
+/// <summary>
+/// The route gate proves that this bound is survivable for every active character. The native
+/// Event endpoint later supplies the actual per-character result, so it is not an exact-target
+/// promise for every member.
+/// </summary>
+internal readonly record struct NetherExpectedHpRange(int Before, int Expected);
+
 internal sealed class NetherActionProjectionCalibration
 {
     private readonly NetherErosionPolicy _erosionPolicy = new();
     private int? _predictedErosion;
     private string _codeFingerprint = string.Empty;
-    private Dictionary<long, int>? _expectedHp;
+    private Dictionary<long, NetherExpectedHpRange>? _expectedHp;
     private HashSet<long>? _expectedActiveCharacterIds;
     private bool _allowPartialActiveDeaths;
 
@@ -42,7 +49,10 @@ internal sealed class NetherActionProjectionCalibration
                 .Where(character => character.IsActive)
                 .ToDictionary(
                     character => character.CharacterId,
-                    character => Math.Max(0, Math.Min(1000, checked(character.HpPermille + decision.HpDelta)))
+                    character => new NetherExpectedHpRange(
+                        character.HpPermille,
+                        Math.Max(0, Math.Min(1000, checked(character.HpPermille + decision.HpDelta)))
+                    )
                 )
             : null;
         _expectedActiveCharacterIds = _expectedHp == null
@@ -59,7 +69,7 @@ internal sealed class NetherActionProjectionCalibration
 
         int predictedErosion = _predictedErosion.Value;
         string codeFingerprint = _codeFingerprint;
-        Dictionary<long, int>? expectedHp = _expectedHp;
+        Dictionary<long, NetherExpectedHpRange>? expectedHp = _expectedHp;
         HashSet<long>? expectedActiveCharacterIds = _expectedActiveCharacterIds;
         bool allowPartialActiveDeaths = _allowPartialActiveDeaths;
         Clear();
@@ -95,20 +105,35 @@ internal sealed class NetherActionProjectionCalibration
                         : "hp-projection-active-set-drift"
                 );
             }
-            foreach ((long characterId, int expected) in expectedHp)
+            foreach ((long characterId, NetherExpectedHpRange expected) in expectedHp)
             {
                 if (!observedById.TryGetValue(characterId, out NetherCharacterState observed))
                     return HpDrift(erosion, "hp-projection-missing-character:" + characterId);
-                if (expected <= 0 && !allowPartialActiveDeaths)
+                if (expected.Expected <= 0 && !allowPartialActiveDeaths)
                     return HpDrift(erosion, "hp-projection-ordinary-death-not-authorized:" + characterId);
-                if (expected <= 0 && allowPartialActiveDeaths)
+                if (expected.Expected <= 0 && allowPartialActiveDeaths)
                 {
                     if (observed.IsActive || observed.HpPermille != 0)
                         return HpDrift(erosion, "hp-projection-authorized-death-state:" + characterId);
                     continue;
                 }
-                if (!observed.IsActive || observed.HpPermille != expected)
-                    return HpDrift(erosion, "hp-projection-drift:" + characterId);
+                if (allowPartialActiveDeaths)
+                {
+                    if (!observed.IsActive || observed.HpPermille != expected.Expected)
+                        return HpDrift(erosion, "hp-projection-drift:" + characterId);
+                    continue;
+                }
+                if (!observed.IsActive
+                    || !IsWithinAuthoritativeEventHpBound(expected, observed.HpPermille))
+                {
+                    return HpDrift(
+                        erosion,
+                        "hp-projection-outside-safe-bound:" + characterId
+                            + ":observed=" + observed.HpPermille
+                            + ":before=" + expected.Before
+                            + ":expected=" + expected.Expected
+                    );
+                }
             }
         }
 
@@ -128,6 +153,12 @@ internal sealed class NetherActionProjectionCalibration
         _expectedActiveCharacterIds = null;
         _allowPartialActiveDeaths = false;
     }
+
+    private static bool IsWithinAuthoritativeEventHpBound(
+        NetherExpectedHpRange expected,
+        int observed
+    ) => observed >= Math.Min(expected.Before, expected.Expected)
+        && observed <= Math.Max(expected.Before, expected.Expected);
 
     private static NetherProjectionObservation HpDrift(
         NetherErosionObservation erosion,
