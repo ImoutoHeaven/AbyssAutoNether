@@ -1865,6 +1865,61 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_keeps_safe_deterministic_recovery_when_transform_is_known_unavailable_during_final_handoff()
+    {
+        NetherSnapshot routeStart = ScriptedRuntimeBridge.RecoveryProofRouteSnapshot(NetherSessionStatus.Play);
+        var bridge = new ScriptedRuntimeBridge
+        {
+            CurrentSnapshot = routeStart,
+            BindRouteSafetyHpToCurrentSnapshot = true,
+            MarkBoundRecoveryTransformUnavailable = true,
+            InteractivePreEntryFactory = (snapshot, settings) =>
+                ScriptedRuntimeBridge.CompleteInteractivePreEntry(
+                    snapshot,
+                    settings,
+                    provideCompleteRecoveryBranchEvidence: true
+                ),
+        };
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            new NetherBattleSettingsLeaseControllerLifecycle(new RecordingLeaseDriver(), retryIntervalUpdates: 1)
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.True(
+                NetherAutoClimbController.Phase == NetherAutoClimbPhase.ExecutingNativeAction,
+                NetherAutoClimbController.Phase + ":"
+                    + NetherAutoClimbController.PauseReason + ":"
+                    + NetherAutoClimbController.PauseDetail
+            );
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.Contains(
+                bridge.BoundRecoveryBranchSafetyByPartId.Values,
+                proof => proof.BranchKind == NetherRecoveryBranchKind.Rest && proof.IsAuthoritative
+            );
+            Assert.Contains(
+                bridge.BoundRecoveryBranchSafetyByPartId.Values,
+                proof => proof.BranchKind == NetherRecoveryBranchKind.Purification && proof.IsAuthoritative
+            );
+            Assert.Contains(
+                bridge.BoundRecoveryBranchSafetyByPartId.Values,
+                proof => proof.BranchKind == NetherRecoveryBranchKind.Transform
+                    && !proof.IsAuthoritative
+            );
+            Assert.Single(bridge.Invocations, action => action == NetherActionKind.SelectFloor);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_pauses_when_final_recovery_proof_is_missing_from_the_recapture()
     {
         NetherSnapshot routeStart = ScriptedRuntimeBridge.RecoveryProofRouteSnapshot(NetherSessionStatus.Play);
@@ -5132,6 +5187,11 @@ public class NetherAutoClimbControllerEndToEndTests
         public int TypedSemanticProviderRegistrationCount { get; private set; }
         public bool DropBoundRecoveryProofOnNextCapture { get; set; }
         public int DropBoundRecoveryProofOnCaptureNumber { get; set; }
+        /// <summary>
+        /// Models the native-positive-amount portfolio capture: a Transform option can be known
+        /// unavailable while the deterministic Recovery branches remain authoritative.
+        /// </summary>
+        public bool MarkBoundRecoveryTransformUnavailable { get; set; }
         public bool BindRouteSafetyHpToCurrentSnapshot { get; set; }
         public NetherActiveCodeErosionProjection ActiveCodeErosion { get; set; } =
             KnownEmptyCodeProjection();
@@ -5427,9 +5487,27 @@ public class NetherAutoClimbControllerEndToEndTests
         )
         {
             RecoveryBranchSafetyBindCount++;
-            BoundRecoveryBranchSafetyByPartId = proofs == null
+            var bound = proofs == null
                 ? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
                 : new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(proofs);
+            // Seed the first route-owned capture only. The next coordinator pass must preserve
+            // this known-unavailable Transform proof through the ordinary final binding rather
+            // than receiving a test-only mutation after it has made its decision.
+            if (MarkBoundRecoveryTransformUnavailable && RecoveryBranchSafetyBindCount == 1)
+            {
+                foreach ((long partId, NetherRecoveryBranchSafetyEvidence proof) in bound.ToArray())
+                {
+                    if (proof == null || proof.BranchKind != NetherRecoveryBranchKind.Transform)
+                        continue;
+                    bound[partId] = proof with
+                    {
+                        IsKnown = false,
+                        IsNextVisibleBranchSafe = false,
+                        UnknownReason = "no-owned-code-for-native-transform",
+                    };
+                }
+            }
+            BoundRecoveryBranchSafetyByPartId = bound;
         }
 
         public void BindRankFiveKeyProcurement(NetherRankFiveKeyProcurementDecision? decision)
@@ -6480,7 +6558,7 @@ public class NetherAutoClimbControllerEndToEndTests
             return new NetherStrategyVisibleMapEvidence(snapshot.Floors.ToArray(), rows);
         }
 
-        private static NetherRuntimeInteractivePreEntryInputsResult CompleteInteractivePreEntry(
+        internal static NetherRuntimeInteractivePreEntryInputsResult CompleteInteractivePreEntry(
             NetherSnapshot snapshot,
             NetherAutoClimbSettings settings,
             bool provideCompleteRecoveryBranchEvidence = false

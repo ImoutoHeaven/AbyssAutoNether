@@ -2641,8 +2641,9 @@ internal static class NetherAutoClimbController
             interactivePreEntry
         );
         // Carry the provisional selected branch into one final native capture. The capture must
-        // carry the exact Recovery proof and rank-five decision that produced this route; a
-        // changed/missing proof is a stale branch, not permission to reuse the old action.
+        // carry the exact deterministic Recovery proofs and rank-five decision that produced this
+        // route; a changed/missing proof is a stale branch, not permission to reuse the old action.
+        // A known-unavailable random Transform remains option-local unless it is the selected exit.
         _bridge.BindRecoveryBranchSafetyProofs(routeDecision.RecoveryBranchSafetyByPartId);
         _bridge.BindRankFiveKeyProcurement(routeDecision.RankFiveKeyProcurement);
         if (routeDecision.Route.HasSelection
@@ -2858,10 +2859,17 @@ internal static class NetherAutoClimbController
                 detail = "selected-recovery-proof-absent-or-mismatched:" + nodeId;
                 return false;
             }
-            if (capture.Input.RecoveryBranchSafetyByPartId.Values.Any(proof =>
-                    proof == null || !proof.IsAuthoritative))
+            // The exact dictionary was matched above. Rest and Purification are the two
+            // deterministic proofs required by the complete Recovery policy. Transform is a
+            // random optional branch: it may be known unavailable (for example, no owned Code)
+            // without invalidating a safe deterministic choice. If Transform were the selected
+            // exit, the final pre-entry safety evaluation above would already require it to be
+            // authoritative before it could be safe.
+            if (!HasAuthoritativeDeterministicRecoveryProofs(
+                    capture.Input.RecoveryBranchSafetyByPartId
+                ))
             {
-                detail = "selected-recovery-proof-not-authoritative:" + nodeId;
+                detail = "selected-recovery-deterministic-proof-not-authoritative:" + nodeId;
                 return false;
             }
         }
@@ -2887,6 +2895,36 @@ internal static class NetherAutoClimbController
             return false;
         }
         return true;
+    }
+
+    private static bool HasAuthoritativeDeterministicRecoveryProofs(
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>? proofs
+    )
+    {
+        if (proofs == null)
+            return false;
+
+        bool hasRest = false;
+        bool hasPurification = false;
+        foreach (NetherRecoveryBranchSafetyEvidence? proof in proofs.Values)
+        {
+            if (proof == null)
+                continue;
+            switch (proof.BranchKind)
+            {
+                case NetherRecoveryBranchKind.Rest:
+                    hasRest = true;
+                    if (!proof.IsAuthoritative)
+                        return false;
+                    break;
+                case NetherRecoveryBranchKind.Purification:
+                    hasPurification = true;
+                    if (!proof.IsAuthoritative)
+                        return false;
+                    break;
+            }
+        }
+        return hasRest && hasPurification;
     }
 
     private static bool DictionaryValuesMatch<TKey, TValue>(
