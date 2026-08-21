@@ -160,9 +160,10 @@ internal readonly record struct NetherOwnedCodePopupRegistrationDecision
 }
 
 /// <summary>
-/// Separates the one legitimate sequence-zero window (this owner has not registered its popup
-/// yet) from a stale, conflicting, or previously-observed registration.  Once a positive exact
-/// sequence has been seen, losing it is permanent evidence loss rather than a new wait budget.
+/// Separates a live owner's initial or replacement-registration gap from a stale or conflicting
+/// registration. Native Code-popup initialization awaits live data after registration, so a
+/// closed early popup may be replaced before its exact owner completes. The caller bounds this
+/// gap and never manufactures a ready popup.
 /// </summary>
 internal static class NetherOwnedCodePopupRegistrationReadiness
 {
@@ -190,8 +191,9 @@ internal static class NetherOwnedCodePopupRegistrationReadiness
         if (!hasRegistration)
         {
             return observedSequence > 0
-                ? NetherOwnedCodePopupRegistrationDecision.Unavailable(
-                    boundary + "-popup-registration-lost:sequence=" + observedSequence
+                ? NetherOwnedCodePopupRegistrationDecision.Awaiting(
+                    "awaiting-live-" + boundary + "-popup-replacement:generation="
+                        + expectedOwnerGeneration + ":previous-sequence=" + observedSequence
                 )
                 : NetherOwnedCodePopupRegistrationDecision.Awaiting(
                     "awaiting-live-" + boundary + "-popup:generation=" + expectedOwnerGeneration

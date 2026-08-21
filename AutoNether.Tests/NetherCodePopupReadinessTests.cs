@@ -144,19 +144,27 @@ public sealed class NetherCodePopupReadinessTests
             observedSequence: 0,
             hasRegistration: false
         );
-        NetherOwnedCodePopupRegistrationDecision lost = Registration(
-            observedSequence: 13,
-            hasRegistration: false
-        );
 
         Assert.True(firstGap.IsAwaiting);
         Assert.Equal(
             "awaiting-live-battle-result-code-popup:generation=11",
             firstGap.Detail
         );
-        Assert.False(lost.IsAwaiting);
-        Assert.Equal(NetherOwnedCodePopupRegistrationKind.Unavailable, lost.Kind);
-        Assert.Equal("battle-result-code-popup-registration-lost:sequence=13", lost.Detail);
+    }
+
+    [Fact]
+    public void Live_result_owner_waits_for_a_replacement_after_its_initial_popup_closes_during_model_initialization()
+    {
+        NetherOwnedCodePopupRegistrationDecision replacementGap = Registration(
+            observedSequence: 13,
+            hasRegistration: false
+        );
+
+        Assert.True(replacementGap.IsAwaiting);
+        Assert.Equal(
+            "awaiting-live-battle-result-code-popup-replacement:generation=11:previous-sequence=13",
+            replacementGap.Detail
+        );
     }
 
     [Fact]
