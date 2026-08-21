@@ -312,6 +312,60 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_rebinds_after_exact_owner_teardown_reports_faulted_continue_parent()
+    {
+        var bridge = new ScriptedRuntimeBridge();
+        bridge.CurrentSnapshot = bridge.SleepCheckpoint;
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+
+            NetherAutoClimbController.Update(); // Starts the exact one-ticket Continue parent.
+            Assert.Equal(NetherActionKind.Continue, bridge.Invocations.Last());
+            Assert.Equal(1, bridge.ContinueNativeInvokeCount);
+
+            // The live old FloorSelection owner is torn down after submitting Continue.  Its
+            // pooled parent observation reports Faulted even though no native builder exception
+            // exists; the controller must wait for a newer authoritative scene instead of pausing.
+            bridge.ContinueParentPollResultOverride = NetherNativeActionResult.UnknownOutcome(
+                "native-start-status-terminal-faulted"
+            );
+            bridge.FloorOwnerTerminated = true;
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(
+                NetherAutoClimbPhase.AwaitingContinueSceneHandoff,
+                NetherAutoClimbController.Phase
+            );
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.Equal(0, bridge.GetOnlyBeginCount);
+
+            bridge.CurrentRuntimeGeneration = 2;
+            bridge.CurrentSnapshot = bridge.NewSegment;
+            NetherAutoClimbController.Update(); // strictly newer entered FloorSelection
+            NetherAutoClimbController.Update(); // one GET-only refresh begins
+            NetherAutoClimbController.Update(); // authoritative post-Continue settlement
+
+            Assert.Equal(NetherAutoClimbPhase.Stable, NetherAutoClimbController.Phase);
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.Equal(1, bridge.GetOnlyBeginCount);
+            Assert.Equal(1, bridge.GetOnlyPollCount);
+            Assert.Equal(1, bridge.ContinueNativeInvokeCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_adopts_server_assigned_checkpoint_with_reused_identifiers()
     {
         var bridge = new ScriptedRuntimeBridge();
@@ -5136,6 +5190,7 @@ public class NetherAutoClimbControllerEndToEndTests
         public int FloorParentTerminalCount { get; private set; }
         public int ContinueParentPollCount { get; private set; }
         public List<string> Trace { get; } = new();
+        public NetherNativeActionResult? ContinueParentPollResultOverride { get; set; }
         public bool ContinueParentCompleted { get; set; }
         public bool FinishParentCompleted { get; set; }
         public Queue<NetherNativeActionResult> ResultFlowSteps { get; } = new();
@@ -6135,6 +6190,8 @@ public class NetherAutoClimbControllerEndToEndTests
         {
             ContinueParentPollCount++;
             Trace.Add("continue-parent-poll");
+            if (ContinueParentPollResultOverride is NetherNativeActionResult overridden)
+                return overridden;
             return ContinueParentCompleted
                 ? NetherNativeActionResult.Completed("native-continue-parent-terminal")
                 : NetherNativeActionResult.Started("native-continue-parent-pending");

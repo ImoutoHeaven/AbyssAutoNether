@@ -214,23 +214,37 @@ internal sealed class NetherContinueSceneCoordinator
             return NetherContinueSceneStep.WaitForTeardown("continue-parent-terminal:" + parent.Detail);
         }
 
-        if (parent.Kind == NetherNativeActionResultKind.UnknownOutcome
-            && parent.Detail.IndexOf("canceled", StringComparison.OrdinalIgnoreCase) >= 0)
+        bool parentCanceled = parent.Kind == NetherNativeActionResultKind.UnknownOutcome
+            && parent.Detail.IndexOf("canceled", StringComparison.OrdinalIgnoreCase) >= 0;
+        bool ownerTeardownFaulted = parent.Kind == NetherNativeActionResultKind.UnknownOutcome
+            && _driver.FloorOwnerTerminated
+            // The generated MoveNext postfix distinguishes a real builder exception from this
+            // exact source-less terminal observation. The latter occurred in the live log after
+            // the old owner was destroyed, while native Continue had already been submitted.
+            && string.Equals(
+                parent.Detail,
+                "native-start-status-terminal-faulted",
+                StringComparison.Ordinal
+            );
+        if (parentCanceled || ownerTeardownFaulted)
         {
-            // Current native HandleGameClearedIfNeededAsync changes to the next NetherTop scene
-            // and then awaits WaitWhile with the old SubViewController's
-            // GetCancellationTokenOnDestroy token. The exact owner teardown therefore cancels
-            // its generated HandleStartEventByStatusAsync parent after the transition was
-            // submitted. Teardown is not settlement: move only to the existing rebind gate,
-            // which still requires a newer controller, matching SubScene.OnEntered, an
-            // authoritative snapshot, and the exact one-ticket postcondition before reconcile.
+            // Fresh native ISIL shows HandleGameClearedIfNeededAsync submits
+            // RequestNetherContinueAsync and later awaits WaitWhile with the old
+            // SubViewController's GetCancellationTokenOnDestroy token. The observed parent may
+            // therefore be Canceled, or report this exact pooled terminal Faulted status, after
+            // the owner transition. Neither observation is settlement: require the existing
+            // newer-controller, matching OnEntered, authoritative-snapshot, and exact one-ticket
+            // postcondition gates before a GET-only reconciliation.
             if (_driver.FloorOwnerTerminated)
             {
                 _parentTerminalObserved = true;
                 _teardownWait.ObserveRegistration();
                 _stage = Stage.AwaitingRebind;
                 return NetherContinueSceneStep.WaitForRebind(
-                    "continue-parent-canceled-after-owner-transition:" + parent.Detail
+                    "continue-parent-"
+                        + (ownerTeardownFaulted ? "faulted" : "canceled")
+                        + "-after-owner-transition:"
+                        + parent.Detail
                 );
             }
             return TerminalPause("continue-parent-canceled:" + parent.Detail);

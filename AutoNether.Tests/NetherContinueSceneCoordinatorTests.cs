@@ -539,6 +539,46 @@ public class NetherContinueSceneCoordinatorTests
         Assert.Equal(0, driver.StartOrMutationCalls);
     }
 
+    [Fact]
+    public void Exact_owner_teardown_rebinds_after_recycled_parent_reports_terminal_faulted()
+    {
+        var driver = new FakeDriver(
+            parent: new[]
+            {
+                NetherNativeActionResult.Started("native-start-status-parent-pending"),
+                NetherNativeActionResult.UnknownOutcome("native-start-status-terminal-faulted"),
+            },
+            appliedSnapshot: AppliedSnapshot()
+        )
+        {
+            CurrentRuntimeGeneration = 10,
+        };
+        var coordinator = new NetherContinueSceneCoordinator(driver);
+
+        Assert.True(coordinator.Begin(Contract(), BeforeSnapshot(), ownerGeneration: 10));
+        Assert.Equal(NetherContinueSceneStepKind.WaitForTeardown, coordinator.Pump().Kind);
+
+        // Fresh native control flow destroys the exact old FloorSelection owner after it
+        // submitted Continue.  The pooled UniTask wrapper can then report Faulted without a
+        // builder exception; this is transition evidence, not settlement success.
+        driver.FloorOwnerTerminated = true;
+        NetherContinueSceneStep afterTeardown = coordinator.Pump();
+
+        Assert.Equal(NetherContinueSceneStepKind.WaitForRebind, afterTeardown.Kind);
+        Assert.Contains("faulted-after-owner-transition", afterTeardown.Detail);
+        Assert.True(coordinator.ParentTerminalObserved);
+        Assert.Equal(0, driver.GetOnlyBeginCalls);
+
+        driver.CurrentRuntimeGeneration = 11;
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+        Assert.Equal(NetherContinueSceneStepKind.Reconcile, coordinator.Pump().Kind);
+
+        Assert.Equal(NetherContinueSceneStepKind.Complete, coordinator.Pump().Kind);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(1, driver.GetOnlyPollCalls);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
     [Theory]
     [InlineData("native-result-faulted", "parent-fault")]
     [InlineData("native-result-canceled", "parent-canceled")]
