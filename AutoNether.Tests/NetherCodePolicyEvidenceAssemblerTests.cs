@@ -275,6 +275,131 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
+    public void Production_result_owned_offer_proves_a_positive_addition_without_future_route_rebind()
+    {
+        // Fresh current-game Cpp2IL proves that AbyssCodeSelectPopupController owns the result-page
+        // decision before FloorSelection is rebound. An empty portfolio addition removes nothing,
+        // so an exact deterministic passive buff can be compared over a positive unit interval
+        // without fabricating either future-route survival or Boss duration.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88300, NetherCodeFamily.Safe, power: 1);
+        NetherAutoClimbSettings settings = EquipmentSettings();
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            Package(snapshot, 0, 0),
+            snapshot,
+            [candidate],
+            [AttackMechanic(candidate.CodeId, 100)],
+            settings,
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherCodeEquipmentMutationEvidence mutation = captured.Evidence!
+            .EquipmentMutationValuesByKey[new NetherCodeMutationKey(candidate.CodeId, 0)];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            settings,
+            captured.Evidence!
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.False(mutation.Survival.IsKnown);
+        Assert.True(mutation.Survival.PreservesSurvivalForAdditiveMutation);
+        Assert.Equal(1, mutation.NativePortfolio.BossDurationSeconds);
+        Assert.Single(mutation.NativePortfolio.AfterWindows);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Production_result_owned_offer_keeps_timed_higher_value_addition_unknown_without_future_route_rebind()
+    {
+        // Fresh current-game BuffController still has HigherValue coexistence. A short stronger
+        // StartBattle buff can displace a retained permanent buff which does not resume when the
+        // short buff ends, so a one-second window cannot prove the complete Boss marginal.
+        NetherCodeState held = HeldCode(88305, NetherCodeFamily.Safe);
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            CodeCapacity = 2,
+            Codes = [held],
+        };
+        NetherCodeCandidate candidate = Candidate(88306, NetherCodeFamily.Safe, power: 1);
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            NativeMechanics = NetherStrategyEvidenceComponent<NetherStrategyNativeMechanicsEvidence>
+                .Known(new NetherStrategyNativeMechanicsEvidence([
+                    AttackMechanic(held.CodeId, 50),
+                ])),
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [
+                TimedAttackMechanic(
+                    candidate.CodeId,
+                    NetherStrategyTriggerKind.StartBattle,
+                    triggerMilliSeconds: 0,
+                    buffDurationMilliSeconds: 1_000,
+                    valuePermille: 100
+                ),
+            ],
+            EquipmentSettings(),
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence!
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+    }
+
+    [Fact]
+    public void Production_result_owned_offer_keeps_replacement_unknown_without_future_route_rebind()
+    {
+        NetherCodeState held = HeldCode(88310, NetherCodeFamily.Safe);
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            CodeCapacity = 1,
+            Codes = [held],
+        };
+        NetherCodeCandidate candidate = Candidate(88311, NetherCodeFamily.Safe, power: 1);
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            NativeMechanics = NetherStrategyEvidenceComponent<NetherStrategyNativeMechanicsEvidence>
+                .Known(new NetherStrategyNativeMechanicsEvidence([
+                    AttackMechanic(held.CodeId, 50),
+                ])),
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [AttackMechanic(candidate.CodeId, 100)],
+            EquipmentSettings(),
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherCodeEquipmentMutationEvidence mutation = captured.Evidence!
+            .EquipmentMutationValuesByKey[new NetherCodeMutationKey(candidate.CodeId, held.CodeId)];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.False(mutation.Survival.PreservesSurvivalForAdditiveMutation);
+        Assert.Equal(NetherCombatValueEvidenceKind.ReachableUnquantified, mutation.MechanismValue.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+    }
+
+    [Fact]
     public void Production_assembler_preserves_proven_survival_deficit_when_offer_cannot_prove_repair()
     {
         // Fresh Project.dll 53806a5b...1300 / GameAssembly 573fa800...c1fb:

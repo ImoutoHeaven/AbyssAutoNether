@@ -77,14 +77,62 @@ public sealed class AutoNetherBattleInteropContractTests
         // The result owner must therefore be independently gated and leave route horizons unknown
         // until FloorSelection rebinds, rather than pretending OnEntered still exists.
         string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+        string routeEvidence = Read(
+            "AutoNether",
+            "Services",
+            "NetherCodePolicyRouteEvidence.cs"
+        );
 
         Assert.Contains("HasActiveBattleResultCodeOwner()", runtime);
         Assert.Contains("TryCaptureBattleResultCodeStrategyEvidence", runtime);
         Assert.Contains("TryMapStrategyPartyModel", runtime);
         Assert.Contains(
-            "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind",
-            runtime
+            "NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()",
+            runtime,
+            StringComparison.Ordinal
         );
+        Assert.Contains(
+            "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind",
+            routeEvidence,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
+    public void Native_code_mechanic_capture_downcasts_base_typed_il2cpp_wrappers()
+    {
+        // Fresh current-game Cpp2IL (Project.dll
+        // 033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4) proves
+        // IAbilityEffectData exposes BattleSituationBase, AbilityTargetBase and AbilityEffectBase.
+        // Il2CppInterop therefore requires TryCast<T>; CLR pattern matching only sees the wrapper.
+        string capture = Read(
+            "AutoNether",
+            "Services",
+            "NetherNativeMechanicProductionCapture.cs"
+        );
+
+        Assert.Contains(
+            "TryCastNative<Project.BattleSituations.BattleSituationStartBattle>(source)",
+            capture,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "TryCastNative<Project.AbilityTarget.AbilityTargetFriend>(source)",
+            capture,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "TryCastNative<Project.AbilityEffect.AbilityEffectParameterBuff>(source)",
+            capture,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "Project.Ingame.BuffEnableConditions.ConditionParameterHasBuff>(value)",
+            capture,
+            StringComparison.Ordinal
+        );
+        Assert.DoesNotContain("NetherStrategyTriggerEvidence mapped = source switch", capture);
+        Assert.DoesNotContain("object? collection = effect switch", capture);
     }
 
     [Fact]

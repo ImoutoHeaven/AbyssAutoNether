@@ -96,6 +96,14 @@ internal readonly record struct NetherSurvivalRepairEvidence(
     string UnknownReason
 )
 {
+    /// <summary>
+    /// The result popup can precede the next FloorSelection binding. In that exact lifecycle gap,
+    /// a no-removal mutation may preserve the unknown survival baseline only when its independent
+    /// native portfolio evidence proves horizon-independent non-regression. This does not claim that
+    /// the unknown route has no deficit and is never valid for replacement.
+    /// </summary>
+    public bool PreservesSurvivalForAdditiveMutation { get; init; }
+
     public static NetherSurvivalRepairEvidence Unknown => UnknownFor(
         hasDeficit: false,
         "survival-deficit-evidence-unavailable"
@@ -113,6 +121,13 @@ internal readonly record struct NetherSurvivalRepairEvidence(
 
     public static NetherSurvivalRepairEvidence Known(bool hasDeficit, bool repairsDeficit) =>
         new(true, hasDeficit, repairsDeficit, string.Empty);
+
+    public static NetherSurvivalRepairEvidence ResultOwnedAdditiveWithoutRouteBaseline(
+        string reason
+    ) => UnknownFor(hasDeficit: false, reason) with
+    {
+        PreservesSurvivalForAdditiveMutation = true,
+    };
 }
 
 internal enum NetherNativeSpecialComparisonKind
@@ -434,7 +449,9 @@ internal sealed class NetherEquipmentCodeValuePolicy
         {
             return Missing("equipment-mutation-evidence-unavailable");
         }
-        if (!evidence.Survival.IsKnown)
+        if (!evidence.Survival.IsKnown
+            && !(evidence.RemoveCodeId == 0
+                && evidence.Survival.PreservesSurvivalForAdditiveMutation))
             return Missing(evidence.Survival.UnknownReason);
         if (evidence.Survival.HasDeficit && !evidence.Survival.RepairsDeficit)
             return NonPositive("candidate-does-not-repair-authoritative-survival-deficit");

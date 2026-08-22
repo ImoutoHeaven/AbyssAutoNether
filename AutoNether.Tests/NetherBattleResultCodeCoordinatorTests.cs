@@ -65,6 +65,65 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     }
 
     [Fact]
+    public void Result_owner_accepts_proven_additive_equipment_code_before_future_route_rebind()
+    {
+        NetherCodeCandidate candidate = Candidate(30024);
+        NetherCodePolicyEvidence evidence = EquipmentEvidence(candidate);
+        NetherCodeMutationKey key = new(candidate.CodeId, 0);
+        NetherCodeEquipmentMutationEvidence additive = evidence.EquipmentMutationValuesByKey[key];
+        var driver = new Driver
+        {
+            Snapshot = Snapshot() with { CodeReloadCount = 0 },
+            Candidates = new NetherRuntimeCodeCandidatesResult(
+                [candidate],
+                IsMasterComplete: true,
+                Detail: string.Empty
+            ),
+            Popup = ResultPopup(),
+            PopupIsPending = true,
+            // The native result-owned offer runs before FloorSelection rebinds, so there is no
+            // future-route survival baseline yet. The supplied evidence already proves this
+            // free-slot addition is positive and horizon-independent, so it remains selectable.
+            PolicyEvidence = evidence with
+            {
+                EquipmentMutationValuesByKey = new Dictionary<
+                    NetherCodeMutationKey,
+                    NetherCodeEquipmentMutationEvidence
+                >
+                {
+                    [key] = additive with
+                    {
+                        Survival = NetherSurvivalRepairEvidence
+                            .ResultOwnedAdditiveWithoutRouteBaseline(
+                                NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebindReason
+                            ),
+                    },
+                },
+            },
+        };
+        var flow = new NetherBattleResultCodeCoordinator(maximumPopupPolls: 2);
+        NetherAutoClimbSettings settings = Settings() with { CodeReloadReserve = 0 };
+
+        Assert.Equal(
+            NetherBattleResultCodeStepKind.AwaitingPopup,
+            flow.Pump(driver, settings, null, allowInvoke: true).Kind
+        );
+        Assert.Empty(driver.InvokedActions);
+
+        driver.PopupIsPending = false;
+        NetherBattleResultCodeStep invoked = flow.Pump(
+            driver,
+            settings,
+            null,
+            allowInvoke: true
+        );
+
+        Assert.Equal(NetherBattleResultCodeStepKind.AwaitingNative, invoked.Kind);
+        Assert.Equal(NetherActionKind.SelectCode, Assert.Single(driver.InvokedActions).Kind);
+        Assert.Equal(candidate.CodeId, driver.InvokedActions.Single().CodeId);
+    }
+
+    [Fact]
     public void Missing_cached_floor_snapshot_waits_for_a_late_authoritative_prime_then_selects_code()
     {
         var driver = new Driver

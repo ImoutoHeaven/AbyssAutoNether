@@ -2720,9 +2720,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             NetherCodePolicyRouteEvidence routeEvidence;
             if (!captureFloorRouteEvidence)
             {
-                routeEvidence = NetherCodePolicyRouteEvidence.Unknown(
-                    "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind"
-                );
+                routeEvidence = NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind();
             }
             else
             {

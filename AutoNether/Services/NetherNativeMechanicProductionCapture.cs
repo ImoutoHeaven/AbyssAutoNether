@@ -313,50 +313,85 @@ internal static class NetherNativeMechanicProductionCapture
     private static NetherStrategyTriggerEvidence MapStrategyTrigger(object source)
     {
         string identity = RuntimeTypeIdentifier(source);
-        if (source is not Project.BattleSituations.BattleSituationBase native)
+        Project.BattleSituations.BattleSituationBase? native =
+            TryCastNative<Project.BattleSituations.BattleSituationBase>(source);
+        if (native == null)
             return UnknownStrategyTrigger("unsupported-ability-situation-type:" + identity);
-        NetherStrategyNativeTriggerCapture subtype = source switch
+        NetherStrategyNativeTriggerCapture subtype;
+        if (TryCastNative<Project.BattleSituations.BattleSituationAboveErosion>(source) is { } aboveErosion)
         {
-            Project.BattleSituations.BattleSituationAboveErosion value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.AboveErosion, identity, value.Percent),
-            Project.BattleSituations.BattleSituationActionCount value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.ActionCount, identity, value.Count, (int)value.SkillTypeFlag),
-            Project.BattleSituations.BattleSituationActivateForceChain => KnownTriggerCapture(NetherStrategyTriggerKind.ActivateForceChain, identity),
-            Project.BattleSituations.BattleSituationAvoidance => KnownTriggerCapture(NetherStrategyTriggerKind.Avoidance, identity),
-            Project.BattleSituations.BattleSituationBattleFinish => KnownTriggerCapture(NetherStrategyTriggerKind.BattleFinish, identity),
-            Project.BattleSituations.BattleSituationBelowErosion value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.BelowErosion, identity, value.Percent),
-            Project.BattleSituations.BattleSituationBelowHp value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.BelowHp, identity, value.HpThreshold),
-            Project.BattleSituations.BattleSituationBuiltIn => KnownTriggerCapture(NetherStrategyTriggerKind.BuiltIn, identity),
-            Project.BattleSituations.BattleSituationCritical => KnownTriggerCapture(NetherStrategyTriggerKind.Critical, identity),
-            Project.BattleSituations.BattleSituationDeadEnemy => KnownTriggerCapture(NetherStrategyTriggerKind.DeadEnemy, identity),
-            Project.BattleSituations.BattleSituationDestroyEnemy => KnownTriggerCapture(NetherStrategyTriggerKind.DestroyEnemy, identity),
-            Project.BattleSituations.BattleSituationDuration value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.Duration, identity, value.MilliSec),
-            Project.BattleSituations.BattleSituationExceedHp value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.ExceedHp, identity, value.HpThreshold),
-            Project.BattleSituations.BattleSituationGameStart => KnownTriggerCapture(NetherStrategyTriggerKind.GameStart, identity),
-            Project.BattleSituations.BattleSituationGiveDamage => KnownTriggerCapture(NetherStrategyTriggerKind.GiveDamage, identity),
-            Project.BattleSituations.BattleSituationGiveRecovery => KnownTriggerCapture(NetherStrategyTriggerKind.GiveRecovery, identity),
-            Project.BattleSituations.BattleSituationImmediateExecution => KnownTriggerCapture(NetherStrategyTriggerKind.ImmediateExecution, identity),
-            Project.BattleSituations.BattleSituationOreMining => KnownTriggerCapture(NetherStrategyTriggerKind.OreMining, identity),
-            Project.BattleSituations.BattleSituationOtherAllyActivateActionSkill => KnownTriggerCapture(NetherStrategyTriggerKind.OtherAllyActivateActionSkill, identity),
-            Project.BattleSituations.BattleSituationReceiveAbnormal => KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveAbnormal, identity),
-            Project.BattleSituations.BattleSituationReceiveBuff value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveBuff, identity, (int)value.BuffType, value.StackCount),
-            Project.BattleSituations.BattleSituationReceiveDamage => KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveDamage, identity),
-            Project.BattleSituations.BattleSituationReceiveRecovery => KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveRecovery, identity),
-            Project.BattleSituations.BattleSituationServantSummonExist => KnownTriggerCapture(NetherStrategyTriggerKind.ServantSummonExist, identity),
-            Project.BattleSituations.BattleSituationServantSummonLeave => KnownTriggerCapture(NetherStrategyTriggerKind.ServantSummonLeave, identity),
-            Project.BattleSituations.BattleSituationSpendBuff value =>
-                KnownTriggerCapture(NetherStrategyTriggerKind.SpendBuff, identity, (int)value.BuffType),
-            Project.BattleSituations.BattleSituationStartBattle => KnownTriggerCapture(NetherStrategyTriggerKind.StartBattle, identity),
-            _ => new NetherStrategyNativeTriggerCapture(NetherStrategyTriggerKind.Unknown, identity)
+            subtype = KnownTriggerCapture(
+                NetherStrategyTriggerKind.AboveErosion,
+                NativeTypeIdentifier<Project.BattleSituations.BattleSituationAboveErosion>(),
+                aboveErosion.Percent
+            );
+        }
+        else if (TryCastNative<Project.BattleSituations.BattleSituationActionCount>(source) is { } actionCount)
+        {
+            subtype = KnownTriggerCapture(
+                NetherStrategyTriggerKind.ActionCount,
+                NativeTypeIdentifier<Project.BattleSituations.BattleSituationActionCount>(),
+                actionCount.Count,
+                (int)actionCount.SkillTypeFlag
+            );
+        }
+        else if (TryCastNative<Project.BattleSituations.BattleSituationActivateForceChain>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ActivateForceChain, NativeTypeIdentifier<Project.BattleSituations.BattleSituationActivateForceChain>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationAvoidance>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.Avoidance, NativeTypeIdentifier<Project.BattleSituations.BattleSituationAvoidance>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationBattleFinish>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.BattleFinish, NativeTypeIdentifier<Project.BattleSituations.BattleSituationBattleFinish>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationBelowErosion>(source) is { } belowErosion)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.BelowErosion, NativeTypeIdentifier<Project.BattleSituations.BattleSituationBelowErosion>(), belowErosion.Percent);
+        else if (TryCastNative<Project.BattleSituations.BattleSituationBelowHp>(source) is { } belowHp)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.BelowHp, NativeTypeIdentifier<Project.BattleSituations.BattleSituationBelowHp>(), belowHp.HpThreshold);
+        else if (TryCastNative<Project.BattleSituations.BattleSituationBuiltIn>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.BuiltIn, NativeTypeIdentifier<Project.BattleSituations.BattleSituationBuiltIn>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationCritical>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.Critical, NativeTypeIdentifier<Project.BattleSituations.BattleSituationCritical>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationDeadEnemy>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.DeadEnemy, NativeTypeIdentifier<Project.BattleSituations.BattleSituationDeadEnemy>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationDestroyEnemy>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.DestroyEnemy, NativeTypeIdentifier<Project.BattleSituations.BattleSituationDestroyEnemy>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationDuration>(source) is { } duration)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.Duration, NativeTypeIdentifier<Project.BattleSituations.BattleSituationDuration>(), duration.MilliSec);
+        else if (TryCastNative<Project.BattleSituations.BattleSituationExceedHp>(source) is { } exceedHp)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ExceedHp, NativeTypeIdentifier<Project.BattleSituations.BattleSituationExceedHp>(), exceedHp.HpThreshold);
+        else if (TryCastNative<Project.BattleSituations.BattleSituationGameStart>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.GameStart, NativeTypeIdentifier<Project.BattleSituations.BattleSituationGameStart>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationGiveDamage>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.GiveDamage, NativeTypeIdentifier<Project.BattleSituations.BattleSituationGiveDamage>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationGiveRecovery>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.GiveRecovery, NativeTypeIdentifier<Project.BattleSituations.BattleSituationGiveRecovery>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationImmediateExecution>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ImmediateExecution, NativeTypeIdentifier<Project.BattleSituations.BattleSituationImmediateExecution>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationOreMining>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.OreMining, NativeTypeIdentifier<Project.BattleSituations.BattleSituationOreMining>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationOtherAllyActivateActionSkill>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.OtherAllyActivateActionSkill, NativeTypeIdentifier<Project.BattleSituations.BattleSituationOtherAllyActivateActionSkill>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationReceiveAbnormal>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveAbnormal, NativeTypeIdentifier<Project.BattleSituations.BattleSituationReceiveAbnormal>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationReceiveBuff>(source) is { } receiveBuff)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveBuff, NativeTypeIdentifier<Project.BattleSituations.BattleSituationReceiveBuff>(), (int)receiveBuff.BuffType, receiveBuff.StackCount);
+        else if (TryCastNative<Project.BattleSituations.BattleSituationReceiveDamage>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveDamage, NativeTypeIdentifier<Project.BattleSituations.BattleSituationReceiveDamage>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationReceiveRecovery>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ReceiveRecovery, NativeTypeIdentifier<Project.BattleSituations.BattleSituationReceiveRecovery>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationServantSummonExist>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ServantSummonExist, NativeTypeIdentifier<Project.BattleSituations.BattleSituationServantSummonExist>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationServantSummonLeave>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.ServantSummonLeave, NativeTypeIdentifier<Project.BattleSituations.BattleSituationServantSummonLeave>());
+        else if (TryCastNative<Project.BattleSituations.BattleSituationSpendBuff>(source) is { } spendBuff)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.SpendBuff, NativeTypeIdentifier<Project.BattleSituations.BattleSituationSpendBuff>(), (int)spendBuff.BuffType);
+        else if (TryCastNative<Project.BattleSituations.BattleSituationStartBattle>(source) != null)
+            subtype = KnownTriggerCapture(NetherStrategyTriggerKind.StartBattle, NativeTypeIdentifier<Project.BattleSituations.BattleSituationStartBattle>());
+        else
+        {
+            subtype = new NetherStrategyNativeTriggerCapture(NetherStrategyTriggerKind.Unknown, identity)
             {
                 UnknownReason = "unsupported-ability-situation-type:" + identity,
-            },
-        };
+            };
+        }
         return NetherStrategyNativeMechanicCaptureMapper.MapTrigger(
             CaptureStrategyTriggerControl(native, subtype)
         );
@@ -663,20 +698,49 @@ internal static class NetherNativeMechanicProductionCapture
         if (source == null)
             return UnknownStrategyTarget("ability-target-unavailable");
         string identity = RuntimeTypeIdentifier(source);
-        NetherStrategyTargetKind kind = source switch
+        NetherStrategyTargetKind kind;
+        if (TryCastNative<Project.AbilityTarget.AbilityTargetAction>(source) != null)
         {
-            Project.AbilityTarget.AbilityTargetAction => NetherStrategyTargetKind.Action,
-            Project.AbilityTarget.AbilityTargetFriend => NetherStrategyTargetKind.Friend,
-            Project.AbilityTarget.AbilityTargetOpponent => NetherStrategyTargetKind.Opponent,
-            Project.AbilityTarget.AbilityTargetSelf => NetherStrategyTargetKind.Self,
-            Project.AbilityTarget.AbilityTargetSucceedAttack => NetherStrategyTargetKind.SucceedAttack,
-            Project.AbilityTarget.AbilityTargetSucceedRecover => NetherStrategyTargetKind.SucceedRecover,
-            Project.AbilityTarget.AbilityTargetTemplate => NetherStrategyTargetKind.Template,
-            _ => NetherStrategyTargetKind.Unknown,
-        };
+            kind = NetherStrategyTargetKind.Action;
+            identity = NativeTypeIdentifier<Project.AbilityTarget.AbilityTargetAction>();
+        }
+        else if (TryCastNative<Project.AbilityTarget.AbilityTargetFriend>(source) != null)
+        {
+            kind = NetherStrategyTargetKind.Friend;
+            identity = NativeTypeIdentifier<Project.AbilityTarget.AbilityTargetFriend>();
+        }
+        else if (TryCastNative<Project.AbilityTarget.AbilityTargetOpponent>(source) != null)
+        {
+            kind = NetherStrategyTargetKind.Opponent;
+            identity = NativeTypeIdentifier<Project.AbilityTarget.AbilityTargetOpponent>();
+        }
+        else if (TryCastNative<Project.AbilityTarget.AbilityTargetSelf>(source) != null)
+        {
+            kind = NetherStrategyTargetKind.Self;
+            identity = NativeTypeIdentifier<Project.AbilityTarget.AbilityTargetSelf>();
+        }
+        else if (TryCastNative<Project.AbilityTarget.AbilityTargetSucceedAttack>(source) != null)
+        {
+            kind = NetherStrategyTargetKind.SucceedAttack;
+            identity = NativeTypeIdentifier<Project.AbilityTarget.AbilityTargetSucceedAttack>();
+        }
+        else if (TryCastNative<Project.AbilityTarget.AbilityTargetSucceedRecover>(source) != null)
+        {
+            kind = NetherStrategyTargetKind.SucceedRecover;
+            identity = NativeTypeIdentifier<Project.AbilityTarget.AbilityTargetSucceedRecover>();
+        }
+        else if (TryCastNative<Project.AbilityTarget.AbilityTargetTemplate>(source) != null)
+        {
+            kind = NetherStrategyTargetKind.Template;
+            identity = NativeTypeIdentifier<Project.AbilityTarget.AbilityTargetTemplate>();
+        }
+        else
+            kind = NetherStrategyTargetKind.Unknown;
         if (kind == NetherStrategyTargetKind.Unknown)
             return UnknownStrategyTarget("unsupported-ability-target-type:" + identity);
-        if (source is Project.AbilityTarget.AbilityTargetGroupBase group)
+        Project.AbilityTarget.AbilityTargetGroupBase? group =
+            TryCastNative<Project.AbilityTarget.AbilityTargetGroupBase>(source);
+        if (group != null)
         {
             int elementFlags = (int)group._elementTypeFlag;
             int positionFlags = (int)group._partyPositionFlag;
@@ -717,106 +781,152 @@ internal static class NetherNativeMechanicProductionCapture
     private static NetherStrategyAbilityEffectEvidence MapStrategyAbilityEffect(object source)
     {
         string identity = RuntimeTypeIdentifier(source);
-        NetherStrategyNativeAbilityEffectCapture capture = source switch
+        NetherStrategyNativeAbilityEffectCapture capture;
+        if (TryCastNative<Project.AbilityEffect.AbilityEffectAbnormalApply>(source) is { } abnormalApply)
         {
-            Project.AbilityEffect.AbilityEffectAbnormalApply value =>
-                MapStrategyAbnormalApply(value, identity),
-            Project.AbilityEffect.AbilityEffectAbnormalRecovery value =>
-                new NetherStrategyNativeAbilityEffectCapture(
-                    NetherStrategyAbilityEffectKind.AbnormalRecovery,
-                    identity
-                )
-                {
-                    AbnormalType = (int)value.AbnormalType,
-                    AbnormalLevel = value.Level,
-                    ParametersKnown = true,
-                },
-            Project.AbilityEffect.AbilityEffectActionPatternChange =>
-                UnsupportedStrategyEffectParameters(
-                    NetherStrategyAbilityEffectKind.ActionPatternChange,
-                    identity
-                ),
-            Project.AbilityEffect.AbilityEffectAppendSkill =>
-                UnsupportedStrategyEffectParameters(
-                    NetherStrategyAbilityEffectKind.AppendSkill,
-                    identity
-                ),
-            Project.AbilityEffect.AbilityEffectChargeMana value =>
-                new NetherStrategyNativeAbilityEffectCapture(
-                    NetherStrategyAbilityEffectKind.ChargeMana,
-                    identity
-                )
-                {
-                    ManaEnergy = value.Energy,
-                    ParametersKnown = true,
-                },
-            Project.AbilityEffect.AbilityEffectErosionLinkedBuff value =>
-                MapStrategyErosionLinkedBuff(value, identity),
-            Project.AbilityEffect.AbilityEffectHpLinkedBuff value =>
-                MapStrategyHpLinkedBuff(value, identity),
-            Project.AbilityEffect.AbilityEffectParameterBuff value =>
-                MapStrategyParameterBuff(value, identity),
-            Project.AbilityEffect.AbilityEffectPassiveBuff value =>
-                MapStrategyPassiveBuff(value, identity),
-            Project.AbilityEffect.AbilityEffectRecoverHp value =>
-                new NetherStrategyNativeAbilityEffectCapture(
-                    NetherStrategyAbilityEffectKind.RecoverHp,
-                    identity
-                )
-                {
-                    RecoverHpHealType = (int)value.HealType,
-                    RecoverHpFixedValue = value.FixedValue,
-                    RecoverHpStatusSourceType = (int)value.StatusSourceType,
-                    RecoverHpRatePermille = value.RatePerMille,
-                    RecoverHpMaxHeal = value.MaxHeal,
-                    ParametersKnown = true,
-                },
-            Project.AbilityEffect.AbilityEffectSkillCharge value =>
-                new NetherStrategyNativeAbilityEffectCapture(
-                    NetherStrategyAbilityEffectKind.SkillCharge,
-                    identity
-                )
-                {
-                    SkillChargePermille = value.ChargePermille,
-                    ParametersKnown = true,
-                },
-            Project.AbilityEffect.AbilityEffectStackLinkedBuff value =>
-                MapStrategyStackLinkedBuff(value, identity),
-            Project.AbilityEffect.AbilityEffectStageFieldManaGainDown value =>
-                new NetherStrategyNativeAbilityEffectCapture(
-                    NetherStrategyAbilityEffectKind.StageFieldManaGainDown,
-                    identity
-                )
-                {
-                    StageFieldReductionPermille = value.ReductionPermille,
-                    StageFieldManaGainSourceFlags = (int)value.TargetSources,
-                    ParametersKnown = true,
-                },
-            Project.AbilityEffect.AbilityEffectSummonParameterAdditionRate value =>
-                new NetherStrategyNativeAbilityEffectCapture(
-                    NetherStrategyAbilityEffectKind.SummonParameterAdditionRate,
-                    identity
-                )
-                {
-                    SummonParameterAdditionRatePermille = value.GetParameterAdditionRatePermille(),
-                    ParametersKnown = true,
-                },
-            Project.AbilityEffect.AbilityEffectTemplate =>
-                new NetherStrategyNativeAbilityEffectCapture(
-                    NetherStrategyAbilityEffectKind.Template,
-                    identity
-                )
-                {
-                    ParametersKnown = true,
-                },
-            _ => new NetherStrategyNativeAbilityEffectCapture(
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectAbnormalApply>();
+            capture = MapStrategyAbnormalApply(abnormalApply, identity);
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectAbnormalRecovery>(source) is { } abnormalRecovery)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectAbnormalRecovery>();
+            capture = new NetherStrategyNativeAbilityEffectCapture(
+                NetherStrategyAbilityEffectKind.AbnormalRecovery,
+                identity
+            )
+            {
+                AbnormalType = (int)abnormalRecovery.AbnormalType,
+                AbnormalLevel = abnormalRecovery.Level,
+                ParametersKnown = true,
+            };
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectActionPatternChange>(source) != null)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectActionPatternChange>();
+            capture = UnsupportedStrategyEffectParameters(
+                NetherStrategyAbilityEffectKind.ActionPatternChange,
+                identity
+            );
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectAppendSkill>(source) != null)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectAppendSkill>();
+            capture = UnsupportedStrategyEffectParameters(
+                NetherStrategyAbilityEffectKind.AppendSkill,
+                identity
+            );
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectChargeMana>(source) is { } chargeMana)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectChargeMana>();
+            capture = new NetherStrategyNativeAbilityEffectCapture(
+                NetherStrategyAbilityEffectKind.ChargeMana,
+                identity
+            )
+            {
+                ManaEnergy = chargeMana.Energy,
+                ParametersKnown = true,
+            };
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectErosionLinkedBuff>(source) is { } erosionLinked)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectErosionLinkedBuff>();
+            capture = MapStrategyErosionLinkedBuff(erosionLinked, identity);
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectHpLinkedBuff>(source) is { } hpLinked)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectHpLinkedBuff>();
+            capture = MapStrategyHpLinkedBuff(hpLinked, identity);
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectParameterBuff>(source) is { } parameterBuff)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectParameterBuff>();
+            capture = MapStrategyParameterBuff(parameterBuff, identity);
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectPassiveBuff>(source) is { } passiveBuff)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectPassiveBuff>();
+            capture = MapStrategyPassiveBuff(passiveBuff, identity);
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectRecoverHp>(source) is { } recoverHp)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectRecoverHp>();
+            capture = new NetherStrategyNativeAbilityEffectCapture(
+                NetherStrategyAbilityEffectKind.RecoverHp,
+                identity
+            )
+            {
+                RecoverHpHealType = (int)recoverHp.HealType,
+                RecoverHpFixedValue = recoverHp.FixedValue,
+                RecoverHpStatusSourceType = (int)recoverHp.StatusSourceType,
+                RecoverHpRatePermille = recoverHp.RatePerMille,
+                RecoverHpMaxHeal = recoverHp.MaxHeal,
+                ParametersKnown = true,
+            };
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectSkillCharge>(source) is { } skillCharge)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectSkillCharge>();
+            capture = new NetherStrategyNativeAbilityEffectCapture(
+                NetherStrategyAbilityEffectKind.SkillCharge,
+                identity
+            )
+            {
+                SkillChargePermille = skillCharge.ChargePermille,
+                ParametersKnown = true,
+            };
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectStackLinkedBuff>(source) is { } stackLinked)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectStackLinkedBuff>();
+            capture = MapStrategyStackLinkedBuff(stackLinked, identity);
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectStageFieldManaGainDown>(source) is { } manaGainDown)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectStageFieldManaGainDown>();
+            capture = new NetherStrategyNativeAbilityEffectCapture(
+                NetherStrategyAbilityEffectKind.StageFieldManaGainDown,
+                identity
+            )
+            {
+                StageFieldReductionPermille = manaGainDown.ReductionPermille,
+                StageFieldManaGainSourceFlags = (int)manaGainDown.TargetSources,
+                ParametersKnown = true,
+            };
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectSummonParameterAdditionRate>(source) is { } summonRate)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectSummonParameterAdditionRate>();
+            capture = new NetherStrategyNativeAbilityEffectCapture(
+                NetherStrategyAbilityEffectKind.SummonParameterAdditionRate,
+                identity
+            )
+            {
+                SummonParameterAdditionRatePermille = summonRate.GetParameterAdditionRatePermille(),
+                ParametersKnown = true,
+            };
+        }
+        else if (TryCastNative<Project.AbilityEffect.AbilityEffectTemplate>(source) != null)
+        {
+            identity = NativeTypeIdentifier<Project.AbilityEffect.AbilityEffectTemplate>();
+            capture = new NetherStrategyNativeAbilityEffectCapture(
+                NetherStrategyAbilityEffectKind.Template,
+                identity
+            )
+            {
+                ParametersKnown = true,
+            };
+        }
+        else
+        {
+            capture = new NetherStrategyNativeAbilityEffectCapture(
                 NetherStrategyAbilityEffectKind.Unknown,
                 identity
             )
             {
                 ParameterUnknownReason = "unsupported-ability-effect-type:" + identity,
-            },
-        };
+            };
+        }
         return NetherStrategyNativeMechanicCaptureMapper.MapAbilityEffect(capture);
     }
 
@@ -1024,7 +1134,9 @@ internal static class NetherNativeMechanicProductionCapture
         var mapped = new List<NetherStrategyNativeBuffParameterCapture>(values.Count);
         foreach (object raw in values)
         {
-            if (raw is not Project.Ingame.BuffParameterByType parameter)
+            Project.Ingame.BuffParameterByType? parameter =
+                TryCastNative<Project.Ingame.BuffParameterByType>(raw);
+            if (parameter == null)
             {
                 parameters = mapped;
                 error = "invalid-buff-parameter-entry:" + RuntimeTypeIdentifier(raw);
@@ -1268,34 +1380,58 @@ internal static class NetherNativeMechanicProductionCapture
         foreach (object value in values)
         {
             string identity = RuntimeTypeIdentifier(value);
-            NetherStrategyBuffConditionEvidence condition = value switch
+            NetherStrategyBuffConditionEvidence condition;
+            if (TryCastNative<Project.Ingame.BuffEnableConditions.ConditionParameterHpBelowOrEqual>(
+                    value
+                ) is { } below)
             {
-                Project.Ingame.BuffEnableConditions.ConditionParameterHpBelowOrEqual typed =>
-                    new(NetherStrategyBuffConditionKind.HpBelowOrEqual, identity)
-                    {
-                        HpThresholdPermille = typed.HpThreshold.Value,
-                    },
-                Project.Ingame.BuffEnableConditions.ConditionParameterHpAboveOrEqual typed =>
-                    new(NetherStrategyBuffConditionKind.HpAboveOrEqual, identity)
-                    {
-                        HpThresholdPermille = typed.HpThreshold.Value,
-                    },
-                Project.Ingame.BuffEnableConditions.ConditionParameterHpFull =>
-                    new(NetherStrategyBuffConditionKind.HpFull, identity),
-                Project.Ingame.BuffEnableConditions.ConditionParameterHasBuff typed =>
-                    new(NetherStrategyBuffConditionKind.HasBuff, identity)
-                    {
-                        RequiredBuffType = new NetherStrategyBuffType((int)typed.BuffType),
-                        RequiredBuffStack = typed.Stack,
-                    },
-                _ => new NetherStrategyBuffConditionEvidence(
+                identity = NativeTypeIdentifier<
+                    Project.Ingame.BuffEnableConditions.ConditionParameterHpBelowOrEqual>();
+                condition = new(NetherStrategyBuffConditionKind.HpBelowOrEqual, identity)
+                {
+                    HpThresholdPermille = below.HpThreshold.Value,
+                };
+            }
+            else if (TryCastNative<
+                    Project.Ingame.BuffEnableConditions.ConditionParameterHpAboveOrEqual>(value)
+                is { } above)
+            {
+                identity = NativeTypeIdentifier<
+                    Project.Ingame.BuffEnableConditions.ConditionParameterHpAboveOrEqual>();
+                condition = new(NetherStrategyBuffConditionKind.HpAboveOrEqual, identity)
+                {
+                    HpThresholdPermille = above.HpThreshold.Value,
+                };
+            }
+            else if (TryCastNative<
+                    Project.Ingame.BuffEnableConditions.ConditionParameterHpFull>(value) != null)
+            {
+                identity = NativeTypeIdentifier<
+                    Project.Ingame.BuffEnableConditions.ConditionParameterHpFull>();
+                condition = new(NetherStrategyBuffConditionKind.HpFull, identity);
+            }
+            else if (TryCastNative<
+                    Project.Ingame.BuffEnableConditions.ConditionParameterHasBuff>(value)
+                is { } hasBuff)
+            {
+                identity = NativeTypeIdentifier<
+                    Project.Ingame.BuffEnableConditions.ConditionParameterHasBuff>();
+                condition = new(NetherStrategyBuffConditionKind.HasBuff, identity)
+                {
+                    RequiredBuffType = new NetherStrategyBuffType((int)hasBuff.BuffType),
+                    RequiredBuffStack = hasBuff.Stack,
+                };
+            }
+            else
+            {
+                condition = new NetherStrategyBuffConditionEvidence(
                     NetherStrategyBuffConditionKind.Unknown,
                     identity
                 )
                 {
                     UnknownReason = "unsupported-buff-condition-parameter:" + identity,
-                },
-            };
+                };
+            }
             mapped.Add(condition);
             if (!condition.IsKnown)
             {
@@ -1465,13 +1601,10 @@ internal static class NetherNativeMechanicProductionCapture
     )
     {
         var values = new HashSet<int>();
-        object? collection = effect switch
-        {
-            Project.AbilityEffect.AbilityEffectParameterBuff typed => typed.Buffs,
-            Project.AbilityEffect.AbilityEffectPassiveBuff typed => typed.Buffs,
-            Project.AbilityEffect.AbilityEffectStackLinkedBuff typed => typed.Buffs,
-            _ => null,
-        };
+        object? collection =
+            TryCastNative<Project.AbilityEffect.AbilityEffectParameterBuff>(effect)?.Buffs
+            ?? (object?)TryCastNative<Project.AbilityEffect.AbilityEffectPassiveBuff>(effect)?.Buffs
+            ?? TryCastNative<Project.AbilityEffect.AbilityEffectStackLinkedBuff>(effect)?.Buffs;
         if (collection != null)
         {
             if (!NetherRuntimeEnumerableReader.TryRead(collection, out List<object> entries, out string detail))
@@ -1482,8 +1615,9 @@ internal static class NetherNativeMechanicProductionCapture
             }
             foreach (object entry in entries)
             {
-                if (entry is not Project.Ingame.BuffParameterByType parameter
-                    || (int)parameter.buffType <= 0)
+                Project.Ingame.BuffParameterByType? parameter =
+                    TryCastNative<Project.Ingame.BuffParameterByType>(entry);
+                if (parameter == null || (int)parameter.buffType <= 0)
                 {
                     buffTypes = Array.Empty<int>();
                     error = "invalid-buff-parameter-entry";
@@ -1492,7 +1626,9 @@ internal static class NetherNativeMechanicProductionCapture
                 values.Add((int)parameter.buffType);
             }
         }
-        if (effect is Project.AbilityEffect.AbilityEffectErosionLinkedBuff erosion)
+        Project.AbilityEffect.AbilityEffectErosionLinkedBuff? erosion =
+            TryCastNative<Project.AbilityEffect.AbilityEffectErosionLinkedBuff>(effect);
+        if (erosion != null)
         {
             if (erosion.Min?.Effect == null || erosion.Max?.Effect == null)
             {
@@ -1503,7 +1639,9 @@ internal static class NetherNativeMechanicProductionCapture
             values.Add((int)erosion.Min.Effect.buffType);
             values.Add((int)erosion.Max.Effect.buffType);
         }
-        if (effect is Project.AbilityEffect.AbilityEffectHpLinkedBuff hp)
+        Project.AbilityEffect.AbilityEffectHpLinkedBuff? hp =
+            TryCastNative<Project.AbilityEffect.AbilityEffectHpLinkedBuff>(effect);
+        if (hp != null)
         {
             if (hp.Min?.Effect == null || hp.Max?.Effect == null)
             {
@@ -1524,6 +1662,12 @@ internal static class NetherNativeMechanicProductionCapture
         error = string.Empty;
         return true;
     }
+
+    private static T? TryCastNative<T>(object? value) where T : Il2CppObjectBase =>
+        value is Il2CppObjectBase native ? native.TryCast<T>() : null;
+
+    private static string NativeTypeIdentifier<T>() =>
+        typeof(T).FullName ?? typeof(T).Name;
 
     private static string RuntimeTypeIdentifier(object? value) =>
         value?.GetType().FullName ?? "null";

@@ -13,6 +13,9 @@ namespace AutoNether.Services;
 /// </summary>
 internal sealed record NetherCodePolicyRouteEvidence
 {
+    public const string BattleResultBeforeFloorRebindReason =
+        "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind";
+
     public bool IsKnown { get; init; }
     public int MinimumBattleStartErosion { get; init; }
     public int MaximumBattleStartErosion { get; init; }
@@ -26,12 +29,23 @@ internal sealed record NetherCodePolicyRouteEvidence
         Array.Empty<NetherConfirmedCombatErosion>();
     public string UnknownReason { get; init; } = string.Empty;
 
+    public bool IsBattleResultBeforeFloorRebind =>
+        !IsKnown
+        && string.Equals(
+            UnknownReason,
+            BattleResultBeforeFloorRebindReason,
+            StringComparison.Ordinal
+        );
+
     public static NetherCodePolicyRouteEvidence Unknown(string reason) => new()
     {
         UnknownReason = string.IsNullOrWhiteSpace(reason)
             ? "code-policy-route-horizon-unavailable"
             : reason,
     };
+
+    public static NetherCodePolicyRouteEvidence BattleResultBeforeFloorRebind() =>
+        Unknown(BattleResultBeforeFloorRebindReason);
 }
 
 internal readonly record struct NetherCodePolicyBattleStageRow(long Id, int TimeLimitSeconds);

@@ -138,6 +138,10 @@ _Avoid_: Display-power ordering, offence/defence weighted sum, front-only percen
 Survival repair remains the highest Equipment tier, but a Code may enter it only when the current lifecycle contains an authoritative before/after survival projection. In the current client, Event HP becomes authoritative in `NetherUpdateEventResponseEntity.t_nether_characters`, battle HP becomes authoritative in `NetherClearBattleResponseEntity.t_nether_characters`, and future combat damage is resolved by the live `UnitDamageCalculator`, including randomness. The Code Offer lifecycle therefore cannot prove that an offered maximum-HP or defence mutation repairs an already-proven route deficit. It must preserve that deficit, mark only the repair relationship unknown, and reject the dependent candidate rather than fabricate a positive repair. A future game version may make this tier reachable only by exposing an exact pre-entry damage/survival contract.
 _Avoid_: Treating a defensive percentage as proof of survival, erasing a known deficit when repair evidence is missing
 
+**Battle-Result Additive Non-Regression**:
+The narrow Equipment proof available while the native battle-result Code owner is live after `FloorSelection` teardown and before the next floor scene rebinds. The future route and survival baseline remain unknown. An acquisition may nevertheless proceed when it removes no held Code and current native mechanics prove a deterministic positive contribution whose non-regression does not depend on the missing horizon: either every participating buff uses unconditional `Allow` coexistence, or a non-`Allow` buff is an unconditional, deterministic, permanent passive `BuiltIn` effect. This does not claim that the unknown route is safe or that a defensive Code repairs a deficit. Replacements, delayed- or recurring-only effects, finite `HigherValue`/other replacing effects, incompatible mechanics, and all other dependent unknowns remain fail-closed.
+_Avoid_: Treating an unknown route as safe, allowing replacement without a horizon, filling spare capacity without a proven positive marginal
+
 **Defensive Portfolio Comparison**:
 For effects with the same recipient set, compare the exact per-character relative effective-HP change through the native HP, defence, and taken-damage chains. For different recipient sets, compare lexicographically by the number of benefiting rear-row characters, then the weakest benefiting rear character's effective-HP gain, then the remaining aggregate gain. A front-only effect cannot outrank a usable rear-row defence merely because its description percentage is larger.
 _Avoid_: Raw description percentage, aggregate gain that hides an unprotected rear character
@@ -690,3 +694,35 @@ is scoped to a single proven node: the route-owned node when the route committed
 one (including the recovered current-node identity of an already-open ownerless
 popup), otherwise the node a uniquely resolved projection proves. With no proven
 node the legacy key-only join remains, and it stays fail-closed on ambiguity.
+
+## Current-world Code-offer authority (2026-08-22)
+
+Fresh read-only Docker Cpp2IL evidence under
+`.scratch/code-offer-rejection-rca/fresh-native/` uses Project.dll SHA-256
+`033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4`,
+GameAssembly.dll SHA-256
+`f2ad94781c161fe93040463b884c328599a40c78079aecacbe17a9b78edfc767`, and
+`global-metadata.dat` SHA-256
+`d7dffa623675ac493a0a4c7cfe8dc729bc37846b455a5284af94a901c1e25c27`.
+Cpp2IL `2022.1.0-pre-release.21+58fc404ac503f4e512055cafc48c03088fc6e224`
+reported Unity `6000.3.8f1`; diffable and ISIL decompilation both exited zero.
+
+`IAbilityEffectData` exposes `List<BattleSituationBase>`, `AbilityTargetBase`,
+and `AbilityEffectBase`. Concrete situations, targets, effects, buff conditions,
+and buff parameters are native subclasses or interface implementations behind
+those Il2CppInterop wrappers. Production capture must use native `TryCast<T>()`
+for subtype dispatch; CLR pattern matching against the wrapper's managed
+`GetType()` is not authoritative and previously made every offered mechanic
+unknown.
+
+`AbyssCodeSelectPopupController.InitializeView` stores the confirm and cancel
+callbacks separately. Fresh ISIL proves the select handler invokes `_onConfirm`
+with the selected Code ID while the keep handler invokes `_onCancel`. The popup
+can remain authoritative after the prior floor scene has terminated and before
+the next one rebinds. In that exact lifecycle gap, Battle-Result Additive
+Non-Regression permits only a proven positive free-slot addition whose native
+coexistence cannot create a later portfolio loss: unconditional `Allow`, or an
+unconditional deterministic permanent passive `BuiltIn` effect. A finite
+`HigherValue` effect still requires the real route horizon because it can remove
+a retained weaker group that does not resume. The boundary never permits a
+replacement or invents a future route horizon.

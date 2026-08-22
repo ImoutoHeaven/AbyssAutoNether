@@ -150,7 +150,7 @@ internal static class NetherCodePolicyEvidenceAssembler
                         FindOwnedMechanic(ownedMechanics, removal),
                         party
                     ),
-                    Survival = MapSurvivalRepair(routeEvidence),
+                    Survival = MapSurvivalRepair(routeEvidence, removal),
                     NativeComparison = nativeComparison,
                     NativeComparisons = nativeComparisons,
                     MechanismPortfolio = mechanismPortfolio,
@@ -234,10 +234,19 @@ internal static class NetherCodePolicyEvidenceAssembler
     }
 
     private static NetherSurvivalRepairEvidence MapSurvivalRepair(
-        NetherCodePolicyRouteEvidence? routeEvidence
+        NetherCodePolicyRouteEvidence? routeEvidence,
+        long removalCodeId
     )
     {
-        if (routeEvidence?.IsKnown != true || !routeEvidence.SurvivalBaselineKnown)
+        if (routeEvidence?.IsKnown != true)
+        {
+            return removalCodeId == 0 && routeEvidence?.IsBattleResultBeforeFloorRebind == true
+                ? NetherSurvivalRepairEvidence.ResultOwnedAdditiveWithoutRouteBaseline(
+                    routeEvidence.UnknownReason
+                )
+                : NetherSurvivalRepairEvidence.Unknown;
+        }
+        if (!routeEvidence.SurvivalBaselineKnown)
             return NetherSurvivalRepairEvidence.Unknown;
         if (!routeEvidence.HasSurvivalDeficit)
             return NetherSurvivalRepairEvidence.Known(hasDeficit: false, repairsDeficit: false);
@@ -1272,7 +1281,26 @@ internal static class NetherCodePolicyEvidenceAssembler
             error = "native-retained-portfolio-input-unavailable";
             return false;
         }
-        if (routeEvidence?.BossDurationKnown != true || routeEvidence.BossDurationSeconds <= 0)
+        int comparisonSeconds;
+        if (routeEvidence?.BossDurationKnown == true && routeEvidence.BossDurationSeconds > 0)
+        {
+            comparisonSeconds = routeEvidence.BossDurationSeconds;
+        }
+        else if (removalCodeId == 0 && routeEvidence?.IsBattleResultBeforeFloorRebind == true)
+        {
+            if (!CanUseBattleResultAdditiveUnitInterval(candidate))
+            {
+                error = "battle-result-additive-native-horizon-required:" + candidate.MechanicId;
+                return false;
+            }
+
+            // The native result popup exists before the next route can be rebound. A unit interval
+            // is complete only for an unconditional Allow addition, which cannot suppress retained
+            // buffs, or a deterministic permanent BuiltIn buff. Finite non-Allow coexistence can
+            // remove a retained group that never resumes and therefore still needs the real horizon.
+            comparisonSeconds = 1;
+        }
+        else
         {
             error = string.IsNullOrWhiteSpace(routeEvidence?.BossDurationUnknownReason)
                 ? "boss-duration-unavailable"
@@ -1288,14 +1316,14 @@ internal static class NetherCodePolicyEvidenceAssembler
         if (!TryBuildNativePortfolioWindows(
                 before,
                 party,
-                routeEvidence.BossDurationSeconds,
+                comparisonSeconds,
                 out IReadOnlyList<NetherNativeBuffWindow> beforeWindows,
                 out error
             )
             || !TryBuildNativePortfolioWindows(
                 after,
                 party,
-                routeEvidence.BossDurationSeconds,
+                comparisonSeconds,
                 out IReadOnlyList<NetherNativeBuffWindow> afterWindows,
                 out error
             ))
@@ -1306,9 +1334,33 @@ internal static class NetherCodePolicyEvidenceAssembler
         comparison = new NetherNativePortfolioComparisonInput(
             beforeWindows,
             afterWindows,
-            routeEvidence.BossDurationSeconds
+            comparisonSeconds
         );
         return true;
+    }
+
+    private static bool CanUseBattleResultAdditiveUnitInterval(
+        NetherStrategyNativeMechanic candidate
+    )
+    {
+        if (!candidate.IsKnown
+            || candidate.AbilityEffect.Conditions.Count != 0
+            || candidate.BuffStrategies.Any(strategy => strategy == null || !strategy.IsKnown))
+        {
+            return false;
+        }
+
+        if (candidate.BuffStrategies.Count > 0
+            && candidate.BuffStrategies.All(strategy =>
+                strategy.Coexistence == NetherStrategyBuffCoexistenceKind.Allow))
+        {
+            return true;
+        }
+
+        return candidate.AbilityEffect.Kind == NetherStrategyAbilityEffectKind.PassiveBuff
+            && candidate.Triggers.Count == 1
+            && candidate.Triggers[0].Kind == NetherStrategyTriggerKind.BuiltIn
+            && IsDeterministicTrigger(candidate.Triggers[0]);
     }
 
     private static bool TryBuildNativePortfolioWindows(
