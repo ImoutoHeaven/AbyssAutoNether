@@ -52,6 +52,76 @@ internal readonly record struct NetherCodePolicyBattleStageRow(long Id, int Time
 
 internal static class NetherCodePolicyRouteEvidenceMapper
 {
+    /// <summary>
+    /// Keeps future route, erosion and survival evidence unknown while recovering only the Boss
+    /// duration that is invariant for the already validated current-map graph. Fresh native
+    /// CreateModel evidence joins Boss floor master id -> battle stage id -> time_limit.
+    /// </summary>
+    public static NetherCodePolicyRouteEvidence MapBattleResultBeforeFloorRebind(
+        NetherSnapshot snapshot,
+        IReadOnlyList<NetherStrategyBattleMasterRow> battleRows,
+        IReadOnlyList<NetherCodePolicyBattleStageRow> battleStageRows
+    )
+    {
+        NetherCodePolicyRouteEvidence mapped =
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind();
+        if (snapshot == null || snapshot.Floors == null)
+        {
+            return mapped with
+            {
+                BossDurationUnknownReason = "battle-result-boss-floor-identity-unavailable",
+            };
+        }
+        if (battleRows == null || battleStageRows == null)
+        {
+            return mapped with
+            {
+                BossDurationUnknownReason = "boss-stage-master-cache-unavailable",
+            };
+        }
+
+        NetherFloorNode[] bossFloors = snapshot.Floors
+            .Where(floor => floor != null
+                && floor.NodeType == NetherFloorNodeType.Boss
+                && floor.FloorId > 0)
+            .ToArray();
+        if (bossFloors.Length != 1)
+        {
+            return mapped with
+            {
+                BossDurationUnknownReason = "battle-result-boss-floor-identity-unavailable",
+            };
+        }
+
+        NetherStrategyBattleMasterRow[] battles = battleRows
+            .Where(row => row.MapFloorMasterId == bossFloors[0].FloorId)
+            .ToArray();
+        if (battles.Length != 1)
+        {
+            return mapped with
+            {
+                BossDurationUnknownReason = "boss-battle-master-relation-unavailable",
+            };
+        }
+        NetherCodePolicyBattleStageRow[] stages = battleStageRows
+            .Where(row => row.Id == battles[0].BattleStageId)
+            .ToArray();
+        if (stages.Length != 1 || stages[0].TimeLimitSeconds <= 0)
+        {
+            return mapped with
+            {
+                BossDurationUnknownReason = "boss-stage-duration-unavailable",
+            };
+        }
+
+        return mapped with
+        {
+            BossDurationKnown = true,
+            BossDurationSeconds = stages[0].TimeLimitSeconds,
+            BossDurationUnknownReason = string.Empty,
+        };
+    }
+
     public static NetherCodePolicyRouteEvidence Map(
         NetherSnapshot snapshot,
         NetherProductionRouteSafetyPlan plan

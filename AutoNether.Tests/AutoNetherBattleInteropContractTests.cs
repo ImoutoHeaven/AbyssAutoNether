@@ -86,16 +86,27 @@ public sealed class AutoNetherBattleInteropContractTests
         Assert.Contains("HasActiveBattleResultCodeOwner()", runtime);
         Assert.Contains("TryCaptureBattleResultCodeStrategyEvidence", runtime);
         Assert.Contains("TryMapStrategyPartyModel", runtime);
-        Assert.Contains(
-            "NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()",
-            runtime,
-            StringComparison.Ordinal
-        );
+        Assert.Contains("MapBattleResultBeforeFloorRebind(", runtime, StringComparison.Ordinal);
         Assert.Contains(
             "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind",
             routeEvidence,
             StringComparison.Ordinal
         );
+    }
+
+    [Fact]
+    public void Battle_result_code_decision_emits_the_same_complete_audit_as_direct_code_policy()
+    {
+        string controller = Read("AutoNether", "Services", "NetherAutoClimbController.cs");
+        string coordinator = Read(
+            "AutoNether",
+            "Services",
+            "NetherBattleResultCodeCoordinator.cs"
+        );
+
+        Assert.Contains("\"battle-result\"", controller, StringComparison.Ordinal);
+        Assert.Contains("AuditCodeDecision(", controller, StringComparison.Ordinal);
+        Assert.Contains("NetherStrategyEvidenceAudit? StrategyAudit", coordinator, StringComparison.Ordinal);
     }
 
     [Fact]

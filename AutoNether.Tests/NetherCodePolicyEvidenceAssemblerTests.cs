@@ -211,6 +211,62 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
+    public void Battle_result_route_keeps_future_horizon_unknown_but_recovers_exact_boss_duration()
+    {
+        // Fresh current-game Project.dll 033a5d1e...c75f4: MNetherFloorBattles joins
+        // m_nether_map_floor_id -> m_nether_battle_stage_id, and MNetherBattleStages.time_limit
+        // is the authoritative duration. The result transition cache already validates that this
+        // complete graph belongs to the live NetherId/MapId, even though no future route is bound.
+        NetherFloorNode boss = new(71_101, 70, 0, NetherFloorNodeType.Boss)
+        {
+            NodeId = 81_101,
+            IsUnlocked = true,
+        };
+        NetherSnapshot snapshot = Snapshot() with { Floors = [boss] };
+
+        NetherCodePolicyRouteEvidence evidence =
+            NetherCodePolicyRouteEvidenceMapper.MapBattleResultBeforeFloorRebind(
+                snapshot,
+                [new NetherStrategyBattleMasterRow(91_101, boss.FloorId, 3, 101_101, 500)],
+                [new NetherCodePolicyBattleStageRow(101_101, 43)]
+            );
+
+        Assert.False(evidence.IsKnown);
+        Assert.True(evidence.IsBattleResultBeforeFloorRebind);
+        Assert.True(evidence.BossDurationKnown, evidence.BossDurationUnknownReason);
+        Assert.Equal(43, evidence.BossDurationSeconds);
+    }
+
+    [Fact]
+    public void Battle_result_route_fails_closed_when_boss_master_relation_is_ambiguous()
+    {
+        NetherFloorNode boss = new(71_102, 70, 0, NetherFloorNodeType.Boss)
+        {
+            NodeId = 81_102,
+            IsUnlocked = true,
+        };
+        NetherSnapshot snapshot = Snapshot() with { Floors = [boss] };
+
+        NetherCodePolicyRouteEvidence evidence =
+            NetherCodePolicyRouteEvidenceMapper.MapBattleResultBeforeFloorRebind(
+                snapshot,
+                [
+                    new NetherStrategyBattleMasterRow(91_102, boss.FloorId, 3, 101_102, 500),
+                    new NetherStrategyBattleMasterRow(91_103, boss.FloorId, 3, 101_103, 500),
+                ],
+                [
+                    new NetherCodePolicyBattleStageRow(101_102, 43),
+                    new NetherCodePolicyBattleStageRow(101_103, 47),
+                ]
+            );
+
+        Assert.False(evidence.IsKnown);
+        Assert.True(evidence.IsBattleResultBeforeFloorRebind);
+        Assert.False(evidence.BossDurationKnown);
+        Assert.Equal("boss-battle-master-relation-unavailable", evidence.BossDurationUnknownReason);
+    }
+
+    [Fact]
     public void Production_assembler_fails_closed_when_selected_route_survival_baseline_is_not_exact()
     {
         // T03's authoritative horizon owns the post-cost active-party HP minimum. Code policy may
@@ -356,6 +412,69 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
 
         Assert.True(captured.IsSuccess, captured.Detail);
         Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+    }
+
+    [Fact]
+    public void Production_result_owned_offer_selects_timed_higher_value_addition_with_exact_boss_duration()
+    {
+        NetherCodeState held = HeldCode(88307, NetherCodeFamily.Safe);
+        NetherFloorNode boss = new(71_107, 70, 0, NetherFloorNodeType.Boss)
+        {
+            NodeId = 81_107,
+            IsUnlocked = true,
+        };
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            CodeCapacity = 2,
+            Codes = [held],
+            Floors = [boss],
+        };
+        NetherCodeCandidate candidate = Candidate(88308, NetherCodeFamily.Safe, power: 1);
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            NativeMechanics = NetherStrategyEvidenceComponent<NetherStrategyNativeMechanicsEvidence>
+                .Known(new NetherStrategyNativeMechanicsEvidence([
+                    AttackMechanic(held.CodeId, 50),
+                ])),
+        };
+        NetherCodePolicyRouteEvidence route =
+            NetherCodePolicyRouteEvidenceMapper.MapBattleResultBeforeFloorRebind(
+                snapshot,
+                [new NetherStrategyBattleMasterRow(91_107, boss.FloorId, 3, 101_107, 500)],
+                [new NetherCodePolicyBattleStageRow(101_107, 30)]
+            );
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [
+                TimedAttackMechanic(
+                    candidate.CodeId,
+                    NetherStrategyTriggerKind.StartBattle,
+                    triggerMilliSeconds: 0,
+                    buffDurationMilliSeconds: 5_000,
+                    valuePermille: 400
+                ),
+            ],
+            EquipmentSettings(),
+            route
+        );
+        NetherCodeEquipmentMutationEvidence mutation = captured.Evidence!
+            .EquipmentMutationValuesByKey[new NetherCodeMutationKey(candidate.CodeId, 0)];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence!
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.True(route.BossDurationKnown, route.BossDurationUnknownReason);
+        Assert.Equal(30, mutation.NativePortfolio.BossDurationSeconds);
+        Assert.Equal(NetherCombatValueEvidenceKind.Quantified, mutation.MechanismValue.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
     }
 
     [Fact]
@@ -682,6 +801,64 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         Assert.All(recurringTimeline.AfterWindows, row => Assert.Equal(5, row.DurationSeconds));
         Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
         Assert.Equal(recurring.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Production_assembler_maps_self_to_all_only_from_complete_same_popup_scope_coverage()
+    {
+        // Fresh current native evidence: AbilityTargetSelf.Logic.TargetResolve returns the ability
+        // owner itself. NetherCodeAbilityController first installs the Code ability on every unit
+        // accepted by NetherCodeModel.AbilityModel.Scope. The same-popup GetBuffTargetCount applies
+        // that exact Scope to NetherPartyModel.GetValidCharacterModels, so coverage == mapped party
+        // count proves one Self recipient per party unit without guessing identities.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88318, NetherCodeFamily.Risk, power: 1);
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            Package(snapshot, 0, 0),
+            snapshot,
+            [candidate],
+            [SelfAttackMechanic(candidate.CodeId, 100, coverageKnown: true, coverage: 1)],
+            EquipmentSettings(),
+            SafeRouteEvidence()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCombatValueEvidenceKind.Quantified, value.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Production_assembler_keeps_partial_self_scope_coverage_candidate_local_unknown()
+    {
+        // GetValidCharacterModels excludes only null entries in the fresh game. A coverage count
+        // smaller than that exact mapped party count cannot reveal which ability owners receive
+        // AbilityTargetSelf, so the dependent candidate must remain fail-closed.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88319, NetherCodeFamily.Risk, power: 99_999);
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            PackageWithFrontAndBack(snapshot),
+            snapshot,
+            [candidate],
+            [SelfAttackMechanic(candidate.CodeId, 900, coverageKnown: true, coverage: 1)],
+            EquipmentSettings(),
+            SafeRouteEvidence()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCombatValueEvidenceKind.Missing, value.Kind);
+        Assert.Contains(
+            "native-self-target-partial-scope-identities-unavailable:1:2",
+            value.Detail
+        );
     }
 
     [Fact]
@@ -4349,6 +4526,21 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
                 ),
             ],
         };
+
+    private static NetherStrategyNativeMechanic SelfAttackMechanic(
+        long codeId,
+        int additionPermille,
+        bool coverageKnown,
+        int coverage
+    ) => AttackMechanic(codeId, additionPermille) with
+    {
+        Target = new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Self)
+        {
+            ParametersKnown = true,
+        },
+        PartyCoverageKnown = coverageKnown,
+        PartyCoverage = coverage,
+    };
 
     private static NetherStrategyNativeMechanic AttackMechanicWithUnsupportedTarget(
         long codeId,

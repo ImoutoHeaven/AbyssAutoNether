@@ -325,6 +325,14 @@ public class NetherCodePolicyTests
 
         Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
         Assert.Equal(proven.CodeId, decision.SelectedCodeId);
+        Assert.Equal(
+            "trigger-evidence-unavailable",
+            Assert.Single(decision.CandidateAudits, audit => audit.CodeId == missing.CodeId).Detail
+        );
+        Assert.Equal(
+            "trigger-reachable;cadence-unavailable",
+            Assert.Single(decision.CandidateAudits, audit => audit.CodeId == reachable.CodeId).Detail
+        );
     }
 
     [Fact]

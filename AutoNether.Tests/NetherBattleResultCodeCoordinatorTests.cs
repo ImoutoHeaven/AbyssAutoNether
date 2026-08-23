@@ -38,6 +38,28 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     }
 
     [Fact]
+    public void Invoked_result_code_step_preserves_complete_policy_audit_context()
+    {
+        NetherStrategyEvidenceAudit audit = new() { OwnerGeneration = 9 };
+        var driver = new Driver
+        {
+            Snapshot = Snapshot(),
+            Candidates = Candidates(30024),
+            Popup = ResultPopup(),
+            StrategyAudit = audit,
+        };
+        var flow = new NetherBattleResultCodeCoordinator(maximumPopupPolls: 2);
+
+        NetherBattleResultCodeStep invoked = flow.Pump(driver, Settings(), null, allowInvoke: true);
+
+        Assert.Equal(NetherBattleResultCodeStepKind.AwaitingNative, invoked.Kind);
+        Assert.Same(driver.Snapshot, invoked.Snapshot);
+        Assert.Same(driver.Candidates.Candidates, invoked.Candidates);
+        Assert.Equal(NetherCodeDecisionKind.Select, invoked.Decision?.Kind);
+        Assert.Same(audit, invoked.StrategyAudit);
+    }
+
+    [Fact]
     public void Result_owner_blocks_next_while_its_popup_registration_is_pending()
     {
         var driver = new Driver
@@ -570,6 +592,7 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         public NetherRuntimePopupContext? Popup { get; set; }
         public bool PopupIsPending { get; set; }
         public NetherCodePolicyEvidence? PolicyEvidence { get; set; }
+        public NetherStrategyEvidenceAudit? StrategyAudit { get; set; }
         public List<NetherPlannedAction> InvokedActions { get; } = new();
         public Queue<NetherBattleResultCodeNativeStep> NativeSteps { get; } = new();
         public Queue<NetherRuntimeSnapshotResult> SnapshotResults { get; } = new();
@@ -593,7 +616,7 @@ public sealed class NetherBattleResultCodeCoordinatorTests
             NetherAutoClimbSettings settings
         ) => NetherRuntimeCodePolicyEvidenceResult.Success(
             PolicyEvidence ?? DefaultEquipmentEvidence(snapshot, candidates.Candidates)
-        );
+        ) with { StrategyAudit = StrategyAudit };
 
         public NetherNativeActionResult InvokeBattleResultCode(
             NetherRuntimePopupContext popup,

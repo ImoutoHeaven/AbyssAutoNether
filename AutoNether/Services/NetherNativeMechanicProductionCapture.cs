@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Reflection;
 using Absf;
 using Il2CppInterop.Runtime.InteropTypes;
 using Project.Master;
@@ -19,47 +18,20 @@ namespace AutoNether.Services;
 /// </summary>
 internal static class NetherNativeMechanicProductionCapture
 {
-    public static bool TryResolveStrategyBuffMap(
-        Func<object?> resolveStore,
-        out string error
-    ) => TryResolveStrategyStore(resolveStore, out _, out error);
-
-    private static bool TryResolveStrategyBuffMap(
-        Func<object?> resolveStore,
-        out IReadOnlyDictionary<int, Project.Ingame.IBuffStrategy> strategies,
-        out string error
-    )
-    {
-        if (!TryResolveStrategyStore(resolveStore, out object? rawStore, out error))
-        {
-            strategies = new Dictionary<int, Project.Ingame.IBuffStrategy>();
-            return false;
-        }
-
-        return TryReadStrategyBuffMap(
-            rawStore as Project.Ingame.BuffTypeStrategies,
-            out strategies,
-            out error
-        );
-    }
-
-    private static bool TryResolveStrategyStore(
-        Func<object?> resolveStore,
-        out object? store,
-        out string error
-    )
+    private static Project.Ingame.BuffTypeStrategies? TryCreateStrategyStore(out string error)
     {
         try
         {
-            store = resolveStore();
+            // Fresh native BuffTypeStrategies..ctor builds the complete strategy dictionary. The
+            // type is an IIngameServiceRegister (not an Engine service), and native
+            // BuffParameterByTypeExtension uses the same direct-construction fallback.
             error = string.Empty;
-            return true;
+            return new Project.Ingame.BuffTypeStrategies();
         }
         catch (Exception)
         {
-            store = null;
             error = "buff-strategy-map-unavailable";
-            return false;
+            return null;
         }
     }
 
@@ -84,11 +56,8 @@ internal static class NetherNativeMechanicProductionCapture
         Project.NetherCodeAbilityAssetDataStore? netherAbilityStore =
             Engine.Get<Project.NetherCodeAbilityAssetDataStore>();
         Project.AbilityAssetDataStore? commonAbilityStore = Engine.Get<Project.AbilityAssetDataStore>();
-        TryResolveStrategyBuffMap(
-            () => Engine.Get<Project.Ingame.BuffTypeStrategies>(),
-            out IReadOnlyDictionary<int, Project.Ingame.IBuffStrategy> strategyByBuffType,
-            out string buffMapError
-        );
+        Project.Ingame.BuffTypeStrategies? buffStrategyStore =
+            TryCreateStrategyStore(out string buffMapError);
 
         var capturedByCodeId = new Dictionary<long, NetherStrategyNativeMechanic>();
         foreach (NetherCodeState code in codes
@@ -217,7 +186,7 @@ internal static class NetherNativeMechanicProductionCapture
                             MapStrategyBuff(
                                 row.id,
                                 buffType,
-                                strategyByBuffType,
+                                buffStrategyStore,
                                 buffMapError
                             )
                         ).ToArray();
@@ -252,6 +221,8 @@ internal static class NetherNativeMechanicProductionCapture
                 MasterEffectParameter1 = row.effect_parameter_1,
                 MasterEffectParameter2 = row.effect_parameter_2,
                 MasterEffectParameter3 = row.effect_parameter_3,
+                PartyCoverageKnown = code.PartyCoverageKnown,
+                PartyCoverage = code.PartyCoverage,
                 IsKnown = known,
                 UnknownReason = unknown,
             };
@@ -1454,57 +1425,25 @@ internal static class NetherNativeMechanicProductionCapture
                 : string.Empty,
         };
 
-    private static bool TryReadStrategyBuffMap(
-        Project.Ingame.BuffTypeStrategies? store,
-        out IReadOnlyDictionary<int, Project.Ingame.IBuffStrategy> strategies,
-        out string error
-    )
-    {
-        var mapped = new Dictionary<int, Project.Ingame.IBuffStrategy>();
-        strategies = mapped;
-        if (store?._strategies == null)
-        {
-            error = "buff-strategy-map-unavailable";
-            return false;
-        }
-        if (!NetherRuntimeEnumerableReader.TryRead(
-                store._strategies,
-                out List<object> entries,
-                out string enumerationDetail
-            ))
-        {
-            error = "buff-strategy-map-enumeration:" + enumerationDetail;
-            return false;
-        }
-        foreach (object entry in entries)
-        {
-            if (!TryReadMember(entry, "Key", out object? rawKey)
-                || rawKey == null
-                || !TryConvertInt32(rawKey, out int key)
-                || !TryReadMember(entry, "Value", out object? rawStrategy)
-                || rawStrategy is not Project.Ingame.IBuffStrategy strategy)
-            {
-                error = "invalid-buff-strategy-map-entry";
-                return false;
-            }
-            if (!mapped.TryAdd(key, strategy))
-            {
-                error = "duplicate-buff-strategy-map-entry:" + key;
-                return false;
-            }
-        }
-        error = string.Empty;
-        return true;
-    }
-
     private static NetherStrategyBuffEvidence MapStrategyBuff(
         long mechanicId,
         int buffType,
-        IReadOnlyDictionary<int, Project.Ingame.IBuffStrategy> strategies,
+        Project.Ingame.BuffTypeStrategies? store,
         string mapError
     )
     {
-        if (!strategies.TryGetValue(buffType, out Project.Ingame.IBuffStrategy? strategy))
+        Project.Ingame.IBuffStrategy strategy = null!;
+        bool found = false;
+        try
+        {
+            found = store != null
+                && store.TryGet((Project.BuffType)buffType, out strategy);
+        }
+        catch (Exception)
+        {
+            mapError = "buff-strategy-map-unavailable";
+        }
+        if (!found || strategy == null)
         {
             string reason = string.IsNullOrEmpty(mapError)
                 ? "buff-strategy-unavailable:" + mechanicId + ":" + buffType
@@ -1551,26 +1490,36 @@ internal static class NetherNativeMechanicProductionCapture
         };
         var additional = new List<NetherStrategyBuffType>();
         string additionalError = string.Empty;
-        if (!NetherRuntimeEnumerableReader.TryRead(
-                strategy.AdditionalMatchedQueryTypes,
-                out List<object> rawAdditional,
-                out string enumerationDetail
-            ))
+        try
         {
-            additionalError = "buff-additional-match-enumeration:"
-                + mechanicId + ":" + buffType + ":" + enumerationDetail;
-        }
-        else
-        {
-            foreach (object raw in rawAdditional)
+            Project.BuffType queryBuffType = (Project.BuffType)buffType;
+            int queryTargetCount = store!.GetQueryTargetTypeCount(queryBuffType);
+            if (queryTargetCount <= 0)
             {
-                if (!TryConvertInt32(raw, out int value) || value <= 0)
-                {
-                    additionalError = "invalid-buff-additional-match:" + mechanicId + ":" + buffType;
-                    break;
-                }
-                additional.Add(new NetherStrategyBuffType(value));
+                additionalError = "invalid-buff-query-target-count:"
+                    + mechanicId + ":" + buffType + ":" + queryTargetCount;
             }
+            else
+            {
+                var seen = new HashSet<int>();
+                for (int index = 0; index < queryTargetCount; index++)
+                {
+                    int value = (int)store.GetQueryTargetTypeAt(queryBuffType, index);
+                    if (value <= 0 || !seen.Add(value))
+                    {
+                        additionalError = "invalid-buff-query-target:"
+                            + mechanicId + ":" + buffType + ":" + index + ":" + value;
+                        break;
+                    }
+                    if (value != buffType)
+                        additional.Add(new NetherStrategyBuffType(value));
+                }
+            }
+        }
+        catch (Exception)
+        {
+            additionalError = "buff-query-target-map-unavailable:"
+                + mechanicId + ":" + buffType;
         }
         bool known = effectKind != NetherStrategyBuffEffectKind.Unknown
             && priority != NetherStrategyStatusPriorityKind.Unknown
@@ -1672,32 +1621,6 @@ internal static class NetherNativeMechanicProductionCapture
     private static string RuntimeTypeIdentifier(object? value) =>
         value?.GetType().FullName ?? "null";
 
-    private static bool TryReadMember(object target, string name, out object? value)
-    {
-        value = null;
-        Type type = target.GetType();
-        PropertyInfo? property = type.GetProperty(name, InstanceFlags);
-        if (property != null && property.GetIndexParameters().Length == 0)
-        {
-            value = property.GetValue(target);
-            return true;
-        }
-        MethodInfo? getter = type.GetMethod("get_" + name, InstanceFlags, null, Type.EmptyTypes, null);
-        if (getter != null)
-        {
-            value = getter.Invoke(target, Array.Empty<object>());
-            return true;
-        }
-        FieldInfo? field = type.GetField(name, InstanceFlags)
-            ?? type.GetField("<" + name + ">k__BackingField", InstanceFlags);
-        if (field != null)
-        {
-            value = field.GetValue(target);
-            return true;
-        }
-        return false;
-    }
-
     private static bool TryConvertInt32(object raw, out int value)
     {
         value = 0;
@@ -1712,6 +1635,4 @@ internal static class NetherNativeMechanicProductionCapture
         }
     }
 
-    private static readonly BindingFlags InstanceFlags =
-        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 }

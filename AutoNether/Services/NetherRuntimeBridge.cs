@@ -2717,10 +2717,36 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 );
             }
 
+            MNetherFloorBattles[]? nativeBattles = masterDataStore.GetCache<MNetherFloorBattles>();
+            MNetherBattleStages[]? nativeStages = masterDataStore.GetCache<MNetherBattleStages>();
+            NetherStrategyBattleMasterRow[]? battleRows = nativeBattles?
+                .Where(row => row != null)
+                .Select(row => new NetherStrategyBattleMasterRow(
+                    row.id,
+                    row.m_nether_map_floor_id,
+                    row.type,
+                    row.m_nether_battle_stage_id,
+                    row.code_drop_ratio
+                ))
+                .ToArray();
+            NetherCodePolicyBattleStageRow[]? battleStageRows = nativeStages?
+                .Where(row => row != null)
+                .Select(row => new NetherCodePolicyBattleStageRow(row.id, row.time_limit))
+                .ToArray();
+
             NetherCodePolicyRouteEvidence routeEvidence;
             if (!captureFloorRouteEvidence)
             {
-                routeEvidence = NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind();
+                routeEvidence = battleRows == null || battleStageRows == null
+                    ? NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind() with
+                    {
+                        BossDurationUnknownReason = "boss-stage-master-cache-unavailable",
+                    }
+                    : NetherCodePolicyRouteEvidenceMapper.MapBattleResultBeforeFloorRebind(
+                        snapshot,
+                        battleRows,
+                        battleStageRows
+                    );
             }
             else
             {
@@ -2732,25 +2758,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         TryCaptureRouteSafety(snapshot.Floors),
                         TryCaptureInteractivePreEntryInputs(snapshot, settings)
                     );
-                MNetherFloorBattles[]? nativeBattles = masterDataStore.GetCache<MNetherFloorBattles>();
-                MNetherBattleStages[]? nativeStages = masterDataStore.GetCache<MNetherBattleStages>();
-                routeEvidence = nativeBattles == null || nativeStages == null
+                routeEvidence = battleRows == null || battleStageRows == null
                     ? NetherCodePolicyRouteEvidenceMapper.Map(snapshot, routePlan)
                     : NetherCodePolicyRouteEvidenceMapper.Map(
                         snapshot,
                         routePlan,
-                        nativeBattles.Where(row => row != null).Select(row =>
-                            new NetherStrategyBattleMasterRow(
-                                row.id,
-                                row.m_nether_map_floor_id,
-                                row.type,
-                                row.m_nether_battle_stage_id,
-                                row.code_drop_ratio
-                            )
-                        ).ToArray(),
-                        nativeStages.Where(row => row != null).Select(row =>
-                            new NetherCodePolicyBattleStageRow(row.id, row.time_limit)
-                        ).ToArray()
+                        battleRows,
+                        battleStageRows
                     );
             }
             NetherRuntimeCodePolicyEvidenceResult assembled = NetherCodePolicyEvidenceAssembler.Assemble(

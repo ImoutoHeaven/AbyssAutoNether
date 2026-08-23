@@ -551,15 +551,27 @@ internal sealed class NetherCodePolicy
             || !evidence.MechanismValuesByCodeId.TryGetValue(
                 candidate.CodeId,
                 out NetherMechanismValue mechanismValue
+            ))
+        {
+            return new(
+                candidate.CodeId,
+                NetherCodeCandidateHardGate.MechanismValue,
+                "candidate-mechanism-value-unavailable"
             )
-            || mechanismValue.Kind == NetherCombatValueEvidenceKind.Missing
+            {
+                UnknownReasonCode = NetherStrategyUnknownReasonCode.MechanismValueUnavailable,
+            };
+        }
+        if (mechanismValue.Kind == NetherCombatValueEvidenceKind.Missing
             || settings.StrategyMode == NetherStrategyMode.Equipment
                 && mechanismValue.Kind == NetherCombatValueEvidenceKind.ReachableUnquantified)
         {
             return new(
                 candidate.CodeId,
                 NetherCodeCandidateHardGate.MechanismValue,
-                "candidate-mechanism-value-unavailable"
+                string.IsNullOrWhiteSpace(mechanismValue.Detail)
+                    ? "candidate-mechanism-value-unavailable"
+                    : mechanismValue.Detail
             )
             {
                 UnknownReasonCode = NetherStrategyUnknownReasonCode.MechanismValueUnavailable,

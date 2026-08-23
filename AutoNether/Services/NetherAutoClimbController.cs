@@ -1643,6 +1643,19 @@ internal static class NetherAutoClimbController
             _lockedCombatLane,
             allowInvoke: State.IsEnabled
         );
+        NetherSnapshot? codeSnapshot = codeStep.Snapshot;
+        IReadOnlyList<NetherCodeCandidate>? codeCandidates = codeStep.Candidates;
+        NetherCodeDecision? codeDecision = codeStep.Decision;
+        if (codeSnapshot != null && codeCandidates != null && codeDecision != null)
+        {
+            AuditCodeDecision(
+                codeSnapshot,
+                codeCandidates,
+                codeDecision,
+                "battle-result",
+                codeStep.StrategyAudit
+            );
+        }
         Audit(
             NetherDetailedAuditKind.Interactive,
             "battle-result-code:" + codeStep.Kind + ":" + codeStep.Detail,

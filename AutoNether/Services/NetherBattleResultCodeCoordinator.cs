@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 
 namespace AutoNether.Services;
 
@@ -72,7 +73,11 @@ internal readonly record struct NetherBattleResultCodeStep(
     NetherBattleResultCodeStepKind Kind,
     string Detail,
     NetherCombatLane? LockedLane = null,
-    NetherPlannedAction? Action = null
+    NetherPlannedAction? Action = null,
+    NetherSnapshot? Snapshot = null,
+    IReadOnlyList<NetherCodeCandidate>? Candidates = null,
+    NetherCodeDecision? Decision = null,
+    NetherStrategyEvidenceAudit? StrategyAudit = null
 );
 
 /// <summary>
@@ -381,7 +386,11 @@ internal sealed class NetherBattleResultCodeCoordinator
             NetherBattleResultCodeStepKind.AwaitingNative,
             invoked.Detail,
             _lockedLane,
-            action
+            action,
+            snapshot,
+            candidates.Candidates,
+            decision,
+            policyEvidence.StrategyAudit
         );
     }
 

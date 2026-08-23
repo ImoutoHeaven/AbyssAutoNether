@@ -987,6 +987,12 @@ internal sealed record NetherStrategyNativeMechanic(
     public bool DurationKnown { get; init; }
     public int Cap { get; init; }
     public bool CapKnown { get; init; }
+    /// <summary>
+    /// Same-popup native Code Scope coverage over NetherPartyModel.GetValidCharacterModels.
+    /// This is recipient identity evidence only when it equals the mapped party member count.
+    /// </summary>
+    public bool PartyCoverageKnown { get; init; }
+    public int PartyCoverage { get; init; }
     public bool IsKnown { get; init; } = true;
     public string UnknownReason { get; init; } = string.Empty;
 }
@@ -1047,6 +1053,8 @@ internal static class NetherStrategyNativeMechanicAssembler
                     ParameterUnknownReason = reason,
                     UnknownReason = reason,
                 },
+                PartyCoverageKnown = code.PartyCoverageKnown,
+                PartyCoverage = code.PartyCoverage,
                 IsKnown = false,
                 UnknownReason = reason,
             });
@@ -1624,6 +1632,7 @@ internal static class NetherStrategyEvidenceMapper
                 || mechanic.Triggers == null
                 || mechanic.BuffStrategies == null
                 || mechanic.Duration < 0 || mechanic.Cap < 0
+                || (mechanic.PartyCoverageKnown && mechanic.PartyCoverage < 0)
                 || !TryCopyAbilityEffect(
                     abilityEffectSource,
                     out NetherStrategyAbilityEffectEvidence abilityEffect

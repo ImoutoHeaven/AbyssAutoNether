@@ -75,7 +75,7 @@ internal static class NetherCodePolicyEvidenceAssembler
                 values[candidate.CodeId] = NetherMechanismValue.Missing(reason);
                 continue;
             }
-            hard[candidate.CodeId] = MapHardEligibility(candidate, mechanic);
+            hard[candidate.CodeId] = MapHardEligibility(candidate, mechanic, party);
             values[candidate.CodeId] = MapMechanismValue(mechanic, party, routeEvidence);
         }
 
@@ -167,7 +167,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             ActiveParty = party,
             Research = research,
             ActiveResearchFamily = activeResearch,
-            HardExcludedCodeIds = BuildHardExcludedCodeIds(snapshot, ownedMechanics),
+            HardExcludedCodeIds = BuildHardExcludedCodeIds(snapshot, ownedMechanics, party),
             FamilyRetentionByPair = BuildFamilyRetentionEvidence(
                 snapshot,
                 party,
@@ -184,7 +184,8 @@ internal static class NetherCodePolicyEvidenceAssembler
 
     private static IReadOnlyList<long> BuildHardExcludedCodeIds(
         NetherSnapshot snapshot,
-        IReadOnlyList<NetherStrategyNativeMechanic>? ownedMechanics
+        IReadOnlyList<NetherStrategyNativeMechanic>? ownedMechanics,
+        IReadOnlyList<NetherStrategyPartyMember>? party
     )
     {
         if (ownedMechanics == null)
@@ -209,7 +210,7 @@ internal static class NetherCodePolicyEvidenceAssembler
                 IsKnown = code.IsKnown,
                 EffectSemanticsKnown = code.EffectSemanticsKnown,
             };
-            NetherCodeHardEligibilityEvidence hard = MapHardEligibility(candidate, matches[0]);
+            NetherCodeHardEligibilityEvidence hard = MapHardEligibility(candidate, matches[0], party);
             if (hard.IsKnown && hard.RiskRule is
                     NetherCodeRiskRule.MinimumErosionSeventy
                     or NetherCodeRiskRule.AdverseErosionAdjustment)
@@ -513,7 +514,8 @@ internal static class NetherCodePolicyEvidenceAssembler
 
     private static NetherCodeHardEligibilityEvidence MapHardEligibility(
         NetherCodeCandidate candidate,
-        NetherStrategyNativeMechanic mechanic
+        NetherStrategyNativeMechanic mechanic,
+        IReadOnlyList<NetherStrategyPartyMember>? party
     )
     {
         if (!mechanic.IsKnown)
@@ -567,10 +569,10 @@ internal static class NetherCodePolicyEvidenceAssembler
                 && row.BuffType.Value == (int)NetherKnownBuffType.CrestImpact
         ) ? NetherCodeFamily.Impact : NetherCodeFamily.Unknown;
         bool mappedCrestTarget = crestFamily == NetherCodeFamily.Unknown
-            || TryMapTargetRow(mechanic.Target, out _, out _);
+            || TryMapTargetRow(mechanic, party, out _, out _);
         NetherCodeTargetRow targetRow = crestFamily == NetherCodeFamily.Unknown
             ? NetherCodeTargetRow.None
-            : TryMapTargetRow(mechanic.Target, out NetherCodeTargetRow mapped, out _)
+            : TryMapTargetRow(mechanic, party, out NetherCodeTargetRow mapped, out _)
                 ? mapped
                 : NetherCodeTargetRow.None;
         bool crestTargetKnown = crestFamily == NetherCodeFamily.Unknown
@@ -622,7 +624,8 @@ internal static class NetherCodePolicyEvidenceAssembler
                 NetherMechanismClassificationKind.Unsupported
                 or NetherMechanismClassificationKind.SharedMana)
             && !TryMapTargetRow(
-                mechanic.Target,
+                mechanic,
+                party,
                 out _,
                 out string targetError
             ))
@@ -641,7 +644,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             }
             NetherTargetMatch? unknownTarget = party
                 .Where(member => member != null && member.IsAlive)
-                .Select(member => MatchTarget(mechanic, classification.Parameter, member))
+                .Select(member => MatchTarget(mechanic, classification.Parameter, member, party))
                 .FirstOrDefault(match => match.Kind == NetherTargetMatchKind.Unknown);
             if (unknownTarget != null)
                 return NetherMechanismValue.Missing(unknownTarget.Detail);
@@ -656,7 +659,8 @@ internal static class NetherCodePolicyEvidenceAssembler
                     CompletionTriggerKnown: force.IsKnown,
                     CompletionMessageReachable: force.IsKnown,
                     TargetRow: TryMapTargetRow(
-                        mechanic.Target,
+                        mechanic,
+                        party,
                         out NetherCodeTargetRow forceTarget,
                         out _
                     ) ? forceTarget : NetherCodeTargetRow.None,
@@ -695,7 +699,7 @@ internal static class NetherCodePolicyEvidenceAssembler
                 return NetherMechanismValue.Missing("shared-mana-target-party-unavailable");
             NetherTargetMatch[] targetRows = party
                 .Where(member => member != null && member.IsAlive)
-                .Select(member => MatchAbilityTarget(mechanic, member))
+                .Select(member => MatchAbilityTarget(mechanic, member, party))
                 .ToArray();
             NetherTargetMatch? unknownTarget = targetRows.FirstOrDefault(row =>
                 row.Kind == NetherTargetMatchKind.Unknown);
@@ -924,7 +928,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             .Select(member => new
             {
                 Member = member,
-                Match = MatchTarget(mechanic, minimum.BuffParameter, member),
+                Match = MatchTarget(mechanic, minimum.BuffParameter, member, party),
             })
             .ToArray();
         NetherTargetMatch? unknownTarget = targetRows.FirstOrDefault(row =>
@@ -979,7 +983,7 @@ internal static class NetherCodePolicyEvidenceAssembler
     {
         if (mechanic == null || !mechanic.IsKnown)
             return NetherEquipmentCombatTier.None;
-        NetherCodeTargetRow row = TryMapTargetRow(mechanic.Target, out NetherCodeTargetRow mapped, out _)
+        NetherCodeTargetRow row = TryMapTargetRow(mechanic, party, out NetherCodeTargetRow mapped, out _)
             ? mapped
             : NetherCodeTargetRow.None;
         NetherMechanismClassification classification = ClassifyMechanism(mechanic);
@@ -1000,7 +1004,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             .Select(member => new
             {
                 Member = member,
-                Match = MatchTarget(mechanic, classification.Parameter, member),
+                Match = MatchTarget(mechanic, classification.Parameter, member, party),
             })
             .ToArray();
         if (targets.Any(target => target.Match.Kind == NetherTargetMatchKind.Unknown))
@@ -1073,19 +1077,54 @@ internal static class NetherCodePolicyEvidenceAssembler
     }
 
     private static bool TryMapTargetRow(
-        NetherStrategyTargetEvidence target,
+        NetherStrategyNativeMechanic mechanic,
+        IReadOnlyList<NetherStrategyPartyMember>? party,
         out NetherCodeTargetRow row,
         out string error
     )
     {
         row = NetherCodeTargetRow.None;
         error = string.Empty;
+        NetherStrategyTargetEvidence target = mechanic.Target;
         if (!target.IsKnown)
         {
             error = string.IsNullOrWhiteSpace(target.UnknownReason)
                 ? "native-target-parameters-unavailable"
                 : target.UnknownReason;
             return false;
+        }
+        if (target.Kind == NetherStrategyTargetKind.Self)
+        {
+            // Fresh native control flow is exact: AbilityTargetSelf resolves only the ability owner.
+            // NetherCodeAbilityController installs that ability on each unit accepted by the Code
+            // Scope, and the same-popup PartyCoverage is GetBuffTargetCount over the same Scope and
+            // GetValidCharacterModels. Equality therefore proves one Self recipient per mapped unit.
+            if (target.ElementTypeFlags != 0
+                || target.PartyPositionFlags != NetherPartyPositionFlags.None
+                || target.UnionTypeFlags != 0 || target.SearchType != 0
+                || target.RandomCount != 0)
+            {
+                error = "native-self-target-parameters-unavailable";
+                return false;
+            }
+            if (party == null || party.Count == 0)
+            {
+                error = "native-self-target-party-unavailable";
+                return false;
+            }
+            if (!mechanic.PartyCoverageKnown)
+            {
+                error = "native-self-target-scope-coverage-unavailable";
+                return false;
+            }
+            if (mechanic.PartyCoverage != party.Count)
+            {
+                error = "native-self-target-partial-scope-identities-unavailable:"
+                    + mechanic.PartyCoverage + ":" + party.Count;
+                return false;
+            }
+            row = NetherCodeTargetRow.All;
+            return true;
         }
         if (target.Kind != NetherStrategyTargetKind.Friend)
         {
@@ -1436,7 +1475,7 @@ internal static class NetherCodePolicyEvidenceAssembler
                          .Where(member => member != null && member.IsAlive)
                          .OrderBy(member => member.PartyIndex))
             {
-                NetherTargetMatch target = MatchTarget(mechanic, parameter, member);
+                NetherTargetMatch target = MatchTarget(mechanic, parameter, member, party);
                 if (target.Kind == NetherTargetMatchKind.Unknown)
                 {
                     windows = Array.Empty<NetherNativeBuffWindow>();
@@ -1650,36 +1689,42 @@ internal static class NetherCodePolicyEvidenceAssembler
                 || !TryCombinedDefensiveBuffValue(
                     beforeMechanics,
                     member,
+                    party,
                     NetherKnownBuffType.MaxHpRateUp,
                     NetherStrategyBuffParameterReferenceKind.RatePermille,
                     out int beforeMaxHpBuff)
                 || !TryCombinedDefensiveBuffValue(
                     afterMechanics,
                     member,
+                    party,
                     NetherKnownBuffType.MaxHpRateUp,
                     NetherStrategyBuffParameterReferenceKind.RatePermille,
                     out int afterMaxHpBuff)
                 || !TryCombinedDefensiveBuffValue(
                     beforeMechanics,
                     member,
+                    party,
                     NetherKnownBuffType.DefenceUp,
                     NetherStrategyBuffParameterReferenceKind.RatePermille,
                     out int beforeDefenceBuff)
                 || !TryCombinedDefensiveBuffValue(
                     afterMechanics,
                     member,
+                    party,
                     NetherKnownBuffType.DefenceUp,
                     NetherStrategyBuffParameterReferenceKind.RatePermille,
                     out int afterDefenceBuff)
                 || !TryCombinedDefensiveBuffValue(
                     beforeMechanics,
                     member,
+                    party,
                     NetherKnownBuffType.TakenDamageDown,
                     NetherStrategyBuffParameterReferenceKind.FixedPermille,
                     out int beforeTakenDamageDown)
                 || !TryCombinedDefensiveBuffValue(
                     afterMechanics,
                     member,
+                    party,
                     NetherKnownBuffType.TakenDamageDown,
                     NetherStrategyBuffParameterReferenceKind.FixedPermille,
                     out int afterTakenDamageDown)
@@ -1741,6 +1786,7 @@ internal static class NetherCodePolicyEvidenceAssembler
     private static bool TryCombinedDefensiveBuffValue(
         IReadOnlyList<NetherStrategyNativeMechanic> mechanics,
         NetherStrategyPartyMember member,
+        IReadOnlyList<NetherStrategyPartyMember> party,
         NetherKnownBuffType buffType,
         NetherStrategyBuffParameterReferenceKind referenceKind,
         out int combined
@@ -1779,7 +1825,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             {
                 return false;
             }
-            NetherTargetMatch target = MatchTarget(mechanic, parameter!, member);
+            NetherTargetMatch target = MatchTarget(mechanic, parameter!, member, party);
             if (target.Kind == NetherTargetMatchKind.Unknown)
                 return false;
             if (target.Kind == NetherTargetMatchKind.NoMatch)
@@ -1841,8 +1887,20 @@ internal static class NetherCodePolicyEvidenceAssembler
             if (!member.EffectiveParametersKnown
                 || !TryGetEffectiveParameter(member, parameterKind, out int before)
                 || requireLiveMaximum && !member.ContinuousAttackCountMaximumKnown
-                || !TryCombinedFixedBuffValue(beforeMechanics, member, buffType, out int currentBuff)
-                || !TryCombinedFixedBuffValue(afterMechanics, member, buffType, out int afterBuff))
+                || !TryCombinedFixedBuffValue(
+                    beforeMechanics,
+                    member,
+                    party,
+                    buffType,
+                    out int currentBuff
+                )
+                || !TryCombinedFixedBuffValue(
+                    afterMechanics,
+                    member,
+                    party,
+                    buffType,
+                    out int afterBuff
+                ))
             {
                 return false;
             }
@@ -1867,11 +1925,13 @@ internal static class NetherCodePolicyEvidenceAssembler
     private static bool TryCombinedFixedBuffValue(
         IReadOnlyList<NetherStrategyNativeMechanic> mechanics,
         NetherStrategyPartyMember member,
+        IReadOnlyList<NetherStrategyPartyMember> party,
         NetherKnownBuffType buffType,
         out int combined
     ) => TryCombinedBuiltInBuffValue(
         mechanics,
         member,
+        party,
         buffType,
         NetherStrategyBuffParameterReferenceKind.FixedPermille,
         out combined
@@ -1880,11 +1940,13 @@ internal static class NetherCodePolicyEvidenceAssembler
     private static bool TryCombinedRateBuffValue(
         IReadOnlyList<NetherStrategyNativeMechanic> mechanics,
         NetherStrategyPartyMember member,
+        IReadOnlyList<NetherStrategyPartyMember> party,
         NetherKnownBuffType buffType,
         out int combined
     ) => TryCombinedBuiltInBuffValue(
         mechanics,
         member,
+        party,
         buffType,
         NetherStrategyBuffParameterReferenceKind.RatePermille,
         out combined
@@ -1893,6 +1955,7 @@ internal static class NetherCodePolicyEvidenceAssembler
     private static bool TryCombinedBuiltInBuffValue(
         IReadOnlyList<NetherStrategyNativeMechanic> mechanics,
         NetherStrategyPartyMember member,
+        IReadOnlyList<NetherStrategyPartyMember> party,
         NetherKnownBuffType buffType,
         NetherStrategyBuffParameterReferenceKind referenceKind,
         out int combined
@@ -1924,7 +1987,7 @@ internal static class NetherCodePolicyEvidenceAssembler
                 }
                 continue;
             }
-            NetherTargetMatch target = MatchTarget(mechanic, parameter!, member);
+            NetherTargetMatch target = MatchTarget(mechanic, parameter!, member, party);
             if (target.Kind == NetherTargetMatchKind.Unknown)
                 return false;
             if (target.Kind == NetherTargetMatchKind.NoMatch)
@@ -2055,10 +2118,11 @@ internal static class NetherCodePolicyEvidenceAssembler
     private static NetherTargetMatch MatchTarget(
         NetherStrategyNativeMechanic mechanic,
         NetherStrategyBuffParameterEvidence parameter,
-        NetherStrategyPartyMember member
+        NetherStrategyPartyMember member,
+        IReadOnlyList<NetherStrategyPartyMember> party
     )
     {
-        if (!TryMapTargetRow(mechanic.Target, out NetherCodeTargetRow row, out string targetError))
+        if (!TryMapTargetRow(mechanic, party, out NetherCodeTargetRow row, out string targetError))
             return NetherTargetMatch.Unknown(targetError + ":" + mechanic.MechanicId);
         bool targetMatches = row switch
         {
@@ -2137,7 +2201,8 @@ internal static class NetherCodePolicyEvidenceAssembler
 
     private static NetherTargetMatch MatchAbilityTarget(
         NetherStrategyNativeMechanic mechanic,
-        NetherStrategyPartyMember member
+        NetherStrategyPartyMember member,
+        IReadOnlyList<NetherStrategyPartyMember> party
     )
     {
         NetherStrategyTargetEvidence target = mechanic.Target;
@@ -2148,6 +2213,12 @@ internal static class NetherCodePolicyEvidenceAssembler
                     ? "native-mana-target-parameters-unavailable"
                     : target.UnknownReason) + ":" + mechanic.MechanicId
             );
+        }
+        if (target.Kind == NetherStrategyTargetKind.Self)
+        {
+            return TryMapTargetRow(mechanic, party, out _, out string selfError)
+                ? NetherTargetMatch.Match
+                : NetherTargetMatch.Unknown(selfError + ":" + mechanic.MechanicId);
         }
         if (target.Kind != NetherStrategyTargetKind.Friend)
         {

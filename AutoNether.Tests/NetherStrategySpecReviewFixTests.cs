@@ -31,15 +31,100 @@ public sealed class NetherStrategySpecReviewFixTests
     }
 
     [Fact]
-    public void Missing_native_buff_strategy_registration_is_candidate_local_unknown_at_capture_seam()
+    public void Production_capture_uses_the_native_ingame_buff_strategy_constructor_not_engine_registration()
     {
-        bool mapped = NetherNativeMechanicProductionCapture.TryResolveStrategyBuffMap(
-            () => throw new KeyNotFoundException("_BuffTypeStrategies_ is not registered"),
-            out string error
+        // Fresh game evidence (Project.dll SHA-256
+        // 033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4):
+        // BuffTypeStrategies implements IIngameServiceRegister, and its native constructor builds
+        // the complete strategy map (including BuffType 90 and 120). BuffParameterByTypeExtension
+        // also constructs this type directly as its null fallback. Engine.Get is the wrong registry.
+        string source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Services",
+            "NetherNativeMechanicProductionCapture.cs"
+        ));
+
+        Assert.Contains(
+            "new Project.Ingame.BuffTypeStrategies()",
+            source,
+            StringComparison.Ordinal
+        );
+        Assert.DoesNotContain(
+            "Engine.Get<Project.Ingame.BuffTypeStrategies>()",
+            source,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
+    public void Production_capture_reads_native_buff_query_targets_through_the_indexed_store_api()
+    {
+        // Fresh game evidence (Project.dll SHA-256
+        // 033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4):
+        // BuffQuery delegates its query-target count/index reads to BuffTypeStrategies. The store
+        // lazily builds the correctly oriented query-type -> held-type map. Directly enumerating an
+        // IBuffStrategy's IL2CPP AdditionalMatchedQueryTypes array both reverses that relationship
+        // and fails in production with get-enumerator-unavailable.
+        string source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Services",
+            "NetherNativeMechanicProductionCapture.cs"
+        ));
+
+        Assert.Contains(
+            "store!.GetQueryTargetTypeCount(queryBuffType)",
+            source,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "store.GetQueryTargetTypeAt(queryBuffType, index)",
+            source,
+            StringComparison.Ordinal
+        );
+        Assert.DoesNotContain(
+            "strategy.AdditionalMatchedQueryTypes",
+            source,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
+    public void Native_mechanic_retains_same_popup_scope_coverage_for_self_target_resolution()
+    {
+        // Fresh game evidence for this exact build: AbilityTargetSelf.Logic.TargetResolve invokes
+        // its callback with self. NetherCodeAbilityController installs each Code ability only on
+        // units accepted by the Code's native Scope, while GetBuffTargetCount counts that same Scope
+        // over NetherPartyModel.GetValidCharacterModels. The mechanic must retain that same-popup
+        // count so Self can become All only when it equals the authoritative party size.
+        Type mechanic = typeof(NetherStrategyNativeMechanic);
+
+        Assert.Equal(
+            typeof(bool),
+            mechanic.GetProperty("PartyCoverageKnown")?.PropertyType
+        );
+        Assert.Equal(
+            typeof(int),
+            mechanic.GetProperty("PartyCoverage")?.PropertyType
         );
 
-        Assert.False(mapped);
-        Assert.Equal("buff-strategy-map-unavailable", error);
+        string capture = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "AutoNether",
+            "Services",
+            "NetherNativeMechanicProductionCapture.cs"
+        ));
+        Assert.Contains(
+            "PartyCoverageKnown = code.PartyCoverageKnown",
+            capture,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "PartyCoverage = code.PartyCoverage",
+            capture,
+            StringComparison.Ordinal
+        );
     }
 
     [Fact]
