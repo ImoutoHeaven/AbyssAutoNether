@@ -736,11 +736,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             return MapErosionLinkedValue(mechanic, party, routeEvidence);
         }
         if (classification.Kind == NetherMechanismClassificationKind.CrestPayoff)
-        {
-            return NetherMechanismValue.ReachableUnquantified(
-                "crest-provider-consumer-ability-paths-unavailable"
-            );
-        }
+            return MapCrestPayoffValue(mechanic, classification, party);
         if (classification.Kind == NetherMechanismClassificationKind.RecurringSkillCharge)
         {
             return NetherMechanismValue.ReachableUnquantified(
@@ -853,7 +849,19 @@ internal static class NetherCodePolicyEvidenceAssembler
         if (effect != NetherMechanismClassificationKind.Unsupported)
             return new(effect, default, null);
         if (IsCrestPayoffTrigger(mechanic))
-            return new(NetherMechanismClassificationKind.CrestPayoff, default, null);
+        {
+            return TryGetCrestPayoffParameter(
+                mechanic,
+                out NetherCombatMetricKind crestMetric,
+                out NetherStrategyBuffParameterEvidence? crestParameter
+            )
+                ? new(
+                    NetherMechanismClassificationKind.CrestPayoff,
+                    crestMetric,
+                    crestParameter
+                )
+                : new(NetherMechanismClassificationKind.CrestPayoff, default, null);
+        }
         if (mechanic.AbilityEffect.BuffParameters.Any(row =>
                 row != null && row.IsKnown
                 && row.BuffType.Value == (int)NetherKnownBuffType.SkillChargeEfficiency))
@@ -874,6 +882,419 @@ internal static class NetherCodePolicyEvidenceAssembler
                 (int)NetherKnownBuffType.CrestPassion
                 or (int)NetherKnownBuffType.CrestImpact)
         );
+
+    private static bool TryGetCrestPayoffParameter(
+        NetherStrategyNativeMechanic mechanic,
+        out NetherCombatMetricKind metric,
+        out NetherStrategyBuffParameterEvidence? parameter
+    )
+    {
+        metric = NetherCombatMetricKind.Unknown;
+        parameter = null;
+        (NetherStrategyBuffParameterEvidence Parameter, NetherCombatMetricKind Metric)[] rows =
+            mechanic.AbilityEffect.BuffParameters
+                .Where(row => row != null && row.IsKnown && row.ParameterReference.IsKnown)
+                .Select(row => (Parameter: row, Metric: MetricFor(row)))
+                .Where(row => row.Metric != NetherCombatMetricKind.Unknown)
+                .Where(row => row.Parameter.ParameterReference.Kind == ReferenceKindFor(row.Metric)
+                    && row.Parameter.ParameterReference.ValueType == 0
+                    && row.Parameter.ParameterReference.Value >= 0
+                    && row.Parameter.ParameterReference.Limit >= 0)
+                .ToArray();
+        if (rows.Length != 1)
+            return false;
+        metric = rows[0].Metric;
+        parameter = rows[0].Parameter;
+        return true;
+    }
+
+    private static NetherMechanismValue MapCrestPayoffValue(
+        NetherStrategyNativeMechanic mechanic,
+        NetherMechanismClassification classification,
+        IReadOnlyList<NetherStrategyPartyMember>? party
+    )
+    {
+        const string LegacyUnknown = "crest-provider-consumer-ability-paths-unavailable";
+        if (party == null || party.Count == 0
+            || party.Where(member => member != null && member.IsAlive)
+                .Any(member => !member.AbilityMechanicsKnown))
+        {
+            return NetherMechanismValue.ReachableUnquantified(LegacyUnknown);
+        }
+        NetherStrategyBuffParameterEvidence? payoffParameter = classification.Parameter;
+        if (payoffParameter == null || classification.Metric == NetherCombatMetricKind.Unknown)
+            return NetherMechanismValue.Missing("crest-payoff-parameter-unavailable");
+
+        NetherStrategyTriggerEvidence[] crestTriggers = mechanic.Triggers
+            .Where(trigger => trigger.IsKnown
+                && trigger.Kind is NetherStrategyTriggerKind.ReceiveBuff
+                    or NetherStrategyTriggerKind.SpendBuff
+                && trigger.Parameter1 is
+                    (int)NetherKnownBuffType.CrestPassion
+                    or (int)NetherKnownBuffType.CrestImpact)
+            .ToArray();
+        if (crestTriggers.Length != 1)
+            return NetherMechanismValue.Missing("crest-payoff-trigger-relationship-unavailable");
+        NetherStrategyTriggerEvidence crestTrigger = crestTriggers[0];
+        NetherCrestIdentity crestIdentity = crestTrigger.Parameter1 switch
+        {
+            (int)NetherKnownBuffType.CrestPassion => NetherCrestIdentity.Passion,
+            (int)NetherKnownBuffType.CrestImpact => NetherCrestIdentity.Impact,
+            _ => NetherCrestIdentity.Unknown,
+        };
+        if (crestIdentity == NetherCrestIdentity.Unknown)
+            return NetherMechanismValue.Missing("crest-payoff-native-crest-unavailable");
+
+        var matched = party
+            .Where(member => member != null && member.IsAlive)
+            .Select(member => new
+            {
+                Member = member,
+                Match = MatchTarget(mechanic, payoffParameter, member, party),
+            })
+            .ToArray();
+        NetherTargetMatch? unknownTarget = matched.FirstOrDefault(row =>
+            row.Match.Kind == NetherTargetMatchKind.Unknown)?.Match;
+        if (unknownTarget != null)
+            return NetherMechanismValue.Missing(unknownTarget.Detail);
+        NetherStrategyPartyMember[] recipients = matched
+            .Where(row => row.Match.Kind == NetherTargetMatchKind.Match)
+            .Select(row => row.Member)
+            .ToArray();
+        if (recipients.Length == 0)
+        {
+            return NetherMechanismValue.Quantified(
+                NetherMechanismQuantityKind.CrestRecipientPayoff,
+                0,
+                "crest-payoff-no-authoritative-recipient",
+                payoffParameter.BuffType,
+                payoffParameter.ParameterReference.Kind
+            );
+        }
+
+        var paths = new List<NetherCrestPayoffRecipient>(recipients.Length);
+        foreach (NetherStrategyPartyMember recipient in recipients)
+        {
+            CrestPathEvidence provider = FindCrestProviderPath(
+                party,
+                recipient,
+                crestTrigger.Parameter1
+            );
+            int candidateAbilityLevel = mechanic.MasterEffectParameter2 is >= 0 and <= int.MaxValue
+                ? (int)mechanic.MasterEffectParameter2
+                : 0;
+            bool candidateTriggerReachable = IsTriggerControlReachable(
+                crestTrigger,
+                candidateAbilityLevel,
+                requireNoSituationCost: true
+            );
+            CrestPathEvidence consumer;
+            if (crestTrigger.Kind == NetherStrategyTriggerKind.ReceiveBuff)
+            {
+                consumer = new CrestPathEvidence(
+                    PathKnown: true,
+                    Reachable: provider.Reachable && candidateTriggerReachable
+                );
+            }
+            else
+            {
+                CrestPathEvidence spend = FindCrestSpendPath(
+                    party,
+                    recipient,
+                    crestTrigger.Parameter1
+                );
+                consumer = spend with
+                {
+                    Reachable = spend.Reachable && candidateTriggerReachable,
+                };
+            }
+            paths.Add(new NetherCrestPayoffRecipient(recipient.CharacterId, crestIdentity)
+            {
+                ProviderPathKnown = provider.PathKnown,
+                ProviderReachable = provider.Reachable,
+                ConsumerPathKnown = consumer.PathKnown,
+                ConsumerReachable = consumer.Reachable,
+            });
+        }
+
+        int payoff = payoffParameter.ParameterReference.Value;
+        NetherMechanismValue value = new NetherMechanismSpecificValuation().EvaluateCrestPayoff(
+            new NetherCrestPayoffInput(paths, payoff)
+        );
+        if (value.Kind != NetherCombatValueEvidenceKind.Quantified)
+            return value;
+        var quantity = new NetherMechanismQuantity(
+            NetherMechanismQuantityKind.CrestRecipientPayoff,
+            value.Quantity.Value
+        )
+        {
+            BuffType = payoffParameter.BuffType,
+            ParameterReferenceKind = payoffParameter.ParameterReference.Kind,
+        };
+        return value with
+        {
+            Quantity = quantity,
+            Detail = value.Detail + ";exact-recipient-count=" + recipients.Length,
+            RecipientQuantities = recipients.Select((recipient, index) =>
+                new NetherMechanismRecipientQuantity(
+                    recipient.CharacterId,
+                    recipient.PartyPosition,
+                    classification.Metric,
+                    new NetherMechanismQuantity(
+                        NetherMechanismQuantityKind.CrestRecipientPayoff,
+                        paths[index].ProviderReachable && paths[index].ConsumerReachable
+                            ? payoff
+                            : 0
+                    )
+                    {
+                        BuffType = payoffParameter.BuffType,
+                        ParameterReferenceKind = payoffParameter.ParameterReference.Kind,
+                    }
+                )
+            ).ToArray(),
+        };
+    }
+
+    private readonly record struct CrestPathEvidence(bool PathKnown, bool Reachable);
+
+    private enum CrestProviderShapeKind
+    {
+        None = 0,
+        Unknown,
+        Exact,
+    }
+
+    private static CrestPathEvidence FindCrestProviderPath(
+        IReadOnlyList<NetherStrategyPartyMember> party,
+        NetherStrategyPartyMember recipient,
+        int crestBuffType
+    )
+    {
+        bool relevantUnknown = false;
+        foreach (NetherStrategyPartyMember source in party
+                     .Where(member => member != null && member.IsAlive)
+                     .OrderBy(member => member.PartyIndex))
+        {
+            foreach (NetherStrategyAbilityEffect ability in PartyAbilityEffects(source))
+            {
+                NetherStrategyPartyAbilityMechanic? graph = ability.Mechanic;
+                if (graph == null)
+                {
+                    relevantUnknown = true;
+                    continue;
+                }
+                CrestProviderShapeKind shape = TryGetCrestProviderParameter(
+                    graph,
+                    crestBuffType,
+                    out NetherStrategyBuffParameterEvidence? parameter
+                );
+                if (shape == CrestProviderShapeKind.None)
+                    continue;
+                if (shape == CrestProviderShapeKind.Unknown || parameter == null)
+                {
+                    relevantUnknown = true;
+                    continue;
+                }
+                NetherTargetMatch target = MatchPartyAbilityTarget(
+                    ability.EffectId,
+                    graph,
+                    parameter,
+                    source,
+                    recipient,
+                    party
+                );
+                if (target.Kind == NetherTargetMatchKind.Unknown)
+                {
+                    relevantUnknown = true;
+                    continue;
+                }
+                if (target.Kind == NetherTargetMatchKind.NoMatch)
+                    continue;
+                if (graph.Triggers.Count == 0
+                    || graph.Triggers.Any(trigger => !trigger.IsKnown))
+                {
+                    relevantUnknown = true;
+                    continue;
+                }
+                if (graph.Triggers.Any(trigger => trigger.Kind is
+                        NetherStrategyTriggerKind.ReceiveBuff
+                        or NetherStrategyTriggerKind.SpendBuff))
+                {
+                    // A crest grant that itself waits on a buff receipt/spend is not an independent
+                    // seed for the candidate's provider path. Do not make a circular graph reachable.
+                    continue;
+                }
+                if (graph.Triggers.All(trigger => IsTriggerControlReachable(
+                        trigger,
+                        ability.Level,
+                        requireNoSituationCost: true
+                    )))
+                {
+                    return new CrestPathEvidence(PathKnown: true, Reachable: true);
+                }
+            }
+        }
+        return relevantUnknown
+            ? new CrestPathEvidence(PathKnown: false, Reachable: false)
+            : new CrestPathEvidence(PathKnown: true, Reachable: false);
+    }
+
+    private static CrestPathEvidence FindCrestSpendPath(
+        IReadOnlyList<NetherStrategyPartyMember> party,
+        NetherStrategyPartyMember recipient,
+        int crestBuffType
+    )
+    {
+        if (!recipient.AbilityMechanicsKnown)
+            return new CrestPathEvidence(PathKnown: false, Reachable: false);
+        bool relevantUnknown = false;
+        foreach (NetherStrategyAbilityEffect ability in PartyAbilityEffects(recipient))
+        {
+            NetherStrategyPartyAbilityMechanic? graph = ability.Mechanic;
+            if (graph == null)
+            {
+                relevantUnknown = true;
+                continue;
+            }
+            foreach (NetherStrategyTriggerEvidence trigger in graph.Triggers)
+            {
+                if (!trigger.IsKnown)
+                {
+                    relevantUnknown = true;
+                    continue;
+                }
+                if (!IsTriggerControlReachable(
+                        trigger,
+                        ability.Level,
+                        requireNoSituationCost: false
+                    ))
+                {
+                    continue;
+                }
+                if (trigger.ControlRelationships.SituationCosts.Any(cost =>
+                        IsMatchingCrestSpendCost(cost, ability.Level, crestBuffType)))
+                {
+                    return new CrestPathEvidence(PathKnown: true, Reachable: true);
+                }
+            }
+        }
+        return relevantUnknown
+            ? new CrestPathEvidence(PathKnown: false, Reachable: false)
+            : new CrestPathEvidence(PathKnown: true, Reachable: false);
+    }
+
+    private static IEnumerable<NetherStrategyAbilityEffect> PartyAbilityEffects(
+        NetherStrategyPartyMember member
+    ) => member.CharacterAbilityEffects
+        .Concat(member.EquipmentAbilityEffects)
+        .Concat(member.GeneralAbilityEffects);
+
+    private static CrestProviderShapeKind TryGetCrestProviderParameter(
+        NetherStrategyPartyAbilityMechanic graph,
+        int crestBuffType,
+        out NetherStrategyBuffParameterEvidence? parameter
+    )
+    {
+        parameter = null;
+        NetherStrategyBuffParameterEvidence[] matching = graph.AbilityEffect.BuffParameters
+            .Where(row => row != null && row.BuffType.Value == crestBuffType)
+            .ToArray();
+        if (matching.Length == 0)
+            return CrestProviderShapeKind.None;
+        if (!graph.AbilityEffect.IsKnown
+            || graph.AbilityEffect.Kind is not (
+                NetherStrategyAbilityEffectKind.ParameterBuff
+                or NetherStrategyAbilityEffectKind.PassiveBuff
+                or NetherStrategyAbilityEffectKind.StackLinkedBuff)
+            || matching.Length != 1
+            || !matching[0].IsKnown
+            || !matching[0].ParameterReference.IsKnown
+            || graph.AbilityEffect.Conditions.Count != 0
+            || matching[0].ParameterReference.Kind
+                != NetherStrategyBuffParameterReferenceKind.CrestGrantStack
+            || matching[0].ParameterReference.Value <= 0)
+        {
+            return CrestProviderShapeKind.Unknown;
+        }
+        NetherStrategyBuffEvidence[] strategies = graph.BuffStrategies
+            .Where(row => row != null && row.BuffType.Value == crestBuffType)
+            .ToArray();
+        if (strategies.Length != 1
+            || !strategies[0].IsKnown
+            || strategies[0].EffectKind != NetherStrategyBuffEffectKind.Buff
+            || strategies[0].StatusPriority != NetherStrategyStatusPriorityKind.Crest
+            || strategies[0].Coexistence != NetherStrategyBuffCoexistenceKind.ExclusiveCrest)
+        {
+            return CrestProviderShapeKind.Unknown;
+        }
+        parameter = matching[0];
+        return CrestProviderShapeKind.Exact;
+    }
+
+    private static bool IsTriggerControlReachable(
+        NetherStrategyTriggerEvidence trigger,
+        int level,
+        bool requireNoSituationCost
+    )
+    {
+        if (!trigger.IsKnown || trigger.Kind is
+                NetherStrategyTriggerKind.Unknown or NetherStrategyTriggerKind.NativeRunState)
+        {
+            return false;
+        }
+        NetherStrategyTriggerControlEvidence control = trigger.ControlRelationships;
+        bool probabilityReachable = control.ProbabilityType switch
+        {
+            NetherStrategyTriggerProbabilityType.NotApplicable => true,
+            NetherStrategyTriggerProbabilityType.Fixed => control.FixedProbabilityPermille > 0,
+            NetherStrategyTriggerProbabilityType.AbilityLevel when level is >= 1 and <= 10
+                && control.LevelProbabilityPermille.Count >= level =>
+                control.LevelProbabilityPermille[level - 1] > 0,
+            _ => false,
+        };
+        if (!probabilityReachable || control.ExecuteCountLimit?.IsKnown != true)
+            return false;
+        NetherStrategyExecuteCountLimitEvidence limit = control.ExecuteCountLimit!;
+        bool countReachable = limit.Kind switch
+        {
+            NetherStrategyExecuteCountLimitKind.None => true,
+            NetherStrategyExecuteCountLimitKind.Battle
+                or NetherStrategyExecuteCountLimitKind.Quest when limit.RawValueType == 0 =>
+                limit.FixedCountLimit > 0,
+            NetherStrategyExecuteCountLimitKind.Battle
+                or NetherStrategyExecuteCountLimitKind.Quest when limit.RawValueType == 1
+                    && level is >= 1 and <= 10
+                    && limit.LevelCountLimits.Count >= level =>
+                limit.LevelCountLimits[level - 1] > 0,
+            _ => false,
+        };
+        if (!countReachable || requireNoSituationCost && control.SituationCosts.Count != 0)
+            return false;
+        return trigger.Kind switch
+        {
+            NetherStrategyTriggerKind.ActionCount => trigger.Parameter1 > 0,
+            NetherStrategyTriggerKind.Duration => trigger.Parameter1 > 0,
+            _ => true,
+        };
+    }
+
+    private static bool IsMatchingCrestSpendCost(
+        NetherStrategySituationCostEvidence cost,
+        int level,
+        int crestBuffType
+    )
+    {
+        if (cost == null || !cost.IsKnown)
+            return false;
+        if (cost.Kind == NetherStrategySituationCostKind.BuffStack)
+            return cost.BuffType == crestBuffType && cost.FixedStack > 0;
+        return cost.Kind == NetherStrategySituationCostKind.BuffStackPerLevel
+            && level is >= 1 and <= 10
+            && cost.LevelBuffTypes.Count >= level
+            && cost.LevelStacks.Count >= level
+            && cost.LevelBuffTypes[level - 1] == crestBuffType
+            && cost.LevelStacks[level - 1] > 0;
+    }
 
     private static NetherMechanismValue MapUniformCrestGrantValue(
         NetherStrategyNativeMechanic mechanic,
@@ -1226,10 +1647,19 @@ internal static class NetherCodePolicyEvidenceAssembler
             // Ability.Scope.IsMatch to each party unit and installs the ability only on matches.
             // AbilityTargetSelf then resolves that installed ability's owner. Target=Self therefore
             // says where an installed ability lands; Scope says which party units own that ability.
-            if (target.ElementTypeFlags != 0
+            if (target.IgnoreDeadUnit
+                || target.ElementTypeFlags != 0
                 || target.PartyPositionFlags != NetherPartyPositionFlags.None
-                || target.UnionTypeFlags != 0 || target.SearchType != 0
-                || target.RandomCount != 0)
+                || target.UnionTypeFlags != 0
+                || target.JobGroupFlags != 0
+                || target.JobSpeciesFlags != 0
+                || target.CharacterSizeFlags != 0
+                || target.RequiredBuffTypes == null
+                || target.RequiredBuffTypes.Count != 0
+                || target.SearchType != 0
+                || target.RandomCount != 0
+                || target.NearestCount != 0
+                || target.CurrentHpLeastCount != 0)
             {
                 error = "native-self-target-parameters-unavailable";
                 return false;
@@ -1325,18 +1755,31 @@ internal static class NetherCodePolicyEvidenceAssembler
             return false;
         }
         int rawFlags = (int)target.PartyPositionFlags;
-        if ((rawFlags & ~0x0e) != 0)
+        if (!HasOnlyScopeFlagBits(rawFlags, 0x0e)
+            || !HasOnlyScopeFlagBits(target.ElementTypeFlags, 0x7e)
+            || !HasOnlyScopeFlagBits(target.UnionTypeFlags, 0x3e)
+            || !HasOnlyScopeFlagBits(target.JobGroupFlags, 0x00ff_ffff)
+            || !HasOnlyScopeFlagBits(target.JobSpeciesFlags, 0x7e)
+            || !HasOnlyScopeFlagBits(target.CharacterSizeFlags, 0x1e))
         {
             error = "native-target-unknown-flag-bits:" + rawFlags;
             return false;
         }
-        if (target.ElementTypeFlags != 0 || target.UnionTypeFlags != 0
-            || target.SearchType != 0 || target.RandomCount != 0)
+        if (target.RequiredBuffTypes == null
+            || target.RequiredBuffTypes.Count != 0
+            || target.ElementTypeFlags != -1
+            || target.UnionTypeFlags != -1
+            || target.JobGroupFlags != -1
+            || target.JobSpeciesFlags != -1
+            || target.CharacterSizeFlags != -1
+            || target.SearchType != 0)
         {
             error = "native-target-live-relationship-unavailable";
             return false;
         }
-        if (target.PartyPositionFlags == NetherPartyPositionFlags.Forward)
+        if (rawFlags == -1)
+            row = NetherCodeTargetRow.All;
+        else if (target.PartyPositionFlags == NetherPartyPositionFlags.Forward)
             row = NetherCodeTargetRow.Forward;
         else if (target.PartyPositionFlags == NetherPartyPositionFlags.Back)
             row = NetherCodeTargetRow.Back;
@@ -1538,6 +1981,28 @@ internal static class NetherCodePolicyEvidenceAssembler
             error = "native-retained-portfolio-input-unavailable";
             return false;
         }
+
+        NetherMechanismClassification candidateClassification = ClassifyMechanism(candidate);
+        bool resultOwnedAddition = removalCodeId == 0
+            && routeEvidence?.IsBattleResultBeforeFloorRebind == true;
+        if (resultOwnedAddition
+            && candidateClassification.Kind is not (
+                NetherMechanismClassificationKind.Unsupported
+                or NetherMechanismClassificationKind.OrdinaryPortfolio))
+        {
+            // TryBuildNativePortfolioWindows deliberately excludes every recognized typed
+            // mechanism: those quantities are compared by the mechanism/special channels. A
+            // result-page free addition removes no held Code, so a typed-only candidate leaves the
+            // ordinary BuffController portfolio exactly unchanged. Empty before/after windows are
+            // therefore the complete zero marginal and need no invented future route duration.
+            comparison = new NetherNativePortfolioComparisonInput(
+                BeforeWindows: [],
+                AfterWindows: [],
+                BossDurationSeconds: 1
+            );
+            return true;
+        }
+
         int comparisonSeconds;
         if (routeEvidence?.BossDurationKnown == true && routeEvidence.BossDurationSeconds > 0)
         {
@@ -2441,66 +2906,218 @@ internal static class NetherCodePolicyEvidenceAssembler
         }
         if (targetMatch.Kind == NetherTargetMatchKind.NoMatch)
             return NetherTargetMatch.NoMatch;
-        NetherStrategyBuffTargetFilterEvidence? filter = parameter.TargetFilter;
+        return MatchBuffTargetFilter(parameter.TargetFilter, member, mechanic.MechanicId);
+    }
+
+    private static NetherTargetMatch MatchPartyAbilityTarget(
+        long effectId,
+        NetherStrategyPartyAbilityMechanic graph,
+        NetherStrategyBuffParameterEvidence parameter,
+        NetherStrategyPartyMember source,
+        NetherStrategyPartyMember recipient,
+        IReadOnlyList<NetherStrategyPartyMember> party
+    )
+    {
+        NetherStrategyTargetEvidence target = graph.Target;
+        if (!target.IsKnown)
+        {
+            return NetherTargetMatch.Unknown(
+                (string.IsNullOrWhiteSpace(target.UnknownReason)
+                    ? "party-ability-target-parameters-unavailable"
+                    : target.UnknownReason) + ":" + effectId
+            );
+        }
+
+        NetherTargetMatch targetMatch;
+        if (target.Kind == NetherStrategyTargetKind.Self)
+        {
+            if (!HasNoGroupTargetParameters(target))
+            {
+                return NetherTargetMatch.Unknown(
+                    "party-ability-self-target-parameters-unavailable:" + effectId
+                );
+            }
+            targetMatch = source.CharacterId == recipient.CharacterId
+                ? NetherTargetMatch.Match
+                : NetherTargetMatch.NoMatch;
+        }
+        else if (target.Kind == NetherStrategyTargetKind.Friend)
+        {
+            targetMatch = MatchGroupTarget(target, recipient, effectId, "party-ability");
+        }
+        else
+        {
+            return NetherTargetMatch.Unknown(
+                "party-ability-target-kind-not-authoritatively-mapped:"
+                    + target.Kind + ":" + effectId
+            );
+        }
+        if (targetMatch.Kind != NetherTargetMatchKind.Match)
+            return targetMatch;
+
+        // Keep the complete native signature at this seam: a future exact implementation for
+        // Random/Nearest/LeastCurrentHp can correlate the filtered set against this same party.
+        _ = party;
+        return MatchBuffTargetFilter(parameter.TargetFilter, recipient, effectId);
+    }
+
+    private static bool HasNoGroupTargetParameters(NetherStrategyTargetEvidence target) =>
+        !target.IgnoreDeadUnit
+        && target.ElementTypeFlags == 0
+        && target.PartyPositionFlags == NetherPartyPositionFlags.None
+        && target.UnionTypeFlags == 0
+        && target.JobGroupFlags == 0
+        && target.JobSpeciesFlags == 0
+        && target.CharacterSizeFlags == 0
+        && target.RequiredBuffTypes != null
+        && target.RequiredBuffTypes.Count == 0
+        && target.SearchType == 0
+        && target.RandomCount == 0
+        && target.NearestCount == 0
+        && target.CurrentHpLeastCount == 0;
+
+    private static NetherTargetMatch MatchGroupTarget(
+        NetherStrategyTargetEvidence target,
+        NetherStrategyPartyMember member,
+        long mechanicId,
+        string detailPrefix
+    )
+    {
+        if (!target.IsKnown || target.RequiredBuffTypes == null)
+        {
+            return NetherTargetMatch.Unknown(
+                (string.IsNullOrWhiteSpace(target.UnknownReason)
+                    ? detailPrefix + "-target-parameters-unavailable"
+                    : target.UnknownReason) + ":" + mechanicId
+            );
+        }
+        if (!HasOnlyScopeFlagBits(target.ElementTypeFlags, 0x7e)
+            || !HasOnlyScopeFlagBits((int)target.PartyPositionFlags, 0x0e)
+            || !HasOnlyScopeFlagBits(target.UnionTypeFlags, 0x3e)
+            || !HasOnlyScopeFlagBits(target.JobGroupFlags, 0x00ff_ffff)
+            || !HasOnlyScopeFlagBits(target.JobSpeciesFlags, 0x7e)
+            || !HasOnlyScopeFlagBits(target.CharacterSizeFlags, 0x1e))
+        {
+            return NetherTargetMatch.Unknown(
+                detailPrefix + "-target-unknown-flag-bits:" + mechanicId
+            );
+        }
+        if (target.IgnoreDeadUnit && !member.IsAlive)
+            return NetherTargetMatch.NoMatch;
+
+        if (member.ElementType is not 0 and not 99 && target.ElementTypeFlags != -1)
+        {
+            int elementFlag = ElementFlag(member.ElementType);
+            if (elementFlag == 0)
+            {
+                return NetherTargetMatch.Unknown(
+                    detailPrefix + "-target-element-unavailable:" + mechanicId
+                );
+            }
+            if ((target.ElementTypeFlags & elementFlag) == 0)
+                return NetherTargetMatch.NoMatch;
+        }
+        if (member.PartyPosition != NetherPartyPosition.Unknown
+            && (int)target.PartyPositionFlags != -1
+            && (target.PartyPositionFlags & PositionFlag(member.PartyPosition)) == 0)
+        {
+            return NetherTargetMatch.NoMatch;
+        }
+
+        if (target.UnionTypeFlags != -1
+            || target.JobGroupFlags != -1
+            || target.JobSpeciesFlags != -1
+            || target.CharacterSizeFlags != -1
+            || target.RequiredBuffTypes.Count != 0)
+        {
+            return NetherTargetMatch.Unknown(
+                detailPrefix + "-target-live-identity-unavailable:" + mechanicId
+            );
+        }
+        if (target.SearchType == 0)
+            return NetherTargetMatch.Match;
+        if (target.SearchType is 1 or 2 or 11)
+        {
+            int selectedCount = target.SearchType switch
+            {
+                1 => target.RandomCount,
+                2 => target.NearestCount,
+                11 => target.CurrentHpLeastCount,
+                _ => 0,
+            };
+            return selectedCount <= 0
+                ? NetherTargetMatch.NoMatch
+                : NetherTargetMatch.Unknown(
+                    detailPrefix + "-target-live-selection-unavailable:" + mechanicId
+                );
+        }
+        return NetherTargetMatch.Unknown(
+            detailPrefix + "-target-search-type-unavailable:" + mechanicId
+        );
+    }
+
+    private static NetherTargetMatch MatchBuffTargetFilter(
+        NetherStrategyBuffTargetFilterEvidence? filter,
+        NetherStrategyPartyMember member,
+        long mechanicId
+    )
+    {
         if (filter == null)
             return NetherTargetMatch.Match;
         if (!filter.IsKnown)
         {
             return NetherTargetMatch.Unknown(
                 string.IsNullOrWhiteSpace(filter.UnknownReason)
-                    ? "native-target-filter-parameters-unavailable:" + mechanic.MechanicId
-                    : filter.UnknownReason + ":" + mechanic.MechanicId
+                    ? "native-target-filter-parameters-unavailable:" + mechanicId
+                    : filter.UnknownReason + ":" + mechanicId
             );
         }
-        if ((filter.ElementTypeFlags & ~0x7e) != 0
-            || (filter.ElementWeakTypeFlags & ~0x7e) != 0
-            || ((int)filter.PartyPositionFlags & ~0x0e) != 0
-            || (filter.UnionTypeFlags & ~0x3e) != 0
-            || (filter.JobGroupFlags & ~0x00ff_ffff) != 0
-            || (filter.JobSpeciesFlags & ~0x7e) != 0)
+        if (!HasOnlyScopeFlagBits(filter.ElementTypeFlags, 0x7e)
+            || !HasOnlyScopeFlagBits(filter.ElementWeakTypeFlags, 0x7e)
+            || !HasOnlyScopeFlagBits((int)filter.PartyPositionFlags, 0x0e)
+            || !HasOnlyScopeFlagBits(filter.UnionTypeFlags, 0x3e)
+            || !HasOnlyScopeFlagBits(filter.JobGroupFlags, 0x00ff_ffff)
+            || !HasOnlyScopeFlagBits(filter.JobSpeciesFlags, 0x7e)
+            || !HasOnlyScopeFlagBits(filter.CharacterSizeFlags, 0x1e))
         {
             return NetherTargetMatch.Unknown(
-                "native-target-filter-unknown-flag-bits:" + mechanic.MechanicId
+                "native-target-filter-unknown-flag-bits:" + mechanicId
             );
         }
-        if (filter.RequiredBuffTypes.Count > 0
-            || filter.ElementWeakTypeFlags != 0 || filter.UnionTypeFlags != 0
-            || filter.JobGroupFlags != 0 || filter.JobSpeciesFlags != 0
-            || filter.CharacterSizeFlags != 0)
+        if (filter.IgnoreDeadUnit && !member.IsAlive)
+            return NetherTargetMatch.NoMatch;
+        if (filter.RequiredBuffTypes == null
+            || filter.RequiredBuffTypes.Count > 0
+            || filter.ElementWeakTypeFlags != 0
+            || filter.UnionTypeFlags != -1
+            || filter.JobGroupFlags != -1
+            || filter.JobSpeciesFlags != -1
+            || filter.CharacterSizeFlags != -1)
         {
             // BuffTargetFilter.IsMatchTarget evaluates these live unit/buff relationships. The
             // immutable offer party evidence does not expose them, so this dependent mechanic is
             // unknown rather than falsely treated as having no recipients.
             return NetherTargetMatch.Unknown(
-                "native-target-filter-live-relationship-unavailable:" + mechanic.MechanicId
+                "native-target-filter-live-relationship-unavailable:" + mechanicId
             );
         }
-        if (filter.ElementTypeFlags != 0)
+        if (member.ElementType is not 0 and not 99 && filter.ElementTypeFlags != -1)
         {
             // Fresh Project.Master evidence: ElementType values Artifact..Dark are 1..6 while
             // ElementTypeFlag values are the exact independent flags 2,4,8,16,32,64. Keep the
             // relationship explicit so a future enum value fails closed instead of relying on
             // ordinal arithmetic.
-            int elementFlag = member.ElementType switch
-            {
-                1 => 2,
-                2 => 4,
-                3 => 8,
-                4 => 16,
-                5 => 32,
-                6 => 64,
-                _ => 0,
-            };
+            int elementFlag = ElementFlag(member.ElementType);
             if (elementFlag == 0)
             {
                 return NetherTargetMatch.Unknown(
-                    "native-target-filter-element-unavailable:" + mechanic.MechanicId
+                    "native-target-filter-element-unavailable:" + mechanicId
                 );
             }
             if ((filter.ElementTypeFlags & elementFlag) == 0)
                 return NetherTargetMatch.NoMatch;
         }
-        return filter.PartyPositionFlags == NetherPartyPositionFlags.None
+        return (int)filter.PartyPositionFlags == -1
             || (filter.PartyPositionFlags & PositionFlag(member.PartyPosition)) != 0
                 ? NetherTargetMatch.Match
                 : NetherTargetMatch.NoMatch;
@@ -2537,54 +3154,19 @@ internal static class NetherCodePolicyEvidenceAssembler
                     + target.Kind + ":" + mechanic.MechanicId
             );
         }
-        int positionFlags = (int)target.PartyPositionFlags;
-        if ((positionFlags & ~0x0e) != 0 || (target.ElementTypeFlags & ~0x7e) != 0
-            || (target.UnionTypeFlags & ~0x3e) != 0)
-        {
-            return NetherTargetMatch.Unknown(
-                "native-mana-target-unknown-flag-bits:" + mechanic.MechanicId
-            );
-        }
-        if (target.UnionTypeFlags != 0 || target.SearchType != 0 || target.RandomCount != 0)
-        {
-            // AbilityTargetGroupBase resolves these against live unit/selection relationships that
-            // the immutable offer package does not expose. The party-global mana pool matters only
-            // after the native target resolver proves at least one trigger recipient.
-            return NetherTargetMatch.Unknown(
-                "native-mana-target-live-relationship-unavailable:" + mechanic.MechanicId
-            );
-        }
-        if (target.PartyPositionFlags == NetherPartyPositionFlags.None)
-        {
-            return NetherTargetMatch.Unknown(
-                "native-mana-target-position-unavailable:" + mechanic.MechanicId
-            );
-        }
-        if ((target.PartyPositionFlags & PositionFlag(member.PartyPosition)) == 0)
-            return NetherTargetMatch.NoMatch;
-        if (target.ElementTypeFlags == 0)
-            return NetherTargetMatch.Match;
-
-        int elementFlag = member.ElementType switch
-        {
-            1 => 2,
-            2 => 4,
-            3 => 8,
-            4 => 16,
-            5 => 32,
-            6 => 64,
-            _ => 0,
-        };
-        if (elementFlag == 0)
-        {
-            return NetherTargetMatch.Unknown(
-                "native-mana-target-element-unavailable:" + mechanic.MechanicId
-            );
-        }
-        return (target.ElementTypeFlags & elementFlag) != 0
-            ? NetherTargetMatch.Match
-            : NetherTargetMatch.NoMatch;
+        return MatchGroupTarget(target, member, mechanic.MechanicId, "native-mana");
     }
+
+    private static int ElementFlag(int elementType) => elementType switch
+    {
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        4 => 16,
+        5 => 32,
+        6 => 64,
+        _ => 0,
+    };
 
     private static NetherPartyPositionFlags PositionFlag(NetherPartyPosition position) => position switch
     {

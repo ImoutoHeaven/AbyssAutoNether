@@ -9000,13 +9000,25 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         out string error
     )
     {
-        if (TryMapStrategyPartyModelDeep(nativeParty, out members, out error))
+        Project.Ingame.BuffTypeStrategies? buffStrategyStore =
+            NetherNativeMechanicProductionCapture.TryCreateStrategyStore(
+                out string buffStrategyError
+            );
+        if (TryMapStrategyPartyModelDeep(
+                nativeParty,
+                buffStrategyStore,
+                buffStrategyError,
+                out members,
+                out error
+            ))
             return true;
 
         string deepError = error;
         if (TryMapStrategyPartyModelShallow(
                 nativeParty,
                 deepError,
+                buffStrategyStore,
+                buffStrategyError,
                 out members,
                 out string shallowError
             ))
@@ -9023,6 +9035,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private static bool TryMapStrategyPartyModelDeep(
         Project.Nether.NetherPartyModel nativeParty,
+        Project.Ingame.BuffTypeStrategies? buffStrategyStore,
+        string buffStrategyError,
         out IReadOnlyList<NetherStrategyPartyMember>? members,
         out string error
     )
@@ -9224,18 +9238,24 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             if (!TryMapStrategyAbilityEffects(
                     character,
                     "CharacterAbilityEffectModels",
+                    buffStrategyStore,
+                    buffStrategyError,
                     out IReadOnlyList<NetherStrategyAbilityEffect>? characterEffects,
                     out error
                 )
                 || !TryMapStrategyAbilityEffects(
                     character,
                     "EquipmentAbilityEffectModels",
+                    buffStrategyStore,
+                    buffStrategyError,
                     out IReadOnlyList<NetherStrategyAbilityEffect>? equipmentEffects,
                     out error
                 )
                 || !TryMapStrategyAbilityEffects(
                     character,
                     "GeneralAbilityEffectModels",
+                    buffStrategyStore,
+                    buffStrategyError,
                     out IReadOnlyList<NetherStrategyAbilityEffect>? generalEffects,
                     out error
                 ))
@@ -9272,6 +9292,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 CharacterAbilityEffects = characterEffects!,
                 EquipmentAbilityEffects = equipmentEffects!,
                 GeneralAbilityEffects = generalEffects!,
+                AbilityMechanicsKnown = true,
+                AbilityMechanicsUnknownReason = string.Empty,
             });
         }
         if (mapped.Count == 0)
@@ -9293,6 +9315,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private static bool TryMapStrategyPartyModelShallow(
         Project.Nether.NetherPartyModel nativeParty,
         string deepError,
+        Project.Ingame.BuffTypeStrategies? buffStrategyStore,
+        string buffStrategyError,
         out IReadOnlyList<NetherStrategyPartyMember>? members,
         out string error
     )
@@ -9362,6 +9386,34 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 return false;
             }
 
+            if (!TryMapStrategyAbilityEffects(
+                    character,
+                    "CharacterAbilityEffectModels",
+                    buffStrategyStore,
+                    buffStrategyError,
+                    out IReadOnlyList<NetherStrategyAbilityEffect>? characterEffects,
+                    out error
+                )
+                || !TryMapStrategyAbilityEffects(
+                    character,
+                    "EquipmentAbilityEffectModels",
+                    buffStrategyStore,
+                    buffStrategyError,
+                    out IReadOnlyList<NetherStrategyAbilityEffect>? equipmentEffects,
+                    out error
+                )
+                || !TryMapStrategyAbilityEffects(
+                    character,
+                    "GeneralAbilityEffectModels",
+                    buffStrategyStore,
+                    buffStrategyError,
+                    out IReadOnlyList<NetherStrategyAbilityEffect>? generalEffects,
+                    out error
+                ))
+            {
+                return false;
+            }
+
             mapped.Add(new NetherStrategyPartyMember(
                 characterId,
                 partyIndex,
@@ -9385,9 +9437,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ContinuousAttackCountMaximumUnknownReason =
                     "code-offer-party-model-has-no-live-i-character-status",
                 NativeParameters = Array.Empty<NetherStrategyNamedValue>(),
-                CharacterAbilityEffects = Array.Empty<NetherStrategyAbilityEffect>(),
-                EquipmentAbilityEffects = Array.Empty<NetherStrategyAbilityEffect>(),
-                GeneralAbilityEffects = Array.Empty<NetherStrategyAbilityEffect>(),
+                CharacterAbilityEffects = characterEffects!,
+                EquipmentAbilityEffects = equipmentEffects!,
+                GeneralAbilityEffects = generalEffects!,
+                AbilityMechanicsKnown = true,
+                AbilityMechanicsUnknownReason = string.Empty,
             });
         }
         if (mapped.Count == 0)
@@ -9435,6 +9489,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private static bool TryMapStrategyAbilityEffects(
         object character,
         string memberName,
+        Project.Ingame.BuffTypeStrategies? buffStrategyStore,
+        string buffStrategyError,
         out IReadOnlyList<NetherStrategyAbilityEffect>? effects,
         out string error
     )
@@ -9462,6 +9518,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         foreach (object model in abilityEffects)
         {
             if (!TryReadMember(model, "Effect", out object? effect) || effect == null
+                || effect is not Project.IAbilityEffectData nativeAbility
                 || !TryReadInt(effect, "ID", out long effectId)
                 || !TryReadInt32(model, "Level", out int level)
                 || !TryReadInt32(model, "AwakeningLevel", out int awakeningLevel)
@@ -9475,6 +9532,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             mapped.Add(new NetherStrategyAbilityEffect(effectId, level, abilityType, value)
             {
                 AwakeningLevel = awakeningLevel,
+                Mechanic = NetherNativeMechanicProductionCapture.CapturePartyAbility(
+                    nativeAbility,
+                    level,
+                    awakeningLevel,
+                    effectId,
+                    buffStrategyStore,
+                    buffStrategyError
+                ),
             });
         }
         effects = mapped;

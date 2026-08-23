@@ -18,7 +18,7 @@ namespace AutoNether.Services;
 /// </summary>
 internal static class NetherNativeMechanicProductionCapture
 {
-    private static Project.Ingame.BuffTypeStrategies? TryCreateStrategyStore(out string error)
+    internal static Project.Ingame.BuffTypeStrategies? TryCreateStrategyStore(out string error)
     {
         try
         {
@@ -245,6 +245,129 @@ internal static class NetherNativeMechanicProductionCapture
         error = string.Empty;
         return true;
     }
+
+    /// <summary>
+    /// Captures the exact mechanic graph retained by one current native
+    /// Project.Outgame.AbilityEffectModel. The caller has already bound the ability to its owning
+    /// NetherPartyCharacterModel; Scope is therefore not reinterpreted as a second owner filter.
+    /// </summary>
+    internal static NetherStrategyPartyAbilityMechanic CapturePartyAbility(
+        Project.IAbilityEffectData? ability,
+        int level,
+        int awakeningLevel,
+        long effectId,
+        Project.Ingame.BuffTypeStrategies? buffStrategyStore,
+        string buffMapError
+    )
+    {
+        string fallback = "party-ability-mechanic-unavailable:" + effectId;
+        if (ability == null || effectId <= 0 || level < 0 || awakeningLevel < 0)
+            return UnknownPartyAbilityMechanic(fallback);
+
+        try
+        {
+            bool known = TryMapStrategyTriggers(
+                ability.Situations,
+                effectId,
+                out IReadOnlyList<NetherStrategyTriggerEvidence> triggers,
+                out string triggerError
+            );
+            string unknown = known ? string.Empty : triggerError;
+            NetherStrategyTargetEvidence target = MapStrategyTarget(ability.Target);
+            if (!target.IsKnown)
+            {
+                known = false;
+                if (unknown.Length == 0)
+                    unknown = target.UnknownReason;
+            }
+
+            object? effect = ability.GetAbilityEffect(level, awakeningLevel);
+            NetherStrategyAbilityEffectEvidence abilityEffect;
+            IReadOnlyList<NetherStrategyBuffEvidence> buffStrategies;
+            if (effect == null)
+            {
+                known = false;
+                if (unknown.Length == 0)
+                    unknown = "party-ability-effect-level-unavailable:" + effectId;
+                abilityEffect = UnknownStrategyAbilityEffect(unknown);
+                buffStrategies = Array.Empty<NetherStrategyBuffEvidence>();
+            }
+            else
+            {
+                abilityEffect = MapStrategyAbilityEffect(effect);
+                if (!abilityEffect.IsKnown)
+                {
+                    known = false;
+                    if (unknown.Length == 0)
+                        unknown = abilityEffect.UnknownReason;
+                }
+                if (!TryReadStrategyBuffTypes(
+                        effect,
+                        out IReadOnlyList<int> buffTypes,
+                        out string buffTypeError
+                    ))
+                {
+                    known = false;
+                    if (unknown.Length == 0)
+                        unknown = "party-ability-buff-type-evidence:"
+                            + effectId + ":" + buffTypeError;
+                    buffStrategies = Array.Empty<NetherStrategyBuffEvidence>();
+                }
+                else
+                {
+                    buffStrategies = buffTypes.Select(buffType =>
+                        MapStrategyBuff(
+                            effectId,
+                            buffType,
+                            buffStrategyStore,
+                            buffMapError
+                        )
+                    ).ToArray();
+                    NetherStrategyBuffEvidence? unknownBuff = buffStrategies.FirstOrDefault(
+                        strategy => !strategy.IsKnown
+                    );
+                    if (unknownBuff != null)
+                    {
+                        known = false;
+                        if (unknown.Length == 0)
+                            unknown = unknownBuff.UnknownReason;
+                    }
+                }
+            }
+
+            return new NetherStrategyPartyAbilityMechanic(
+                triggers,
+                target,
+                abilityEffect,
+                buffStrategies
+            )
+            {
+                IsKnown = known,
+                UnknownReason = known
+                    ? string.Empty
+                    : string.IsNullOrWhiteSpace(unknown) ? fallback : unknown,
+            };
+        }
+        catch (Exception ex)
+        {
+            return UnknownPartyAbilityMechanic(
+                fallback + ":" + ex.GetType().Name
+            );
+        }
+    }
+
+    private static NetherStrategyPartyAbilityMechanic UnknownPartyAbilityMechanic(
+        string reason
+    ) => new(
+        [UnknownStrategyTrigger(reason)],
+        UnknownStrategyTarget(reason),
+        UnknownStrategyAbilityEffect(reason),
+        Array.Empty<NetherStrategyBuffEvidence>()
+    )
+    {
+        IsKnown = false,
+        UnknownReason = reason,
+    };
 
     private static NetherCodeMasterEffectType MapStrategySourceEffectType(int raw) => raw switch
     {
@@ -724,24 +847,77 @@ internal static class NetherNativeMechanicProductionCapture
             TryCastNative<Project.AbilityTarget.AbilityTargetGroupBase>(source);
         if (group != null)
         {
+            IReadOnlyList<NetherStrategyBuffType> requiredBuffs =
+                Array.Empty<NetherStrategyBuffType>();
+            string requiredBuffError = string.Empty;
+            if (group._buffs != null)
+            {
+                if (!NetherRuntimeEnumerableReader.TryRead(
+                        group._buffs,
+                        out List<object> rawBuffs,
+                        out string enumerationError
+                    ))
+                {
+                    requiredBuffError = "ability-target-required-buffs-enumeration:"
+                        + enumerationError;
+                }
+                else
+                {
+                    var mappedBuffs = new List<NetherStrategyBuffType>(rawBuffs.Count);
+                    foreach (object raw in rawBuffs)
+                    {
+                        if (!TryConvertInt32(raw, out int rawBuffType) || rawBuffType <= 0)
+                        {
+                            requiredBuffError = "invalid-ability-target-required-buff";
+                            break;
+                        }
+                        mappedBuffs.Add(new NetherStrategyBuffType(rawBuffType));
+                    }
+                    requiredBuffs = mappedBuffs;
+                }
+            }
             int elementFlags = (int)group._elementTypeFlag;
             int positionFlags = (int)group._partyPositionFlag;
             int unionFlags = (int)group._unionTypeFlag;
-            bool flagsKnown = HasOnlyFlagBits(elementFlags, 0x7e)
-                && HasOnlyFlagBits(positionFlags, 0x0e)
-                && HasOnlyFlagBits(unionFlags, 0x3e);
+            int jobGroupFlags = (int)group._jobGroupFlag;
+            int jobSpeciesFlags = (int)group._jobSpeciesFlag;
+            int characterSizeFlags = (int)group._charaSizeFlag;
+            int searchType = (int)group._searchType;
+            bool flagsKnown = HasOnlyBroadFlagBits(elementFlags, 0x7e)
+                && HasOnlyBroadFlagBits(positionFlags, 0x0e)
+                && HasOnlyBroadFlagBits(unionFlags, 0x3e)
+                && HasOnlyBroadFlagBits(jobGroupFlags, 0x00ff_ffff)
+                && HasOnlyBroadFlagBits(jobSpeciesFlags, 0x7e)
+                && HasOnlyBroadFlagBits(characterSizeFlags, 0x1e);
+            bool selectionKnown = searchType is 0 or 1 or 2 or 11
+                && group._randomNum >= 0
+                && group._nearestNum >= 0
+                && group._currentHpLeastNum >= 0;
+            bool parametersKnown = flagsKnown
+                && selectionKnown
+                && requiredBuffError.Length == 0;
+            string unknownReason = !flagsKnown
+                ? "ability-target-unknown-native-flag-bits:" + identity
+                : !selectionKnown
+                    ? "ability-target-unknown-native-search-parameters:" + identity
+                    : requiredBuffError;
             return new NetherStrategyTargetEvidence(kind)
             {
+                IgnoreDeadUnit = group._ignoreDeadUnit,
                 ElementTypeFlags = elementFlags,
                 PartyPositionFlags = (NetherPartyPositionFlags)positionFlags,
                 UnionTypeFlags = unionFlags,
-                SearchType = (int)group._searchType,
+                JobGroupFlags = jobGroupFlags,
+                JobSpeciesFlags = jobSpeciesFlags,
+                CharacterSizeFlags = characterSizeFlags,
+                RequiredBuffTypes = requiredBuffs,
+                SearchType = searchType,
                 RandomCount = group._randomNum,
-                ParametersKnown = flagsKnown,
+                NearestCount = group._nearestNum,
+                CurrentHpLeastCount = group._currentHpLeastNum,
+                ParametersKnown = parametersKnown,
                 NativeTypeIdentity = identity,
-                UnknownReason = flagsKnown
-                    ? string.Empty
-                    : "ability-target-unknown-native-flag-bits:" + identity,
+                UnknownReason = parametersKnown ? string.Empty : unknownReason,
             };
         }
         return new NetherStrategyTargetEvidence(kind)
@@ -1296,12 +1472,14 @@ internal static class NetherNativeMechanicProductionCapture
         int unionFlags = (int)filter._unionTypeFlag;
         int jobGroupFlags = (int)filter._jobGroupFlag;
         int jobSpeciesFlags = (int)filter._jobSpeciesFlag;
-        bool flagsKnown = HasOnlyFlagBits(elementFlags, 0x7e)
-            && HasOnlyFlagBits(weakFlags, 0x7e)
-            && HasOnlyFlagBits(positionFlags, 0x0e)
-            && HasOnlyFlagBits(unionFlags, 0x3e)
-            && HasOnlyFlagBits(jobGroupFlags, 0x00ff_ffff)
-            && HasOnlyFlagBits(jobSpeciesFlags, 0x7e);
+        int characterSizeFlags = (int)filter._charaSizeFlag;
+        bool flagsKnown = HasOnlyBroadFlagBits(elementFlags, 0x7e)
+            && HasOnlyBroadFlagBits(weakFlags, 0x7e)
+            && HasOnlyBroadFlagBits(positionFlags, 0x0e)
+            && HasOnlyBroadFlagBits(unionFlags, 0x3e)
+            && HasOnlyBroadFlagBits(jobGroupFlags, 0x00ff_ffff)
+            && HasOnlyBroadFlagBits(jobSpeciesFlags, 0x7e)
+            && HasOnlyBroadFlagBits(characterSizeFlags, 0x1e);
         evidence = new NetherStrategyBuffTargetFilterEvidence(
             filter._ignoreDeadUnit,
             elementFlags,
@@ -1310,7 +1488,7 @@ internal static class NetherNativeMechanicProductionCapture
             unionFlags,
             jobGroupFlags,
             jobSpeciesFlags,
-            (int)filter._charaSizeFlag,
+            characterSizeFlags,
             required
         )
         {
@@ -1325,6 +1503,9 @@ internal static class NetherNativeMechanicProductionCapture
 
     private static bool HasOnlyFlagBits(int value, int knownMask) =>
         value >= 0 && (value & ~knownMask) == 0;
+
+    private static bool HasOnlyBroadFlagBits(int value, int knownMask) =>
+        value == -1 || HasOnlyFlagBits(value, knownMask);
 
     private static bool HasOnlyScopeFlagBits(int value, int knownMask) =>
         value == -1 || value >= 0 && (value & ~knownMask) == 0;

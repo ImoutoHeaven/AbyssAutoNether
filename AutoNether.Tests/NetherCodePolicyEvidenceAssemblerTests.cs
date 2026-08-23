@@ -1135,11 +1135,11 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
                             IgnoreDeadUnit: true,
                             ElementTypeFlags: 128,
                             ElementWeakTypeFlags: 0,
-                            PartyPositionFlags: NetherPartyPositionFlags.None,
-                            UnionTypeFlags: 0,
-                            JobGroupFlags: 0,
-                            JobSpeciesFlags: 0,
-                            CharacterSizeFlags: 0,
+                            PartyPositionFlags: (NetherPartyPositionFlags)(-1),
+                            UnionTypeFlags: -1,
+                            JobGroupFlags: -1,
+                            JobSpeciesFlags: -1,
+                            CharacterSizeFlags: -1,
                             RequiredBuffTypes: []
                         ),
                     },
@@ -3565,6 +3565,190 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
+    public void Production_crest_payoff_uses_the_matching_native_party_ability_provider_graph()
+    {
+        // Fresh current-game evidence: NetherPartyCharacterModel retains the three native
+        // AbilityEffectModel arrays, and each model retains IAbilityEffectData plus Level and
+        // AwakeningLevel. AbilityController reconstructs that exact graph in battle. A known
+        // StartBattle self-target crest grant therefore proves the provider path for a matching
+        // ReceiveBuff Code payoff on the same native party member.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88518, NetherCodeFamily.Impact, power: 1);
+        NetherStrategyNativeMechanic provider = CrestGrantMechanic(
+            78_001,
+            (int)NetherKnownBuffType.CrestImpact
+        );
+        NetherStrategyPartyMember member = Assert.Single(
+            Package(snapshot, 0, 0).Party.Value!.Members
+        );
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Known(
+                new NetherStrategyPartyProfile([
+                    member with
+                    {
+                        AbilityMechanicsKnown = true,
+                        AbilityMechanicsUnknownReason = string.Empty,
+                        CharacterAbilityEffects =
+                        [
+                            new NetherStrategyAbilityEffect(78_001, 1, 0, 0)
+                            {
+                                Mechanic = new NetherStrategyPartyAbilityMechanic(
+                                    provider.Triggers,
+                                    provider.Target,
+                                    provider.AbilityEffect,
+                                    provider.BuffStrategies
+                                ),
+                            },
+                        ],
+                    },
+                ])
+            ),
+        };
+        NetherStrategyNativeMechanic payoff = AttackMechanic(candidate.CodeId, 250) with
+        {
+            Triggers =
+            [
+                KnownTrigger(NetherStrategyTriggerKind.ReceiveBuff) with
+                {
+                    Parameter1 = (int)NetherKnownBuffType.CrestImpact,
+                    Parameter2 = 1,
+                },
+            ],
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [payoff],
+            EquipmentSettings(),
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence
+        );
+        NetherCodeEquipmentMutationEvidence mutation = captured.Evidence
+            .EquipmentMutationValuesByKey[new NetherCodeMutationKey(candidate.CodeId, 0)];
+        NetherEquipmentMutationValue mutationValue = new NetherEquipmentCodeValuePolicy()
+            .Evaluate(mutation);
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCombatValueEvidenceKind.Quantified, value.Kind);
+        Assert.Equal(NetherMechanismQuantityKind.CrestRecipientPayoff, value.Quantity.Kind);
+        Assert.Equal(250m, value.Quantity.Value);
+        Assert.NotEmpty(value.RecipientQuantities);
+        Assert.Equal(1, mutation.NativePortfolio.BossDurationSeconds);
+        Assert.Empty(mutation.NativePortfolio.BeforeWindows);
+        Assert.Empty(mutation.NativePortfolio.AfterWindows);
+        Assert.NotEqual(NetherEquipmentCombatTier.None, mutation.CombatTier);
+        Assert.Equal(
+            NetherEquipmentMutationValueKind.StrictQuantifiedImprovement,
+            mutationValue.Kind
+        );
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Production_crest_provider_accepts_native_broad_friend_defaults_and_inactive_search_counts()
+    {
+        // Fresh current-game AbilityTargetGroupBase constructor evidence initializes every broad
+        // member flag to -1 and Random/Nearest/LeastCurrentHp counts to 1 while SearchType remains
+        // Default (0). IsMatch consumes the broad flags, and GetMatchTargets does not consult those
+        // counts unless the corresponding non-default SearchType is active.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88519, NetherCodeFamily.Impact, power: 1);
+        NetherStrategyNativeMechanic provider = CrestGrantMechanic(
+            78_002,
+            (int)NetherKnownBuffType.CrestImpact
+        ) with
+        {
+            Target = new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Friend)
+            {
+                ParametersKnown = true,
+                IgnoreDeadUnit = true,
+                ElementTypeFlags = -1,
+                PartyPositionFlags = (NetherPartyPositionFlags)(-1),
+                UnionTypeFlags = -1,
+                JobGroupFlags = -1,
+                JobSpeciesFlags = -1,
+                CharacterSizeFlags = -1,
+                RequiredBuffTypes = [],
+                SearchType = 0,
+                RandomCount = 1,
+                NearestCount = 1,
+                CurrentHpLeastCount = 1,
+            },
+        };
+        NetherStrategyPartyMember member = Assert.Single(
+            Package(snapshot, 0, 0).Party.Value!.Members
+        );
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Known(
+                new NetherStrategyPartyProfile([
+                    member with
+                    {
+                        AbilityMechanicsKnown = true,
+                        AbilityMechanicsUnknownReason = string.Empty,
+                        CharacterAbilityEffects =
+                        [
+                            new NetherStrategyAbilityEffect(78_002, 1, 0, 0)
+                            {
+                                Mechanic = new NetherStrategyPartyAbilityMechanic(
+                                    provider.Triggers,
+                                    provider.Target,
+                                    provider.AbilityEffect,
+                                    provider.BuffStrategies
+                                ),
+                            },
+                        ],
+                    },
+                ])
+            ),
+        };
+        NetherStrategyNativeMechanic payoff = AttackMechanic(candidate.CodeId, 250) with
+        {
+            Triggers =
+            [
+                KnownTrigger(NetherStrategyTriggerKind.ReceiveBuff) with
+                {
+                    Parameter1 = (int)NetherKnownBuffType.CrestImpact,
+                    Parameter2 = 1,
+                },
+            ],
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [payoff],
+            EquipmentSettings(),
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCombatValueEvidenceKind.Quantified, value.Kind);
+        Assert.Equal(NetherMechanismQuantityKind.CrestRecipientPayoff, value.Quantity.Kind);
+        Assert.Equal(250m, value.Quantity.Value);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
     public void Production_shared_mana_requires_exact_matching_trigger_recipient_candidate_locally()
     {
         // Fresh Project.dll 53806a5b...1300: AbilityChargeMana.Initialize receives the exact
@@ -4447,7 +4631,18 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Friend)
         {
             ParametersKnown = true,
+            IgnoreDeadUnit = true,
+            ElementTypeFlags = -1,
             PartyPositionFlags = targetFlags,
+            UnionTypeFlags = -1,
+            JobGroupFlags = -1,
+            JobSpeciesFlags = -1,
+            CharacterSizeFlags = -1,
+            RequiredBuffTypes = [],
+            SearchType = 0,
+            RandomCount = 1,
+            NearestCount = 1,
+            CurrentHpLeastCount = 1,
         }
     )
     {
@@ -4464,7 +4659,18 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Friend)
         {
             ParametersKnown = true,
+            IgnoreDeadUnit = true,
+            ElementTypeFlags = -1,
             PartyPositionFlags = NetherPartyPositionFlags.Back,
+            UnionTypeFlags = -1,
+            JobGroupFlags = -1,
+            JobSpeciesFlags = -1,
+            CharacterSizeFlags = -1,
+            RequiredBuffTypes = [],
+            SearchType = 0,
+            RandomCount = 1,
+            NearestCount = 1,
+            CurrentHpLeastCount = 1,
         }
     )
     {
@@ -4603,11 +4809,11 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
                             IgnoreDeadUnit: true,
                             ElementTypeFlags: elementTypeFlags,
                             ElementWeakTypeFlags: 0,
-                            PartyPositionFlags: NetherPartyPositionFlags.None,
-                            UnionTypeFlags: 0,
-                            JobGroupFlags: 0,
-                            JobSpeciesFlags: 0,
-                            CharacterSizeFlags: 0,
+                            PartyPositionFlags: (NetherPartyPositionFlags)(-1),
+                            UnionTypeFlags: -1,
+                            JobGroupFlags: -1,
+                            JobSpeciesFlags: -1,
+                            CharacterSizeFlags: -1,
                             RequiredBuffTypes: []
                         ),
                     },
@@ -4637,11 +4843,11 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
                             IgnoreDeadUnit: true,
                             ElementTypeFlags: elementTypeFlags,
                             ElementWeakTypeFlags: 0,
-                            PartyPositionFlags: NetherPartyPositionFlags.None,
-                            UnionTypeFlags: 0,
-                            JobGroupFlags: 0,
-                            JobSpeciesFlags: 0,
-                            CharacterSizeFlags: 0,
+                            PartyPositionFlags: (NetherPartyPositionFlags)(-1),
+                            UnionTypeFlags: -1,
+                            JobGroupFlags: -1,
+                            JobSpeciesFlags: -1,
+                            CharacterSizeFlags: -1,
                             RequiredBuffTypes: []
                         ),
                     new NetherStrategyBuffParameterReferenceEvidence(
@@ -4773,13 +4979,13 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
 
     private static NetherStrategyBuffTargetFilterEvidence UnsupportedLiveFilter() => new(
         IgnoreDeadUnit: true,
-        ElementTypeFlags: 0,
+        ElementTypeFlags: -1,
         ElementWeakTypeFlags: 0,
-        PartyPositionFlags: NetherPartyPositionFlags.None,
-        UnionTypeFlags: 0,
-        JobGroupFlags: 0,
-        JobSpeciesFlags: 0,
-        CharacterSizeFlags: 0,
+        PartyPositionFlags: (NetherPartyPositionFlags)(-1),
+        UnionTypeFlags: -1,
+        JobGroupFlags: -1,
+        JobSpeciesFlags: -1,
+        CharacterSizeFlags: -1,
         RequiredBuffTypes: [new NetherStrategyBuffType(777)]
     );
 
@@ -4833,16 +5039,25 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     private static NetherStrategyNativeMechanic SharedManaMechanic(
         long codeId,
         NetherPartyPositionFlags targetFlags,
-        int elementTypeFlags = 0,
-        int unionTypeFlags = 0
+        int elementTypeFlags = -1,
+        int unionTypeFlags = -1
     ) => OrdinaryMechanic(codeId) with
     {
         Target = new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Friend)
         {
             ParametersKnown = true,
+            IgnoreDeadUnit = true,
             PartyPositionFlags = targetFlags,
             ElementTypeFlags = elementTypeFlags,
             UnionTypeFlags = unionTypeFlags,
+            JobGroupFlags = -1,
+            JobSpeciesFlags = -1,
+            CharacterSizeFlags = -1,
+            RequiredBuffTypes = [],
+            SearchType = 0,
+            RandomCount = 1,
+            NearestCount = 1,
+            CurrentHpLeastCount = 1,
         },
         AbilityEffect = new NetherStrategyAbilityEffectEvidence(
             NetherStrategyAbilityEffectKind.ChargeMana

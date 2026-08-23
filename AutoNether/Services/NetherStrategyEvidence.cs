@@ -230,6 +230,13 @@ internal sealed record NetherStrategyPartyMember(
         Array.Empty<NetherStrategyAbilityEffect>();
     public IReadOnlyList<NetherStrategyAbilityEffect> GeneralAbilityEffects { get; init; } =
         Array.Empty<NetherStrategyAbilityEffect>();
+    /// <summary>
+    /// True only when all three native AbilityEffectModel collections were captured from the
+    /// current NetherPartyCharacterModel, including each IAbilityEffectData mechanic graph.
+    /// </summary>
+    public bool AbilityMechanicsKnown { get; init; }
+    public string AbilityMechanicsUnknownReason { get; init; } =
+        "party-ability-mechanics-not-captured";
 }
 
 internal readonly record struct NetherStrategyAbilityEffect(
@@ -240,6 +247,22 @@ internal readonly record struct NetherStrategyAbilityEffect(
 )
 {
     public int AwakeningLevel { get; init; }
+    public NetherStrategyPartyAbilityMechanic? Mechanic { get; init; }
+}
+
+/// <summary>
+/// Immutable graph retained from one native Outgame.AbilityEffectModel. The enclosing party
+/// member is the native ability owner; Target describes the recipients resolved from that owner.
+/// </summary>
+internal sealed record NetherStrategyPartyAbilityMechanic(
+    IReadOnlyList<NetherStrategyTriggerEvidence> Triggers,
+    NetherStrategyTargetEvidence Target,
+    NetherStrategyAbilityEffectEvidence AbilityEffect,
+    IReadOnlyList<NetherStrategyBuffEvidence> BuffStrategies
+)
+{
+    public bool IsKnown { get; init; } = true;
+    public string UnknownReason { get; init; } = string.Empty;
 }
 
 internal sealed record NetherStrategyPartyProfile(
@@ -743,11 +766,19 @@ internal enum NetherStrategyTargetKind
 internal readonly record struct NetherStrategyTargetEvidence(NetherStrategyTargetKind Kind)
 {
     public bool IsKnown => Kind != NetherStrategyTargetKind.Unknown && ParametersKnown;
+    public bool IgnoreDeadUnit { get; init; }
     public int ElementTypeFlags { get; init; }
     public NetherPartyPositionFlags PartyPositionFlags { get; init; }
     public int UnionTypeFlags { get; init; }
+    public int JobGroupFlags { get; init; }
+    public int JobSpeciesFlags { get; init; }
+    public int CharacterSizeFlags { get; init; }
+    public IReadOnlyList<NetherStrategyBuffType> RequiredBuffTypes { get; init; } =
+        Array.Empty<NetherStrategyBuffType>();
     public int SearchType { get; init; }
     public int RandomCount { get; init; }
+    public int NearestCount { get; init; }
+    public int CurrentHpLeastCount { get; init; }
     public bool ParametersKnown { get; init; }
     public string NativeTypeIdentity { get; init; } = string.Empty;
     public string UnknownReason { get; init; } = string.Empty;
@@ -1539,11 +1570,20 @@ internal static class NetherStrategyEvidenceMapper
                     "invalid-party-profile-member"
                 );
             }
-            if (!TryCopyEffectiveParameters(
+            if (member.CharacterAbilityEffects == null
+                || member.EquipmentAbilityEffects == null
+                || member.GeneralAbilityEffects == null
+                || !TryCopyEffectiveParameters(
                     member,
                     out IReadOnlyList<NetherStrategyEffectiveParameter>? effectiveParameters,
                     out IReadOnlyList<NetherStrategyParameterCalculationEvidence>? calculations
                 )
+                || member.AbilityMechanicsKnown
+                    && member.CharacterAbilityEffects.Concat(member.EquipmentAbilityEffects)
+                        .Concat(member.GeneralAbilityEffects)
+                        .Any(effect => effect.Mechanic == null)
+                || !member.AbilityMechanicsKnown
+                    && string.IsNullOrWhiteSpace(member.AbilityMechanicsUnknownReason)
                 || !TryCopyNamed(member.NativeParameters, out IReadOnlyList<NetherStrategyNamedValue>? parameters)
                 || !TryCopyEffects(member.CharacterAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? character)
                 || !TryCopyEffects(member.EquipmentAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? equipment)
@@ -1737,6 +1777,7 @@ internal static class NetherStrategyEvidenceMapper
             if (mechanic == null || mechanic.MechanicId <= 0
                 || mechanic.Triggers == null
                 || mechanic.BuffStrategies == null
+                || !TryCopyTarget(mechanic.Target, out NetherStrategyTargetEvidence target)
                 || mechanic.Duration < 0 || mechanic.Cap < 0
                 || (mechanic.PartyCoverageKnown && mechanic.PartyCoverage < 0)
                 || !TryCopyAbilityEffect(
@@ -1760,6 +1801,7 @@ internal static class NetherStrategyEvidenceMapper
             copied.Add(mechanic with
             {
                 Triggers = ReadOnly(mechanic.Triggers.Select(CopyTrigger).ToArray()),
+                Target = target,
                 AbilityEffect = abilityEffect,
                 BuffStrategies = buffStrategies!,
             });
@@ -1926,7 +1968,73 @@ internal static class NetherStrategyEvidenceMapper
         if (values.Any(value => value.EffectId <= 0 || value.Level < 0)
             || values.GroupBy(value => value.EffectId).Any(group => group.Count() != 1))
             return false;
-        copied = ReadOnly(values);
+        var clones = new List<NetherStrategyAbilityEffect>(values.Length);
+        foreach (NetherStrategyAbilityEffect value in values)
+        {
+            NetherStrategyPartyAbilityMechanic? mechanic = null;
+            if (value.Mechanic != null
+                && !TryCopyPartyAbilityMechanic(value.Mechanic, out mechanic))
+            {
+                return false;
+            }
+            clones.Add(value with { Mechanic = mechanic });
+        }
+        copied = ReadOnly(clones.ToArray());
+        return true;
+    }
+
+    private static bool TryCopyPartyAbilityMechanic(
+        NetherStrategyPartyAbilityMechanic source,
+        out NetherStrategyPartyAbilityMechanic? copied
+    )
+    {
+        copied = null;
+        if (source.Triggers == null
+            || source.BuffStrategies == null
+            || !TryCopyTarget(source.Target, out NetherStrategyTargetEvidence target)
+            || !TryCopyAbilityEffect(
+                source.AbilityEffect,
+                out NetherStrategyAbilityEffectEvidence abilityEffect
+            )
+            || !TryCopyBuffStrategies(
+                source.BuffStrategies,
+                out IReadOnlyList<NetherStrategyBuffEvidence>? buffStrategies
+            )
+            || source.IsKnown
+                && (source.Triggers.Count == 0
+                    || source.Triggers.Any(trigger => !trigger.IsKnown)
+                    || !source.Target.IsKnown
+                    || !source.AbilityEffect.IsKnown)
+            || !source.IsKnown && string.IsNullOrWhiteSpace(source.UnknownReason))
+        {
+            return false;
+        }
+        copied = source with
+        {
+            Triggers = ReadOnly(source.Triggers.Select(CopyTrigger).ToArray()),
+            Target = target,
+            AbilityEffect = abilityEffect,
+            BuffStrategies = buffStrategies!,
+        };
+        return true;
+    }
+
+    private static bool TryCopyTarget(
+        NetherStrategyTargetEvidence source,
+        out NetherStrategyTargetEvidence copied
+    )
+    {
+        copied = source;
+        if (source.RequiredBuffTypes == null
+            || source.RequiredBuffTypes.Any(type => !type.IsKnown)
+            || source.RequiredBuffTypes.GroupBy(type => type.Value).Any(group => group.Count() != 1))
+        {
+            return false;
+        }
+        copied = source with
+        {
+            RequiredBuffTypes = ReadOnly(source.RequiredBuffTypes.ToArray()),
+        };
         return true;
     }
 
