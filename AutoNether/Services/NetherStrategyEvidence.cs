@@ -211,7 +211,7 @@ internal sealed record NetherStrategyPartyMember(
         "effective-party-parameters-unavailable";
     public bool ParameterCalculationsKnown { get; init; }
     public IReadOnlyList<NetherStrategyParameterCalculationEvidence> ParameterCalculations
-        { get; init; } = Array.Empty<NetherStrategyParameterCalculationEvidence>();
+    { get; init; } = Array.Empty<NetherStrategyParameterCalculationEvidence>();
     public string ParameterCalculationsUnknownReason { get; init; } =
         "native-party-parameter-calculation-inputs-unavailable";
     /// <summary>
@@ -675,23 +675,55 @@ internal static class NetherStrategyNativeMechanicCaptureMapper
 
     private static NetherStrategyBuffParameterEvidence MapBuffParameter(
         NetherStrategyNativeBuffParameterCapture capture
-    ) => new(
-        capture.BuffType,
-        capture.TargetFilter == null
-            ? null
-            : capture.TargetFilter with
-            {
-                RequiredBuffTypes = capture.TargetFilter.RequiredBuffTypes.ToArray(),
-            },
-        capture.ParameterReference
     )
     {
-        IsKnown = capture.IsKnown && capture.TargetFilter?.IsKnown != false,
-        UnknownReason = !capture.IsKnown
-            ? capture.UnknownReason
-            : capture.TargetFilter?.IsKnown == false
-                ? capture.TargetFilter.UnknownReason
-                : string.Empty,
+        NetherStrategyBuffTargetFilterEvidence? targetFilter = CopyTargetFilter(
+            capture.TargetFilter
+        );
+        return new(
+            capture.BuffType,
+            targetFilter,
+            CopyParameterReference(capture.ParameterReference)
+        )
+        {
+            IsKnown = capture.IsKnown && capture.TargetFilter?.IsKnown != false,
+            UnknownReason = !capture.IsKnown
+                ? capture.UnknownReason
+                : capture.TargetFilter?.IsKnown == false
+                    ? capture.TargetFilter.UnknownReason
+                    : string.Empty,
+        };
+    }
+
+    private static NetherStrategyBuffTargetFilterEvidence? CopyTargetFilter(
+        NetherStrategyBuffTargetFilterEvidence? source
+    ) => source == null
+        ? null
+        : source with
+        {
+            RequiredBuffTypes = source.RequiredBuffTypes.ToArray(),
+        };
+
+    internal static NetherStrategyBuffParameterReferenceEvidence CopyParameterReference(
+        NetherStrategyBuffParameterReferenceEvidence source
+    ) => source with
+    {
+        NativeValues = source.NativeValues?.ToArray() ?? Array.Empty<NetherStrategyNamedValue>(),
+        NestedBuffParameters = source.NestedBuffParameters?
+            .Select(CopyNativeBuffParameter)
+            .ToArray() ?? Array.Empty<NetherStrategyNativeBuffParameterCapture>(),
+    };
+
+    private static NetherStrategyNativeBuffParameterCapture CopyNativeBuffParameter(
+        NetherStrategyNativeBuffParameterCapture source
+    ) => new(
+        source.BuffType,
+        CopyTargetFilter(source.TargetFilter),
+        CopyParameterReference(source.ParameterReference)
+    )
+    {
+        IsKnown = source.IsKnown,
+        UnknownReason = source.UnknownReason,
     };
 }
 
@@ -777,6 +809,30 @@ internal enum NetherStrategyBuffParameterReferenceKind
     FixedPermille,
     FixedValue,
     AbnormalProbabilityPermille,
+    Barrier,
+    ConversionDefenceToAttack,
+    LegacyConversion,
+    CrestGrantStack,
+    DamageOnAction,
+    DotDamage,
+    EnemyUnitTypeHate,
+    Faith,
+    ForceChainRestriction,
+    GrantStackAmountUp,
+    HellFire,
+    Hibernation,
+    Hunger,
+    IceArmor,
+    IceFang,
+    IcePrison,
+    ManaChargeQuantityUp,
+    Poison,
+    Provocation,
+    Revive,
+    Satiety,
+    Sniper,
+    SpecialSkillPatternFactor,
+    StackConsumptionSubstitute,
 }
 
 /// <summary>
@@ -809,6 +865,20 @@ internal readonly record struct NetherStrategyBuffParameterReferenceEvidence(
     public int ValueType { get; init; }
     public int Value { get; init; }
     public int Limit { get; init; }
+    /// <summary>
+    /// Exact serialized scalar payload retained for current native reference types whose shape is
+    /// wider than the common ValueType/Value/Limit tuple. Names are native field identities; no
+    /// combat meaning is inferred from them.
+    /// </summary>
+    public IReadOnlyList<NetherStrategyNamedValue> NativeValues { get; init; } =
+        Array.Empty<NetherStrategyNamedValue>();
+    /// <summary>Exact IEEE-754 value used by the one current float-bearing reference.</summary>
+    public float FloatingValue { get; init; }
+    /// <summary>
+    /// Recursively captured parameter buffs embedded by IceArmor, IceFang, or Satiety.
+    /// </summary>
+    public IReadOnlyList<NetherStrategyNativeBuffParameterCapture> NestedBuffParameters { get; init; } =
+        Array.Empty<NetherStrategyNativeBuffParameterCapture>();
     public bool ValuesKnown { get; init; }
     public string UnknownReason { get; init; } = string.Empty;
 }
@@ -1969,7 +2039,17 @@ internal static class NetherStrategyEvidenceMapper
                 RequiredBuffTypes = ReadOnly(filter.RequiredBuffTypes.ToArray()),
             };
         }
-        copied = source with { TargetFilter = filter };
+        NetherStrategyBuffParameterReferenceEvidence reference =
+            NetherStrategyNativeMechanicCaptureMapper.CopyParameterReference(
+                source.ParameterReference
+            );
+        if (source.IsKnown && !reference.IsKnown)
+            return false;
+        copied = source with
+        {
+            TargetFilter = filter,
+            ParameterReference = reference,
+        };
         return true;
     }
 

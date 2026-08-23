@@ -1167,9 +1167,16 @@ internal static class NetherNativeMechanicProductionCapture
     private static bool TryMapStrategyBuffParameters(
         object? source,
         out IReadOnlyList<NetherStrategyNativeBuffParameterCapture> parameters,
-        out string error
+        out string error,
+        int depth = 0
     )
     {
+        if (depth > 4)
+        {
+            parameters = Array.Empty<NetherStrategyNativeBuffParameterCapture>();
+            error = "buff-parameter-nesting-depth-exceeded";
+            return false;
+        }
         if (!NetherRuntimeEnumerableReader.TryRead(source, out List<object> values, out string detail))
         {
             parameters = Array.Empty<NetherStrategyNativeBuffParameterCapture>();
@@ -1187,7 +1194,10 @@ internal static class NetherNativeMechanicProductionCapture
                 error = "invalid-buff-parameter-entry:" + RuntimeTypeIdentifier(raw);
                 return false;
             }
-            NetherStrategyNativeBuffParameterCapture capture = MapStrategyBuffParameter(parameter);
+            NetherStrategyNativeBuffParameterCapture capture = MapStrategyBuffParameter(
+                parameter,
+                depth
+            );
             mapped.Add(capture);
             if (!capture.IsKnown)
             {
@@ -1202,7 +1212,8 @@ internal static class NetherNativeMechanicProductionCapture
     }
 
     private static NetherStrategyNativeBuffParameterCapture MapStrategyBuffParameter(
-        Project.Ingame.BuffParameterByType parameter
+        Project.Ingame.BuffParameterByType parameter,
+        int depth = 0
     )
     {
         int buffType = (int)parameter.buffType;
@@ -1222,7 +1233,7 @@ internal static class NetherNativeMechanicProductionCapture
             return UnknownStrategyBuffParameter(buffType, filterError);
         }
         NetherStrategyBuffParameterReferenceEvidence reference =
-            MapStrategyBuffParameterReference(parameter.parameterReference, buffType);
+            MapStrategyBuffParameterReference(parameter.parameterReference, buffType, depth);
         if (!reference.IsKnown)
             return UnknownStrategyBuffParameter(buffType, reference.UnknownReason, filter, reference);
         return new NetherStrategyNativeBuffParameterCapture(
@@ -1320,7 +1331,8 @@ internal static class NetherNativeMechanicProductionCapture
 
     private static NetherStrategyBuffParameterReferenceEvidence MapStrategyBuffParameterReference(
         Project.Ingame.IBuffParameterReference? source,
-        int buffType
+        int buffType,
+        int depth
     )
     {
         if (source == null)
@@ -1332,7 +1344,7 @@ internal static class NetherNativeMechanicProductionCapture
         }
         string identity = RuntimeTypeIdentifier(source);
         Project.Ingame.RatePermilleBuffParameterReferenceBase? rate =
-            source.TryCast<Project.Ingame.RatePermilleBuffParameterReferenceBase>();
+            TryCastNative<Project.Ingame.RatePermilleBuffParameterReferenceBase>(source);
         if (rate != null)
         {
             return KnownStrategyBuffParameterReference(
@@ -1344,7 +1356,7 @@ internal static class NetherNativeMechanicProductionCapture
             );
         }
         Project.Ingame.FixedPermilleBuffParameterReferenceBase? fixedPermille =
-            source.TryCast<Project.Ingame.FixedPermilleBuffParameterReferenceBase>();
+            TryCastNative<Project.Ingame.FixedPermilleBuffParameterReferenceBase>(source);
         if (fixedPermille != null)
         {
             return KnownStrategyBuffParameterReference(
@@ -1356,7 +1368,7 @@ internal static class NetherNativeMechanicProductionCapture
             );
         }
         Project.Ingame.FixedBuffParameterReferenceBase? fixedValue =
-            source.TryCast<Project.Ingame.FixedBuffParameterReferenceBase>();
+            TryCastNative<Project.Ingame.FixedBuffParameterReferenceBase>(source);
         if (fixedValue != null)
         {
             return KnownStrategyBuffParameterReference(
@@ -1368,7 +1380,7 @@ internal static class NetherNativeMechanicProductionCapture
             );
         }
         Project.Ingame.AbnormalBuffParameterReferenceBase? abnormal =
-            source.TryCast<Project.Ingame.AbnormalBuffParameterReferenceBase>();
+            TryCastNative<Project.Ingame.AbnormalBuffParameterReferenceBase>(source);
         if (abnormal != null)
         {
             return abnormal.Probability == null
@@ -1384,23 +1396,458 @@ internal static class NetherNativeMechanicProductionCapture
                     0
                 );
         }
+
+        if (TryCastNative<Project.Ingame.BarrierParameterReference>(source) is { } barrier)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.BarrierParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.Barrier,
+                identity,
+                (int)barrier.statusSourceType,
+                barrier.rate,
+                0,
+                [
+                    new("statusSourceType", (int)barrier.statusSourceType),
+                    new("rate", barrier.rate),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.ConversionDefenceToAttackParameterReference>(source)
+            is { } conversionDefence)
+        {
+            identity = NativeTypeIdentifier<
+                Project.Ingame.ConversionDefenceToAttackParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.ConversionDefenceToAttack,
+                identity,
+                0,
+                conversionDefence.conversionRatePermille,
+                0,
+                [new("conversionRatePermille", conversionDefence.conversionRatePermille)]
+            );
+        }
+        if (TryCastNative<Project.Ingame.ConversionParameterReference>(source) is { } conversion)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.ConversionParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.LegacyConversion,
+                identity,
+                (int)conversion.conversionFrom,
+                conversion.conversionRatePermille,
+                (int)conversion.additionTo,
+                [
+                    new("conversionFrom", (int)conversion.conversionFrom),
+                    new("conversionRatePermille", conversion.conversionRatePermille),
+                    new("additionTo", (int)conversion.additionTo),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.CrestBuffImpactParameterReference>(source)
+            is { } impactCrest)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.CrestBuffImpactParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.CrestGrantStack,
+                identity,
+                0,
+                impactCrest.grantStackCount,
+                0,
+                [new("grantStackCount", impactCrest.grantStackCount)]
+            );
+        }
+        if (TryCastNative<Project.Ingame.CrestBuffPassionParameterReference>(source)
+            is { } passionCrest)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.CrestBuffPassionParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.CrestGrantStack,
+                identity,
+                0,
+                passionCrest.grantStackCount,
+                0,
+                [new("grantStackCount", passionCrest.grantStackCount)]
+            );
+        }
+        if (TryCastNative<Project.Ingame.DamageOnActionParameterReference>(source)
+            is { } damageOnAction)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.DamageOnActionParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.DamageOnAction,
+                identity,
+                0,
+                damageOnAction.DamageRatePerMaxHp,
+                0,
+                [new("DamageRatePerMaxHp", damageOnAction.DamageRatePerMaxHp)]
+            );
+        }
+        if (TryCastNative<Project.Ingame.DotDamageParameterReference>(source) is { } dotDamage)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.DotDamageParameterReference>();
+            if (dotDamage.interval == null)
+                return MissingSpecializedReferenceField(identity, buffType, "interval");
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.DotDamage,
+                identity,
+                0,
+                dotDamage.interval.damageMultiplierPermille,
+                dotDamage.interval.milliSec,
+                [
+                    new("interval.milliSec", dotDamage.interval.milliSec),
+                    new(
+                        "interval.damageMultiplierPermille",
+                        dotDamage.interval.damageMultiplierPermille
+                    ),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.EnemyUnitTypeHateParameterReference>(source)
+            is { } enemyHate)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.EnemyUnitTypeHateParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.EnemyUnitTypeHate,
+                identity,
+                0,
+                enemyHate.normalEnemyHate,
+                0,
+                [
+                    new("normalEnemyHate", enemyHate.normalEnemyHate),
+                    new(
+                        "playableCharacterAsEnemyModelHate",
+                        enemyHate.playableCharacterAsEnemyModelHate
+                    ),
+                    new("rareEnemyHate", enemyHate.rareEnemyHate),
+                    new("explorationBossHate", enemyHate.explorationBossHate),
+                    new("mineEnemyHate", enemyHate.mineEnemyHate),
+                    new("disasterBossHate", enemyHate.disasterBossHate),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.FaithParameterReference>(source) != null)
+            return KnownMarkerReference<
+                Project.Ingame.FaithParameterReference>(
+                NetherStrategyBuffParameterReferenceKind.Faith
+            );
+        if (TryCastNative<Project.Ingame.ForceChainRestrictionParameterReference>(source) != null)
+            return KnownMarkerReference<
+                Project.Ingame.ForceChainRestrictionParameterReference>(
+                NetherStrategyBuffParameterReferenceKind.ForceChainRestriction
+            );
+        if (TryCastNative<Project.Ingame.GrantStackAmountUpParameterReference>(source)
+            is { } grantStackAmount)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.GrantStackAmountUpParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.GrantStackAmountUp,
+                identity,
+                (int)grantStackAmount.targetBuffType,
+                grantStackAmount.increaseAmount,
+                0,
+                [
+                    new("increaseAmount", grantStackAmount.increaseAmount),
+                    new("targetBuffType", (int)grantStackAmount.targetBuffType),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.HellFireParameterReference>(source) is { } hellFire)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.HellFireParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.HellFire,
+                identity,
+                0,
+                hellFire.stack,
+                0,
+                [new("stack", hellFire.stack)]
+            );
+        }
+        if (TryCastNative<Project.Ingame.HibernationParameterReference>(source)
+            is { } hibernation)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.HibernationParameterReference>();
+            if (hibernation.interval == null)
+                return MissingSpecializedReferenceField(identity, buffType, "interval");
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.Hibernation,
+                identity,
+                hibernation.interval.increaseCountOfIceArmor,
+                hibernation.interval.recoverPermille,
+                hibernation.interval.milliSec,
+                [
+                    new("interval.milliSec", hibernation.interval.milliSec),
+                    new("interval.recoverPermille", hibernation.interval.recoverPermille),
+                    new(
+                        "interval.increaseCountOfIceArmor",
+                        hibernation.interval.increaseCountOfIceArmor
+                    ),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.HungerParameterReference>(source) is { } hunger)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.HungerParameterReference>();
+            if (hunger.interval == null)
+                return MissingSpecializedReferenceField(identity, buffType, "interval");
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.Hunger,
+                identity,
+                hunger.InitialStack,
+                hunger.interval.DamageRatePerMaxHp,
+                hunger.interval.milliSec,
+                [
+                    new("InitialStack", hunger.InitialStack),
+                    new("interval.milliSec", hunger.interval.milliSec),
+                    new("interval.DamageRatePerMaxHp", hunger.interval.DamageRatePerMaxHp),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.IceArmorParameterReference>(source) is { } iceArmor)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.IceArmorParameterReference>();
+            return MapNestedSpecializedReference(
+                NetherStrategyBuffParameterReferenceKind.IceArmor,
+                identity,
+                buffType,
+                iceArmor.initialStack,
+                iceArmor.decreaseStackDamageValue,
+                [
+                    new("initialStack", iceArmor.initialStack),
+                    new("decreaseStackDamageValue", iceArmor.decreaseStackDamageValue),
+                ],
+                iceArmor.buffs,
+                depth
+            );
+        }
+        if (TryCastNative<Project.Ingame.IceFangParameterReference>(source) is { } iceFang)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.IceFangParameterReference>();
+            return MapNestedSpecializedReference(
+                NetherStrategyBuffParameterReferenceKind.IceFang,
+                identity,
+                buffType,
+                iceFang.stack,
+                0,
+                [new("stack", iceFang.stack)],
+                iceFang.buffs,
+                depth
+            );
+        }
+        if (TryCastNative<Project.Ingame.IcePrisonParameterReference>(source) != null)
+            return KnownMarkerReference<
+                Project.Ingame.IcePrisonParameterReference>(
+                NetherStrategyBuffParameterReferenceKind.IcePrison
+            );
+        if (TryCastNative<Project.Ingame.ManaChargeQuantityUpParameterReference>(source)
+            is { } manaCharge)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.ManaChargeQuantityUpParameterReference>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.ManaChargeQuantityUp,
+                identity,
+                (int)manaCharge.valueType,
+                manaCharge.value,
+                0,
+                [
+                    new("valueType", (int)manaCharge.valueType),
+                    new("value", manaCharge.value),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.PoisonParameterReference>(source) is { } poison)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.PoisonParameterReference>();
+            if (poison.interval == null)
+                return MissingSpecializedReferenceField(identity, buffType, "interval");
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.Poison,
+                identity,
+                0,
+                poison.interval.DamageRatePerMaxHp,
+                poison.interval.milliSec,
+                [
+                    new("interval.milliSec", poison.interval.milliSec),
+                    new("interval.DamageRatePerMaxHp", poison.interval.DamageRatePerMaxHp),
+                ]
+            );
+        }
+        if (TryCastNative<Project.Ingame.ProvocationParameterReference>(source)
+            is { } provocation)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.ProvocationParameterReference>();
+            if (provocation.provocation == null)
+                return MissingSpecializedReferenceField(identity, buffType, "provocation");
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.Provocation,
+                identity,
+                0,
+                provocation.provocation.hate,
+                0,
+                [new("provocation.hate", provocation.provocation.hate)],
+                provocation.provocation.distance
+            );
+        }
+        if (TryCastNative<Project.Ingame.ReviveParameterReference>(source) != null)
+            return KnownMarkerReference<
+                Project.Ingame.ReviveParameterReference>(
+                NetherStrategyBuffParameterReferenceKind.Revive
+            );
+        if (TryCastNative<Project.Ingame.SatietyParameterReference>(source) is { } satiety)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.SatietyParameterReference>();
+            return MapNestedSpecializedReference(
+                NetherStrategyBuffParameterReferenceKind.Satiety,
+                identity,
+                buffType,
+                satiety.initialStack,
+                satiety.milliSecOfDecreaseStack,
+                [
+                    new("initialStack", satiety.initialStack),
+                    new("milliSecOfDecreaseStack", satiety.milliSecOfDecreaseStack),
+                ],
+                satiety.buffs,
+                depth
+            );
+        }
+        if (TryCastNative<Project.Ingame.SniperParameterReference>(source) != null)
+            return KnownMarkerReference<
+                Project.Ingame.SniperParameterReference>(
+                NetherStrategyBuffParameterReferenceKind.Sniper
+            );
+        if (TryCastNative<Project.Ingame.SpecialSkillPatternFactorParameterReference>(source) != null)
+            return KnownMarkerReference<
+                Project.Ingame.SpecialSkillPatternFactorParameterReference>(
+                NetherStrategyBuffParameterReferenceKind.SpecialSkillPatternFactor
+            );
+        if (TryCastNative<Project.Ingame.StackConsumptionSubstituteParameterReference>(source) != null)
+            return KnownMarkerReference<
+                Project.Ingame.StackConsumptionSubstituteParameterReference>(
+                NetherStrategyBuffParameterReferenceKind.StackConsumptionSubstitute
+            );
+
+        // Keep the abstract-family fallbacks after every current concrete type so diagnostics retain
+        // the exact concrete identity above while an added native subclass can still preserve its
+        // stable base payload until the current-native inventory test is refreshed.
+        if (TryCastNative<Project.Ingame.CrestBuffParameterReferenceBase>(source) is { } crestBase)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.CrestBuffParameterReferenceBase>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.CrestGrantStack,
+                identity,
+                0,
+                crestBase.grantStackCount,
+                0,
+                [new("grantStackCount", crestBase.grantStackCount)]
+            );
+        }
+        if (TryCastNative<Project.Ingame.ConversionParamAdditionParameterReferenceBase>(source)
+            is { } conversionBase)
+        {
+            identity = NativeTypeIdentifier<
+                Project.Ingame.ConversionParamAdditionParameterReferenceBase>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.ConversionDefenceToAttack,
+                identity,
+                0,
+                conversionBase.conversionRatePermille,
+                0,
+                [new("conversionRatePermille", conversionBase.conversionRatePermille)]
+            );
+        }
+        if (TryCastNative<Project.Ingame.ManaChargeQuantityUpReferenceBase>(source)
+            is { } manaChargeBase)
+        {
+            identity = NativeTypeIdentifier<Project.Ingame.ManaChargeQuantityUpReferenceBase>();
+            return KnownStrategyBuffParameterReference(
+                NetherStrategyBuffParameterReferenceKind.ManaChargeQuantityUp,
+                identity,
+                (int)manaChargeBase.valueType,
+                manaChargeBase.value,
+                0,
+                [
+                    new("valueType", (int)manaChargeBase.valueType),
+                    new("value", manaChargeBase.value),
+                ]
+            );
+        }
         return UnknownStrategyBuffParameterReference(
             identity,
             "unsupported-buff-parameter-reference:" + buffType + ":" + identity
         );
     }
 
+    private static NetherStrategyBuffParameterReferenceEvidence MapNestedSpecializedReference(
+        NetherStrategyBuffParameterReferenceKind kind,
+        string identity,
+        int buffType,
+        int value,
+        int limit,
+        IReadOnlyList<NetherStrategyNamedValue> nativeValues,
+        object? nestedSource,
+        int depth
+    )
+    {
+        if (!TryMapStrategyBuffParameters(
+                nestedSource,
+                out IReadOnlyList<NetherStrategyNativeBuffParameterCapture> nested,
+                out string error,
+                depth + 1
+            ))
+        {
+            return UnknownStrategyBuffParameterReference(
+                identity,
+                "nested-buff-parameter-reference-unavailable:" + buffType + ":" + error
+            );
+        }
+        return KnownStrategyBuffParameterReference(
+            kind,
+            identity,
+            0,
+            value,
+            limit,
+            nativeValues,
+            0,
+            nested
+        );
+    }
+
+    private static NetherStrategyBuffParameterReferenceEvidence KnownMarkerReference<T>(
+        NetherStrategyBuffParameterReferenceKind kind
+    ) where T : Il2CppObjectBase => KnownStrategyBuffParameterReference(
+        kind,
+        NativeTypeIdentifier<T>(),
+        0,
+        0,
+        0
+    );
+
+    private static NetherStrategyBuffParameterReferenceEvidence MissingSpecializedReferenceField(
+        string identity,
+        int buffType,
+        string field
+    ) => UnknownStrategyBuffParameterReference(
+        identity,
+        "buff-parameter-reference-field-unavailable:" + buffType + ":" + field
+    );
+
     private static NetherStrategyBuffParameterReferenceEvidence KnownStrategyBuffParameterReference(
         NetherStrategyBuffParameterReferenceKind kind,
         string identity,
         int valueType,
         int value,
-        int limit
+        int limit,
+        IReadOnlyList<NetherStrategyNamedValue>? nativeValues = null,
+        float floatingValue = 0,
+        IReadOnlyList<NetherStrategyNativeBuffParameterCapture>? nestedBuffParameters = null
     ) => new(kind, identity)
     {
         ValueType = valueType,
         Value = value,
         Limit = limit,
+        NativeValues = nativeValues?.ToArray() ?? Array.Empty<NetherStrategyNamedValue>(),
+        FloatingValue = floatingValue,
+        NestedBuffParameters = nestedBuffParameters?.ToArray()
+            ?? Array.Empty<NetherStrategyNativeBuffParameterCapture>(),
         ValuesKnown = true,
     };
 

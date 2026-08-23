@@ -5,6 +5,88 @@ namespace AutoNether.Tests;
 
 public sealed class NetherCodePolicyEvidenceAssemblerTests
 {
+    [Theory]
+    [InlineData((int)NetherStrategyMode.Research, 10_010L, (int)NetherCodeFamily.Impact, (int)NetherCrestIdentity.Impact, (int)NetherKnownBuffType.CrestImpact)]
+    [InlineData((int)NetherStrategyMode.Research, 20_010L, (int)NetherCodeFamily.Rush, (int)NetherCrestIdentity.Passion, (int)NetherKnownBuffType.CrestPassion)]
+    [InlineData((int)NetherStrategyMode.Equipment, 10_010L, (int)NetherCodeFamily.Impact, (int)NetherCrestIdentity.Impact, (int)NetherKnownBuffType.CrestImpact)]
+    [InlineData((int)NetherStrategyMode.Equipment, 20_010L, (int)NetherCodeFamily.Rush, (int)NetherCrestIdentity.Passion, (int)NetherKnownBuffType.CrestPassion)]
+    public void Production_current_crest_grant_reference_reaches_mode_selection(
+        int rawMode,
+        long codeId,
+        int rawFamily,
+        int rawCrest,
+        int buffType
+    )
+    {
+        // Fresh current-game assets map 10010/20010 to Back-row battle-start uniform grants;
+        // fresh Project.dll maps BuffType 10000002/10000001 to the two CrestBuff reference types,
+        // whose shared serialized payload is grantStackCount. This exercises the public production
+        // seam after that typed capture instead of accepting a displayed-power fallback.
+        NetherCodeFamily family = (NetherCodeFamily)rawFamily;
+        NetherCrestIdentity crest = (NetherCrestIdentity)rawCrest;
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(codeId, family, power: 1);
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0);
+        NetherStrategyPartyMember member = Assert.Single(package.Party.Value!.Members);
+        package = package with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Known(
+                new NetherStrategyPartyProfile([member with { Crest = crest }])
+            ),
+        };
+        NetherAutoClimbSettings settings = new()
+        {
+            StrategyMode = (NetherStrategyMode)rawMode,
+            ResearchPrimaryFamily = family,
+            CodeReloadReserve = 1,
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [CrestGrantMechanic(candidate.CodeId, buffType)],
+            settings,
+            SafeRouteEvidence()
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        NetherCodeHardEligibilityEvidence hard =
+            captured.Evidence!.MechanicsByCodeId[candidate.CodeId];
+        Assert.True(hard.IsKnown, hard.UnknownReason);
+        Assert.Equal(family, hard.UniformCrestFamily);
+        Assert.Equal(NetherCodeTargetRow.Back, hard.UniformCrestTargetRow);
+        NetherMechanismValue mechanism =
+            captured.Evidence.MechanismValuesByCodeId[candidate.CodeId];
+        Assert.Equal(NetherCombatValueEvidenceKind.Quantified, mechanism.Kind);
+        Assert.Equal(NetherMechanismQuantityKind.CrestStackGrant, mechanism.Quantity.Kind);
+        Assert.Equal(1m, mechanism.Quantity.Value);
+        NetherMechanismRecipientQuantity recipient = Assert.Single(
+            mechanism.RecipientQuantities
+        );
+        Assert.Equal(
+            family == NetherCodeFamily.Impact
+                ? NetherCombatMetricKind.Attack
+                : NetherCombatMetricKind.CriticalProbability,
+            recipient.Metric
+        );
+        Assert.Equal(buffType, recipient.Quantity.BuffType.Value);
+        Assert.Equal(
+            NetherStrategyBuffParameterReferenceKind.CrestGrantStack,
+            recipient.Quantity.ParameterReferenceKind
+        );
+
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            settings,
+            captured.Evidence
+        );
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+    }
+
     [Fact]
     public void Production_assembler_carries_future_typed_research_rate_overwrite_into_hard_eligibility()
     {
@@ -4733,20 +4815,20 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
 
     private static NetherStrategyNativeMechanic ConditionalRiskManaMechanic(long codeId) =>
         OrdinaryMechanic(codeId) with
-    {
-        Triggers =
-        [
-            KnownTrigger(NetherStrategyTriggerKind.StartBattle),
-            KnownTrigger(NetherStrategyTriggerKind.AboveErosion) with { Parameter1 = 50 },
-        ],
-        AbilityEffect = new NetherStrategyAbilityEffectEvidence(
-            NetherStrategyAbilityEffectKind.ChargeMana
-        )
         {
-            ManaEnergy = 5f,
-            ParametersKnown = true,
-        },
-    };
+            Triggers =
+            [
+                KnownTrigger(NetherStrategyTriggerKind.StartBattle),
+                KnownTrigger(NetherStrategyTriggerKind.AboveErosion) with { Parameter1 = 50 },
+            ],
+            AbilityEffect = new NetherStrategyAbilityEffectEvidence(
+                NetherStrategyAbilityEffectKind.ChargeMana
+            )
+            {
+                ManaEnergy = 5f,
+                ParametersKnown = true,
+            },
+        };
 
     private static NetherStrategyNativeMechanic SharedManaMechanic(
         long codeId,
@@ -4816,6 +4898,56 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
             ),
         ],
     };
+
+    private static NetherStrategyNativeMechanic CrestGrantMechanic(
+        long codeId,
+        int buffType
+    )
+    {
+        NetherStrategyNativeMechanic mechanic = OrdinaryBuffMechanic(
+            codeId,
+            buffType,
+            NetherStrategyBuffParameterReferenceKind.CrestGrantStack,
+            value: 1,
+            targetFlags: NetherPartyPositionFlags.Back
+        );
+        NetherStrategyBuffParameterEvidence parameter = Assert.Single(
+            mechanic.AbilityEffect.BuffParameters
+        );
+        parameter = parameter with
+        {
+            ParameterReference = parameter.ParameterReference with
+            {
+                NativeValues = [new NetherStrategyNamedValue("grantStackCount", 1)],
+            },
+        };
+        return mechanic with
+        {
+            Target = new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Self)
+            {
+                ParametersKnown = true,
+            },
+            Scope = PlayerSideScope((int)NetherPartyPositionFlags.Back),
+            PartyCoverageKnown = true,
+            PartyCoverage = 1,
+            Triggers = [KnownTrigger(NetherStrategyTriggerKind.StartBattle)],
+            BuffStrategies =
+            [
+                new NetherStrategyBuffEvidence(
+                    new NetherStrategyBuffType(buffType),
+                    NetherStrategyBuffEffectKind.Buff,
+                    NetherStrategyStatusPriorityKind.Crest,
+                    NetherStrategyBuffCoexistenceKind.ExclusiveCrest
+                ),
+            ],
+            AbilityEffect = mechanic.AbilityEffect with
+            {
+                Kind = NetherStrategyAbilityEffectKind.ParameterBuff,
+                BuffParameters = [parameter],
+                ParametersKnown = true,
+            },
+        };
+    }
 
     private static NetherStrategyBuffParameterEvidence LinkedParameter(int value) => new(
         new NetherStrategyBuffType((int)NetherKnownBuffType.AttackUp1),

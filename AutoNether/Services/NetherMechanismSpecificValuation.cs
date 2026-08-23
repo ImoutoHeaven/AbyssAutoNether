@@ -21,6 +21,7 @@ internal enum NetherMechanismQuantityKind
 {
     None = 0,
     CrestRecipientPayoff,
+    CrestStackGrant,
     SharedManaEnergy,
     InitialSkillCharge,
     RecurringSkillCharge,

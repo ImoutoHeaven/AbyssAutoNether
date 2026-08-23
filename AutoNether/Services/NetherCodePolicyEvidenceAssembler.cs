@@ -748,11 +748,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             );
         }
         if (classification.Kind == NetherMechanismClassificationKind.UniformCrestGrant)
-        {
-            return NetherMechanismValue.ReachableUnquantified(
-                "crest-provider-consumer-ability-paths-unavailable"
-            );
-        }
+            return MapUniformCrestGrantValue(mechanic, party);
         return NetherMechanismValue.ReachableUnquantified(
             "native-mechanic-known;future-trigger-or-timeline-unavailable"
         );
@@ -878,6 +874,137 @@ internal static class NetherCodePolicyEvidenceAssembler
                 (int)NetherKnownBuffType.CrestPassion
                 or (int)NetherKnownBuffType.CrestImpact)
         );
+
+    private static NetherMechanismValue MapUniformCrestGrantValue(
+        NetherStrategyNativeMechanic mechanic,
+        IReadOnlyList<NetherStrategyPartyMember>? party
+    )
+    {
+        if (party == null)
+            return NetherMechanismValue.Missing("uniform-crest-target-party-unavailable");
+        if (mechanic.AbilityEffect.Kind != NetherStrategyAbilityEffectKind.ParameterBuff
+            || !mechanic.AbilityEffect.ParametersKnown)
+        {
+            return NetherMechanismValue.Missing(
+                "uniform-crest-parameter-buff-relationship-unavailable"
+            );
+        }
+        if (mechanic.Triggers.Count == 0
+            || mechanic.Triggers.Any(trigger => !trigger.IsKnown))
+        {
+            return NetherMechanismValue.Missing("uniform-crest-trigger-unavailable");
+        }
+        if (mechanic.Triggers.Any(trigger =>
+                trigger.Kind != NetherStrategyTriggerKind.StartBattle))
+        {
+            return NetherMechanismValue.ReachableUnquantified(
+                "uniform-crest-trigger-timeline-unavailable"
+            );
+        }
+
+        NetherStrategyBuffEvidence[] strategies = mechanic.BuffStrategies
+            .Where(row => row != null && row.BuffType.Value is
+                (int)NetherKnownBuffType.CrestPassion or
+                (int)NetherKnownBuffType.CrestImpact)
+            .ToArray();
+        if (strategies.Length != 1
+            || !strategies[0].IsKnown
+            || strategies[0].EffectKind != NetherStrategyBuffEffectKind.Buff
+            || strategies[0].StatusPriority != NetherStrategyStatusPriorityKind.Crest
+            || strategies[0].Coexistence != NetherStrategyBuffCoexistenceKind.ExclusiveCrest)
+        {
+            return NetherMechanismValue.Missing("uniform-crest-native-strategy-unavailable");
+        }
+
+        NetherStrategyBuffType buffType = strategies[0].BuffType;
+        NetherStrategyBuffParameterEvidence[] parameters = mechanic.AbilityEffect.BuffParameters
+            .Where(row => row != null && row.BuffType == buffType)
+            .ToArray();
+        if (parameters.Length != 1
+            || !parameters[0].IsKnown
+            || !parameters[0].ParameterReference.IsKnown
+            || parameters[0].ParameterReference.Kind
+                != NetherStrategyBuffParameterReferenceKind.CrestGrantStack)
+        {
+            return NetherMechanismValue.Missing("uniform-crest-grant-parameter-unavailable");
+        }
+
+        NetherStrategyBuffParameterEvidence parameter = parameters[0];
+        NetherStrategyBuffParameterReferenceEvidence reference = parameter.ParameterReference;
+        NetherStrategyNamedValue[] stackFields = reference.NativeValues?
+            .Where(row => row.Name == "grantStackCount")
+            .ToArray() ?? Array.Empty<NetherStrategyNamedValue>();
+        if (stackFields.Length != 1
+            || stackFields[0].Value < 0
+            || stackFields[0].Value > int.MaxValue
+            || reference.Value != (int)stackFields[0].Value)
+        {
+            return NetherMechanismValue.Missing("uniform-crest-grant-stack-unavailable");
+        }
+
+        NetherCombatMetricKind metric = buffType.Value switch
+        {
+            // Fresh current BuffCrestPassionStrategy.get_AffectCriticalUp returns BuffType 30;
+            // BuffCrestImpactStrategy.get_AffectAttackUp returns BuffType 10. The exact native
+            // quantity remains a Crest stack, while this metric tags only the recipient combat tier.
+            (int)NetherKnownBuffType.CrestPassion => NetherCombatMetricKind.CriticalProbability,
+            (int)NetherKnownBuffType.CrestImpact => NetherCombatMetricKind.Attack,
+            _ => NetherCombatMetricKind.Unknown,
+        };
+        if (metric == NetherCombatMetricKind.Unknown)
+            return NetherMechanismValue.Missing("uniform-crest-consumer-domain-unavailable");
+
+        var targetRows = party
+            .Where(member => member != null && member.IsAlive)
+            .Select(member => new
+            {
+                Member = member,
+                Match = MatchTarget(mechanic, parameter, member, party),
+            })
+            .ToArray();
+        NetherTargetMatch? unknownTarget = targetRows.FirstOrDefault(row =>
+            row.Match.Kind == NetherTargetMatchKind.Unknown)?.Match;
+        if (unknownTarget != null)
+            return NetherMechanismValue.Missing(unknownTarget.Detail);
+        NetherStrategyPartyMember[] recipients = targetRows
+            .Where(row => row.Match.Kind == NetherTargetMatchKind.Match)
+            .Select(row => row.Member)
+            .ToArray();
+        if (recipients.Any(member => member.CharacterId <= 0)
+            || recipients.Select(member => member.CharacterId).Distinct().Count()
+                != recipients.Length)
+        {
+            return NetherMechanismValue.Missing("uniform-crest-recipient-identity-unavailable");
+        }
+
+        int grantStackCount = (int)stackFields[0].Value;
+        var quantity = new NetherMechanismQuantity(
+            NetherMechanismQuantityKind.CrestStackGrant,
+            grantStackCount
+        )
+        {
+            BuffType = buffType,
+            ParameterReferenceKind = reference.Kind,
+        };
+        return NetherMechanismValue.Quantified(
+            NetherMechanismQuantityKind.CrestStackGrant,
+            (decimal)grantStackCount * recipients.Length,
+            "native-start-battle-uniform-crest-stack-grant;exact-recipient-count="
+                + recipients.Length,
+            buffType,
+            reference.Kind
+        ) with
+        {
+            RecipientQuantities = recipients.Select(member =>
+                new NetherMechanismRecipientQuantity(
+                    member.CharacterId,
+                    member.PartyPosition,
+                    metric,
+                    quantity
+                )
+            ).ToArray(),
+        };
+    }
 
     private static NetherMechanismValue MapErosionLinkedValue(
         NetherStrategyNativeMechanic mechanic,

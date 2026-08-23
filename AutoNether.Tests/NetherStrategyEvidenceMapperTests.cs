@@ -447,6 +447,120 @@ public sealed class NetherStrategyEvidenceMapperTests
     }
 
     [Fact]
+    public void Production_effect_capture_deep_copies_specialized_reference_payloads()
+    {
+        // Fresh current Project.dll exposes wider reference payloads and three nested-buff
+        // references (IceArmor, IceFang, Satiety). The immutable strategy boundary must retain
+        // those exact native scalars and children without sharing mutable capture arrays.
+        var nativeValues = new[]
+        {
+            new NetherStrategyNamedValue("initialStack", 3),
+            new NetherStrategyNamedValue("decreaseStackDamageValue", 456),
+        };
+        var nestedReference = new NetherStrategyBuffParameterReferenceEvidence(
+            NetherStrategyBuffParameterReferenceKind.RatePermille,
+            "Project.Ingame.AttackUpPermilleBuffParameterReference"
+        )
+        {
+            ValueType = 1,
+            Value = 250,
+            Limit = 500,
+            ValuesKnown = true,
+        };
+        var nestedCaptures = new[]
+        {
+            new NetherStrategyNativeBuffParameterCapture(
+                new NetherStrategyBuffType((int)NetherKnownBuffType.AttackUp1),
+                null,
+                nestedReference
+            ),
+        };
+        var outerReference = new NetherStrategyBuffParameterReferenceEvidence(
+            NetherStrategyBuffParameterReferenceKind.IceArmor,
+            "Project.Ingame.IceArmorParameterReference"
+        )
+        {
+            Value = 3,
+            Limit = 456,
+            NativeValues = nativeValues,
+            NestedBuffParameters = nestedCaptures,
+            ValuesKnown = true,
+        };
+        var capture = new NetherStrategyNativeAbilityEffectCapture(
+            NetherStrategyAbilityEffectKind.ParameterBuff,
+            "Project.AbilityEffect.AbilityEffectParameterBuff"
+        )
+        {
+            BuffParameters =
+            [
+                new NetherStrategyNativeBuffParameterCapture(
+                    new NetherStrategyBuffType(10_002),
+                    null,
+                    outerReference
+                ),
+            ],
+            ParametersKnown = true,
+        };
+
+        NetherStrategyAbilityEffectEvidence mapped =
+            NetherStrategyNativeMechanicCaptureMapper.MapAbilityEffect(capture);
+
+        NetherStrategyBuffParameterReferenceEvidence reference = Assert.Single(
+            mapped.BuffParameters
+        ).ParameterReference;
+        Assert.Equal(NetherStrategyBuffParameterReferenceKind.IceArmor, reference.Kind);
+        Assert.Equal(3, reference.Value);
+        Assert.Equal(456, reference.Limit);
+        Assert.Equal(
+            new[] { "initialStack", "decreaseStackDamageValue" },
+            reference.NativeValues.Select(row => row.Name)
+        );
+        NetherStrategyNativeBuffParameterCapture nested = Assert.Single(
+            reference.NestedBuffParameters
+        );
+        Assert.Equal((int)NetherKnownBuffType.AttackUp1, nested.BuffType.Value);
+        Assert.Equal(250, nested.ParameterReference.Value);
+        Assert.NotSame(nativeValues, reference.NativeValues);
+        Assert.NotSame(nestedCaptures, reference.NestedBuffParameters);
+
+        nativeValues[0] = new NetherStrategyNamedValue("mutated", 999);
+        nestedCaptures[0] = new NetherStrategyNativeBuffParameterCapture(
+            new NetherStrategyBuffType(999),
+            null,
+            default
+        );
+        Assert.Equal("initialStack", reference.NativeValues[0].Name);
+        Assert.Equal((int)NetherKnownBuffType.AttackUp1, reference.NestedBuffParameters[0].BuffType.Value);
+
+        NetherSnapshot snapshot = Snapshot();
+        NetherStrategyEvidenceMapResult packageMap = NetherStrategyEvidenceMapper.Map(
+            new NetherStrategyEvidenceMapRequest(Identity(snapshot), snapshot)
+            {
+                NativeMechanics = [KnownMechanic(70_001) with { AbilityEffect = mapped }],
+            }
+        );
+        Assert.True(packageMap.IsMapped, packageMap.Detail);
+        NetherStrategyBuffParameterReferenceEvidence packageReference = Assert.Single(
+            Assert.Single(packageMap.Package!.NativeMechanics.Value!.Mechanics)
+                .AbilityEffect.BuffParameters
+        ).ParameterReference;
+
+        Assert.IsType<NetherStrategyNamedValue[]>(reference.NativeValues)[0] =
+            new NetherStrategyNamedValue("mutated-again", 1_000);
+        Assert.IsType<NetherStrategyNativeBuffParameterCapture[]>(reference.NestedBuffParameters)[0] =
+            new NetherStrategyNativeBuffParameterCapture(
+                new NetherStrategyBuffType(1_000),
+                null,
+                default
+            );
+        Assert.Equal("initialStack", packageReference.NativeValues[0].Name);
+        Assert.Equal(
+            (int)NetherKnownBuffType.AttackUp1,
+            packageReference.NestedBuffParameters[0].BuffType.Value
+        );
+    }
+
+    [Fact]
     public void Production_trigger_capture_preserves_exact_native_base_probability_limit_and_cost_relationships()
     {
         // Fresh Project.dll SHA-256 53806a5b...1300: BattleSituationBase owns

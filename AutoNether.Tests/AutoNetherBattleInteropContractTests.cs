@@ -150,6 +150,59 @@ public sealed class AutoNetherBattleInteropContractTests
     }
 
     [Fact]
+    public void Native_code_buff_parameter_capture_covers_every_current_concrete_reference_type()
+    {
+        // Fresh current-game Cpp2IL (Project.dll
+        // 033a5d1e92df1f90d15b4f33312fb935327fd2baa87811b7860b227d6c1c75f4) exposes
+        // 134 concrete IBuffParameterReference implementations. The existing four numeric base
+        // families cover 109 of them; these are the complete remaining 25 concrete types. Keeping
+        // this inventory explicit prevents a future Code offer from silently returning to the
+        // unsupported-buff-parameter-reference gate when it uses a current native reference.
+        string capture = Read(
+            "AutoNether",
+            "Services",
+            "NetherNativeMechanicProductionCapture.cs"
+        );
+        string[] remainingConcreteReferences =
+        [
+            "BarrierParameterReference",
+            "ConversionDefenceToAttackParameterReference",
+            "ConversionParameterReference",
+            "CrestBuffImpactParameterReference",
+            "CrestBuffPassionParameterReference",
+            "DamageOnActionParameterReference",
+            "DotDamageParameterReference",
+            "EnemyUnitTypeHateParameterReference",
+            "FaithParameterReference",
+            "ForceChainRestrictionParameterReference",
+            "GrantStackAmountUpParameterReference",
+            "HellFireParameterReference",
+            "HibernationParameterReference",
+            "HungerParameterReference",
+            "IceArmorParameterReference",
+            "IceFangParameterReference",
+            "IcePrisonParameterReference",
+            "ManaChargeQuantityUpParameterReference",
+            "PoisonParameterReference",
+            "ProvocationParameterReference",
+            "ReviveParameterReference",
+            "SatietyParameterReference",
+            "SniperParameterReference",
+            "SpecialSkillPatternFactorParameterReference",
+            "StackConsumptionSubstituteParameterReference",
+        ];
+
+        foreach (string reference in remainingConcreteReferences)
+        {
+            Assert.Contains(
+                "TryCastNative<Project.Ingame." + reference + ">(source)",
+                capture,
+                StringComparison.Ordinal
+            );
+        }
+    }
+
+    [Fact]
     public void Return_popup_owns_its_already_initialized_nested_scroll_without_waiting_for_a_wrapper_hook()
     {
         string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
