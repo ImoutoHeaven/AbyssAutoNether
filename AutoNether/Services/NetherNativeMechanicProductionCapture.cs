@@ -108,6 +108,15 @@ internal static class NetherNativeMechanicProductionCapture
                     ParametersKnown = true,
                     NativeTypeIdentity = "Project.Master.NoaMessagePack.MNetherCodes",
                 };
+            NetherStrategyAbilityScopeEvidence scope = new(
+                NetherStrategyAbilityScopeKind.Unknown
+            )
+            {
+                ParametersKnown = false,
+                UnknownReason = expectsAbility
+                    ? "ability-effect-asset-unavailable:" + row.id
+                    : "ability-scope-not-applicable:" + row.id,
+            };
             NetherStrategyAbilityEffectEvidence abilityEffect = expectsAbility
                 ? UnknownStrategyAbilityEffect("ability-effect-asset-unavailable:" + row.id)
                 : new NetherStrategyAbilityEffectEvidence(
@@ -135,6 +144,7 @@ internal static class NetherNativeMechanicProductionCapture
                     unknown = triggerError;
                 }
                 target = MapStrategyTarget(ability.Target);
+                scope = MapStrategyScope(ability.Scope);
                 if (!target.IsKnown)
                 {
                     known = false;
@@ -208,6 +218,7 @@ internal static class NetherNativeMechanicProductionCapture
                 target
             )
             {
+                Scope = scope,
                 // Current MNetherCodes evidence does not prove a selectable research-rate
                 // overwrite. Keep the typed seam explicit and fail closed until an authoritative
                 // native field/control-flow source is captured.
@@ -749,6 +760,69 @@ internal static class NetherNativeMechanicProductionCapture
                 : string.Empty,
         };
 
+    private static NetherStrategyAbilityScopeEvidence MapStrategyScope(object? source)
+    {
+        if (source == null)
+        {
+            return UnknownStrategyScope(
+                string.Empty,
+                "ability-scope-unavailable"
+            );
+        }
+
+        string identity = RuntimeTypeIdentifier(source);
+        Project.Ingame.AbilityScope.AbilityScopePlayerSide? playerSide =
+            TryCastNative<Project.Ingame.AbilityScope.AbilityScopePlayerSide>(source);
+        if (playerSide == null)
+        {
+            return UnknownStrategyScope(
+                identity,
+                "unsupported-ability-scope-type:" + identity
+            );
+        }
+
+        identity = NativeTypeIdentifier<Project.Ingame.AbilityScope.AbilityScopePlayerSide>();
+        int elementFlags = (int)playerSide._elementType;
+        int manaFlags = (int)playerSide._manaType;
+        int positionFlags = (int)playerSide._partyPosition;
+        int unionFlags = (int)playerSide._unionType;
+        int jobGroupFlags = (int)playerSide._jobGroupFlag;
+        int jobSpeciesFlags = (int)playerSide._jobSpeciesFlag;
+        bool flagsKnown = HasOnlyScopeFlagBits(elementFlags, 0x7e)
+            && HasOnlyScopeFlagBits(manaFlags, 0x0c)
+            && HasOnlyScopeFlagBits(positionFlags, 0x0e)
+            && HasOnlyScopeFlagBits(unionFlags, 0x3e)
+            && HasOnlyScopeFlagBits(jobGroupFlags, 0x00ff_ffff)
+            && HasOnlyScopeFlagBits(jobSpeciesFlags, 0x7e);
+        return new NetherStrategyAbilityScopeEvidence(
+            NetherStrategyAbilityScopeKind.PlayerSide
+        )
+        {
+            IgnoreDeadUnit = playerSide._ignoreDeadUnit,
+            ElementTypeFlags = elementFlags,
+            ManaTypeFlags = manaFlags,
+            PartyPositionFlags = positionFlags,
+            UnionTypeFlags = unionFlags,
+            JobGroupFlags = jobGroupFlags,
+            JobSpeciesFlags = jobSpeciesFlags,
+            ParametersKnown = flagsKnown,
+            NativeTypeIdentity = identity,
+            UnknownReason = flagsKnown
+                ? string.Empty
+                : "ability-scope-unknown-native-flag-bits:" + identity,
+        };
+    }
+
+    private static NetherStrategyAbilityScopeEvidence UnknownStrategyScope(
+        string identity,
+        string reason
+    ) => new(NetherStrategyAbilityScopeKind.Unknown)
+    {
+        ParametersKnown = false,
+        NativeTypeIdentity = identity,
+        UnknownReason = reason,
+    };
+
     private static NetherStrategyAbilityEffectEvidence MapStrategyAbilityEffect(object source)
     {
         string identity = RuntimeTypeIdentifier(source);
@@ -1240,6 +1314,9 @@ internal static class NetherNativeMechanicProductionCapture
 
     private static bool HasOnlyFlagBits(int value, int knownMask) =>
         value >= 0 && (value & ~knownMask) == 0;
+
+    private static bool HasOnlyScopeFlagBits(int value, int knownMask) =>
+        value == -1 || value >= 0 && (value & ~knownMask) == 0;
 
     private static NetherStrategyBuffParameterReferenceEvidence MapStrategyBuffParameterReference(
         Project.Ingame.IBuffParameterReference? source,

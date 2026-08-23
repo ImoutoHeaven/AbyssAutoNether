@@ -721,6 +721,34 @@ internal readonly record struct NetherStrategyTargetEvidence(NetherStrategyTarge
     public string UnknownReason { get; init; } = string.Empty;
 }
 
+internal enum NetherStrategyAbilityScopeKind
+{
+    Unknown = 0,
+    PlayerSide,
+}
+
+/// <summary>
+/// Exact stable fields consumed by the current native AbilityScopePlayerSide.IsMatch path before
+/// NetherCodeAbilityController installs an ability on a party unit. Native scope flags use -1 for
+/// the broad/default set, so they remain raw integers instead of being normalized into target flags.
+/// </summary>
+internal readonly record struct NetherStrategyAbilityScopeEvidence(
+    NetherStrategyAbilityScopeKind Kind
+)
+{
+    public bool IsKnown => Kind != NetherStrategyAbilityScopeKind.Unknown && ParametersKnown;
+    public bool IgnoreDeadUnit { get; init; }
+    public int ElementTypeFlags { get; init; }
+    public int ManaTypeFlags { get; init; }
+    public int PartyPositionFlags { get; init; }
+    public int UnionTypeFlags { get; init; }
+    public int JobGroupFlags { get; init; }
+    public int JobSpeciesFlags { get; init; }
+    public bool ParametersKnown { get; init; }
+    public string NativeTypeIdentity { get; init; } = string.Empty;
+    public string UnknownReason { get; init; } = string.Empty;
+}
+
 internal enum NetherStrategyAbilityEffectKind
 {
     Unknown = 0,
@@ -974,6 +1002,12 @@ internal sealed record NetherStrategyNativeMechanic(
     NetherStrategyTargetEvidence Target
 )
 {
+    public NetherStrategyAbilityScopeEvidence Scope { get; init; } =
+        new(NetherStrategyAbilityScopeKind.Unknown)
+        {
+            ParametersKnown = false,
+            UnknownReason = "ability-scope-not-captured",
+        };
     public NetherStrategyResearchRateOverwriteEvidence ResearchRateOverwrite { get; init; } =
         NetherStrategyResearchRateOverwriteEvidence.NotPresent;
     public NetherStrategyAbilityEffectEvidence AbilityEffect { get; init; } =
@@ -989,7 +1023,9 @@ internal sealed record NetherStrategyNativeMechanic(
     public bool CapKnown { get; init; }
     /// <summary>
     /// Same-popup native Code Scope coverage over NetherPartyModel.GetValidCharacterModels.
-    /// This is recipient identity evidence only when it equals the mapped party member count.
+    /// It corroborates an exact Scope match count when party identities are available. With no
+    /// mapped party, positive coverage plus a broad non-position Scope can still prove the coarse
+    /// native position row without inventing character-specific relationships.
     /// </summary>
     public bool PartyCoverageKnown { get; init; }
     public int PartyCoverage { get; init; }

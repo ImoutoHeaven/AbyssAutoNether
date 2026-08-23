@@ -838,9 +838,9 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     [Fact]
     public void Production_assembler_keeps_partial_self_scope_coverage_candidate_local_unknown()
     {
-        // GetValidCharacterModels excludes only null entries in the fresh game. A coverage count
-        // smaller than that exact mapped party count cannot reveal which ability owners receive
-        // AbilityTargetSelf, so the dependent candidate must remain fail-closed.
+        // Fresh AbilityScopePlayerSide defaults to broad/all filters. A claimed coverage smaller
+        // than the exact broad Scope matches contradicts the same-popup party identities, so the
+        // dependent candidate remains fail-closed instead of inventing an ability owner.
         NetherSnapshot snapshot = Snapshot();
         NetherCodeCandidate candidate = Candidate(88319, NetherCodeFamily.Risk, power: 99_999);
         NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
@@ -856,9 +856,113 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         Assert.True(captured.IsSuccess, captured.Detail);
         Assert.Equal(NetherCombatValueEvidenceKind.Missing, value.Kind);
         Assert.Contains(
-            "native-self-target-partial-scope-identities-unavailable:1:2",
+            "native-self-target-scope-coverage-mismatch:1:2",
             value.Detail
         );
+    }
+
+    [Fact]
+    public void Production_assembler_maps_partial_self_scope_to_the_exact_back_ability_owner()
+    {
+        // Fresh Project.dll 033a5d1e...c75f4: NetherCodeAbilityController checks Ability.Scope
+        // for each spawned party unit before AddAbility. AbilityTargetSelf then resolves that exact
+        // ability owner. A Back-only PlayerSide scope with coverage one is therefore an identified
+        // Back recipient even when another valid Front character is present.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88320, NetherCodeFamily.Safe, power: 1);
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            PackageWithFrontAndBack(snapshot),
+            snapshot,
+            [candidate],
+            [SelfAttackMechanic(
+                candidate.CodeId,
+                100,
+                coverageKnown: true,
+                coverage: 1,
+                scopePositionFlags: (int)NetherPartyPositionFlags.Back
+            )],
+            EquipmentSettings(),
+            SafeRouteEvidence()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCombatValueEvidenceKind.Quantified, value.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+    }
+
+    [Fact]
+    public void Research_selects_30008_shape_from_known_assist_scope_without_deep_party_evidence()
+    {
+        // Fresh Project.dll 033a5d1e...c75f4: GetBuffTargetCount counts PlayerSide Scope matches,
+        // and AbilityTargetSelf resolves each installed ability's owner. The observed offer carries
+        // coverage=6. Deep parameter evidence is irrelevant to Research acquisition when the exact
+        // broad Assist scope proves that the recurring-charge mechanic is reachable.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(30008, NetherCodeFamily.Safe, power: 1) with
+        {
+            PartyCoverage = 6,
+        };
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Unknown(
+                "strategy-deep-party-evidence-unavailable"
+            ),
+        };
+        NetherStrategyNativeMechanic mechanic = OrdinaryBuffMechanic(
+            candidate.CodeId,
+            (int)NetherKnownBuffType.SkillChargeEfficiency,
+            NetherStrategyBuffParameterReferenceKind.FixedPermille,
+            200
+        ) with
+        {
+            Target = new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Self)
+            {
+                ParametersKnown = true,
+            },
+            Scope = PlayerSideScope((int)NetherPartyPositionFlags.Assist),
+            PartyCoverageKnown = true,
+            PartyCoverage = 6,
+        };
+        NetherAutoClimbSettings settings = new()
+        {
+            StrategyMode = NetherStrategyMode.Research,
+            ResearchPrimaryFamily = NetherCodeFamily.Safe,
+            ResearchSecondaryFamily = NetherCodeFamily.Rush,
+            CodeReloadReserve = 1,
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [mechanic],
+            settings,
+            SafeRouteEvidence()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            settings,
+            captured.Evidence
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCombatValueEvidenceKind.ReachableUnquantified, value.Kind);
+        Assert.Equal(
+            "code-offer-lifecycle-recurring-skill-charge-timeline-unavailable",
+            value.Detail
+        );
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
     }
 
     [Fact]
@@ -4531,15 +4635,34 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         long codeId,
         int additionPermille,
         bool coverageKnown,
-        int coverage
+        int coverage,
+        int scopePositionFlags = -1
     ) => AttackMechanic(codeId, additionPermille) with
     {
         Target = new NetherStrategyTargetEvidence(NetherStrategyTargetKind.Self)
         {
             ParametersKnown = true,
         },
+        Scope = PlayerSideScope(scopePositionFlags),
         PartyCoverageKnown = coverageKnown,
         PartyCoverage = coverage,
+    };
+
+    private static NetherStrategyAbilityScopeEvidence PlayerSideScope(
+        int partyPositionFlags,
+        int elementTypeFlags = -1,
+        int manaTypeFlags = -1
+    ) => new(NetherStrategyAbilityScopeKind.PlayerSide)
+    {
+        IgnoreDeadUnit = true,
+        ElementTypeFlags = elementTypeFlags,
+        ManaTypeFlags = manaTypeFlags,
+        PartyPositionFlags = partyPositionFlags,
+        UnionTypeFlags = -1,
+        JobGroupFlags = -1,
+        JobSpeciesFlags = -1,
+        ParametersKnown = true,
+        NativeTypeIdentity = "Project.Ingame.AbilityScope.AbilityScopePlayerSide",
     };
 
     private static NetherStrategyNativeMechanic AttackMechanicWithUnsupportedTarget(

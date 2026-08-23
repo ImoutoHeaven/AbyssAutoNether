@@ -96,10 +96,14 @@ public sealed class NetherStrategySpecReviewFixTests
         // Fresh game evidence for this exact build: AbilityTargetSelf.Logic.TargetResolve invokes
         // its callback with self. NetherCodeAbilityController installs each Code ability only on
         // units accepted by the Code's native Scope, while GetBuffTargetCount counts that same Scope
-        // over NetherPartyModel.GetValidCharacterModels. The mechanic must retain that same-popup
-        // count so Self can become All only when it equals the authoritative party size.
+        // over NetherPartyModel.GetValidCharacterModels. The mechanic must retain both Scope and
+        // that same-popup count so Self resolves only to the authoritative ability owners.
         Type mechanic = typeof(NetherStrategyNativeMechanic);
 
+        Assert.Equal(
+            typeof(NetherStrategyAbilityScopeEvidence),
+            mechanic.GetProperty("Scope")?.PropertyType
+        );
         Assert.Equal(
             typeof(bool),
             mechanic.GetProperty("PartyCoverageKnown")?.PropertyType
@@ -125,6 +129,8 @@ public sealed class NetherStrategySpecReviewFixTests
             capture,
             StringComparison.Ordinal
         );
+        Assert.Contains("scope = MapStrategyScope(ability.Scope)", capture, StringComparison.Ordinal);
+        Assert.Contains("Scope = scope", capture, StringComparison.Ordinal);
     }
 
     [Fact]

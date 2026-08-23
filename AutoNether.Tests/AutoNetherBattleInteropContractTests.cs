@@ -86,6 +86,9 @@ public sealed class AutoNetherBattleInteropContractTests
         Assert.Contains("HasActiveBattleResultCodeOwner()", runtime);
         Assert.Contains("TryCaptureBattleResultCodeStrategyEvidence", runtime);
         Assert.Contains("TryMapStrategyPartyModel", runtime);
+        Assert.Contains("TryMapStrategyPartyModelDeep", runtime);
+        Assert.Contains("TryMapStrategyPartyModelShallow", runtime);
+        Assert.Contains("EffectiveParametersKnown = false", runtime);
         Assert.Contains("MapBattleResultBeforeFloorRebind(", runtime, StringComparison.Ordinal);
         Assert.Contains(
             "battle-result-code-route-horizon-unavailable-before-floor-scene-rebind",

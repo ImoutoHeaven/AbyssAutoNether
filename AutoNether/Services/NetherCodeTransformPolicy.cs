@@ -143,7 +143,8 @@ internal static class NetherCodeTransformHardExclusionMapper
         };
         if (required == NetherCrestIdentity.Unknown || party == null
             || mechanic.UniformCrestTargetRow is not (
-                NetherCodeTargetRow.Forward or NetherCodeTargetRow.Back or NetherCodeTargetRow.All
+                NetherCodeTargetRow.Forward or NetherCodeTargetRow.Back
+                    or NetherCodeTargetRow.All or NetherCodeTargetRow.Assist
             ))
         {
             return false;
@@ -155,6 +156,7 @@ internal static class NetherCodeTransformHardExclusionMapper
             {
                 NetherCodeTargetRow.Forward => member.PartyPosition == NetherPartyPosition.Forward,
                 NetherCodeTargetRow.Back => member.PartyPosition == NetherPartyPosition.Back,
+                NetherCodeTargetRow.Assist => member.PartyPosition == NetherPartyPosition.Assist,
                 NetherCodeTargetRow.All => member.PartyPosition is NetherPartyPosition.Forward
                     or NetherPartyPosition.Back or NetherPartyPosition.Assist,
                 _ => false,

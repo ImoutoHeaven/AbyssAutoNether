@@ -38,6 +38,7 @@ internal enum NetherCodeTargetRow
     Forward,
     Back,
     All,
+    Assist,
 }
 
 internal enum NetherPartyPosition
@@ -680,6 +681,7 @@ internal sealed class NetherCodePolicy
             {
                 NetherCodeTargetRow.Forward => PartyPositionOf(member) == NetherPartyPosition.Forward,
                 NetherCodeTargetRow.Back => PartyPositionOf(member) == NetherPartyPosition.Back,
+                NetherCodeTargetRow.Assist => PartyPositionOf(member) == NetherPartyPosition.Assist,
                 NetherCodeTargetRow.All => PartyPositionOf(member) != NetherPartyPosition.Unknown,
                 _ => false,
             })
@@ -1217,6 +1219,7 @@ internal sealed class NetherCodePolicy
             {
                 NetherCodeTargetRow.Forward => PartyPositionOf(member) == NetherPartyPosition.Forward,
                 NetherCodeTargetRow.Back => PartyPositionOf(member) == NetherPartyPosition.Back,
+                NetherCodeTargetRow.Assist => PartyPositionOf(member) == NetherPartyPosition.Assist,
                 NetherCodeTargetRow.All => PartyPositionOf(member) != NetherPartyPosition.Unknown,
                 _ => false,
             })

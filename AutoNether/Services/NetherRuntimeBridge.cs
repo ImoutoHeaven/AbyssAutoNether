@@ -9000,6 +9000,33 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         out string error
     )
     {
+        if (TryMapStrategyPartyModelDeep(nativeParty, out members, out error))
+            return true;
+
+        string deepError = error;
+        if (TryMapStrategyPartyModelShallow(
+                nativeParty,
+                deepError,
+                out members,
+                out string shallowError
+            ))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        members = null;
+        error = "strategy-party-deep-and-shallow-unavailable:"
+            + deepError + ";" + shallowError;
+        return false;
+    }
+
+    private static bool TryMapStrategyPartyModelDeep(
+        Project.Nether.NetherPartyModel nativeParty,
+        out IReadOnlyList<NetherStrategyPartyMember>? members,
+        out string error
+    )
+    {
         members = null;
         if (nativeParty == null || nativeParty.CharacterModels == null)
         {
@@ -9245,6 +9272,122 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 CharacterAbilityEffects = characterEffects!,
                 EquipmentAbilityEffects = equipmentEffects!,
                 GeneralAbilityEffects = generalEffects!,
+            });
+        }
+        if (mapped.Count == 0)
+        {
+            error = "empty-strategy-party";
+            return false;
+        }
+        members = mapped;
+        error = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// Preserves the exact identity fields owned directly by NetherPartyCharacterModel when the
+    /// native deep parameter calculator is unavailable during the result popup lifetime. Consumers
+    /// that need calculated parameters still see explicit component-local unknowns, while Scope and
+    /// target matching can use the authoritative character, position, element, mana and life data.
+    /// </summary>
+    private static bool TryMapStrategyPartyModelShallow(
+        Project.Nether.NetherPartyModel nativeParty,
+        string deepError,
+        out IReadOnlyList<NetherStrategyPartyMember>? members,
+        out string error
+    )
+    {
+        members = null;
+        if (nativeParty == null || nativeParty.CharacterModels == null)
+        {
+            error = "missing-strategy-party-model";
+            return false;
+        }
+        if (!NetherRuntimeEnumerableReader.TryRead(
+                nativeParty.CharacterModels,
+                out List<object> characters,
+                out string characterEnumerationError
+            ))
+        {
+            error = "strategy-party-characters-enumeration:" + characterEnumerationError;
+            return false;
+        }
+
+        string componentUnknown = "strategy-deep-party-evidence-unavailable:" + deepError;
+        var mapped = new List<NetherStrategyPartyMember>();
+        foreach (object character in characters)
+        {
+            if (!TryReadInt(character, "MCharacterId", out long characterId)
+                || !TryReadInt32(character, "PartyIndex", out int partyIndex)
+                || !TryReadInt32(character, "PartyPosition", out int partyPosition)
+                || !TryReadInt32(character, "ElementType", out int elementType)
+                || !TryReadInt32(character, "ManaType", out int manaType)
+                || !TryReadDouble(character, "HpRatio", out double hpRatio)
+                || !TryReadBoolean(character, "IsAlive", out bool isAlive)
+                || !TryReadInt32(character, "Level", out int level)
+                || !TryReadInt32(character, "LimitBreakCount", out int limitBreakCount))
+            {
+                error = "missing-strategy-party-member";
+                return false;
+            }
+            if (characterId <= 0
+                || partyIndex < 0
+                || elementType < 0
+                || level < 1
+                || limitBreakCount < 0
+                || !NetherHpRatioPermilleQuantizer.TryQuantize(hpRatio, out int hpPermille))
+            {
+                error = "invalid-strategy-party-member:" + characterId;
+                return false;
+            }
+            NetherPartyPosition typedPartyPosition = partyPosition switch
+            {
+                (int)Project.PartyPositionType.Forward => NetherPartyPosition.Forward,
+                (int)Project.PartyPositionType.Back => NetherPartyPosition.Back,
+                (int)Project.PartyPositionType.Assist => NetherPartyPosition.Assist,
+                _ => NetherPartyPosition.Unknown,
+            };
+            NetherCrestIdentity typedCrest = manaType switch
+            {
+                (int)Project.Master.ManaType.General => NetherCrestIdentity.General,
+                (int)Project.Master.ManaType.Passion => NetherCrestIdentity.Passion,
+                (int)Project.Master.ManaType.Impact => NetherCrestIdentity.Impact,
+                _ => NetherCrestIdentity.Unknown,
+            };
+            if (typedPartyPosition == NetherPartyPosition.Unknown
+                || typedCrest == NetherCrestIdentity.Unknown)
+            {
+                error = "unsupported-strategy-party-enum:"
+                    + characterId + ":" + partyPosition + ":" + manaType;
+                return false;
+            }
+
+            mapped.Add(new NetherStrategyPartyMember(
+                characterId,
+                partyIndex,
+                typedPartyPosition,
+                elementType,
+                typedCrest,
+                hpPermille,
+                isAlive,
+                level,
+                limitBreakCount
+            )
+            {
+                EffectiveParametersKnown = false,
+                EffectiveParameters = Array.Empty<NetherStrategyEffectiveParameter>(),
+                EffectiveParametersUnknownReason = componentUnknown,
+                ParameterCalculationsKnown = false,
+                ParameterCalculations =
+                    Array.Empty<NetherStrategyParameterCalculationEvidence>(),
+                ParameterCalculationsUnknownReason = componentUnknown,
+                ContinuousAttackCountMaximumKnown = false,
+                ContinuousAttackCountMaximumUnknownReason =
+                    "code-offer-party-model-has-no-live-i-character-status",
+                NativeParameters = Array.Empty<NetherStrategyNamedValue>(),
+                CharacterAbilityEffects = Array.Empty<NetherStrategyAbilityEffect>(),
+                EquipmentAbilityEffects = Array.Empty<NetherStrategyAbilityEffect>(),
+                GeneralAbilityEffects = Array.Empty<NetherStrategyAbilityEffect>(),
             });
         }
         if (mapped.Count == 0)

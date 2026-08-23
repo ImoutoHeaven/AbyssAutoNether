@@ -1095,10 +1095,10 @@ internal static class NetherCodePolicyEvidenceAssembler
         }
         if (target.Kind == NetherStrategyTargetKind.Self)
         {
-            // Fresh native control flow is exact: AbilityTargetSelf resolves only the ability owner.
-            // NetherCodeAbilityController installs that ability on each unit accepted by the Code
-            // Scope, and the same-popup PartyCoverage is GetBuffTargetCount over the same Scope and
-            // GetValidCharacterModels. Equality therefore proves one Self recipient per mapped unit.
+            // Fresh native control flow is exact: NetherCodeAbilityController first applies
+            // Ability.Scope.IsMatch to each party unit and installs the ability only on matches.
+            // AbilityTargetSelf then resolves that installed ability's owner. Target=Self therefore
+            // says where an installed ability lands; Scope says which party units own that ability.
             if (target.ElementTypeFlags != 0
                 || target.PartyPositionFlags != NetherPartyPositionFlags.None
                 || target.UnionTypeFlags != 0 || target.SearchType != 0
@@ -1107,9 +1107,28 @@ internal static class NetherCodePolicyEvidenceAssembler
                 error = "native-self-target-parameters-unavailable";
                 return false;
             }
-            if (party == null || party.Count == 0)
+            NetherStrategyAbilityScopeEvidence scope = mechanic.Scope;
+            if (!scope.IsKnown)
             {
-                error = "native-self-target-party-unavailable";
+                error = string.IsNullOrWhiteSpace(scope.UnknownReason)
+                    ? "native-self-target-scope-unavailable"
+                    : scope.UnknownReason;
+                return false;
+            }
+            if (scope.Kind != NetherStrategyAbilityScopeKind.PlayerSide)
+            {
+                error = "native-self-target-scope-kind-not-authoritatively-mapped:"
+                    + scope.Kind;
+                return false;
+            }
+            if (!HasOnlyScopeFlagBits(scope.ElementTypeFlags, 0x7e)
+                || !HasOnlyScopeFlagBits(scope.ManaTypeFlags, 0x0c)
+                || !HasOnlyScopeFlagBits(scope.PartyPositionFlags, 0x0e)
+                || !HasOnlyScopeFlagBits(scope.UnionTypeFlags, 0x3e)
+                || !HasOnlyScopeFlagBits(scope.JobGroupFlags, 0x00ff_ffff)
+                || !HasOnlyScopeFlagBits(scope.JobSpeciesFlags, 0x7e))
+            {
+                error = "native-self-target-scope-unknown-flag-bits";
                 return false;
             }
             if (!mechanic.PartyCoverageKnown)
@@ -1117,14 +1136,61 @@ internal static class NetherCodePolicyEvidenceAssembler
                 error = "native-self-target-scope-coverage-unavailable";
                 return false;
             }
-            if (mechanic.PartyCoverage != party.Count)
+            if (mechanic.PartyCoverage <= 0)
             {
-                error = "native-self-target-partial-scope-identities-unavailable:"
-                    + mechanic.PartyCoverage + ":" + party.Count;
+                error = "native-self-target-scope-has-no-recipient";
                 return false;
             }
-            row = NetherCodeTargetRow.All;
-            return true;
+
+            if (party == null || party.Count == 0)
+            {
+                // Without character identities, same-popup positive coverage still proves a
+                // recipient only when every non-position Scope filter is the native broad default.
+                // The explicit position flag then identifies the exact recipient row (30008 is the
+                // observed Assist shape) without inventing element/crest/job relationships.
+                if (scope.ElementTypeFlags != -1
+                    || scope.ManaTypeFlags != -1
+                    || scope.UnionTypeFlags != -1
+                    || scope.JobGroupFlags != -1
+                    || scope.JobSpeciesFlags != -1)
+                {
+                    error = "native-self-target-filtered-scope-party-unavailable";
+                    return false;
+                }
+                return TryMapSelfScopePositionRow(
+                    scope.PartyPositionFlags,
+                    out row,
+                    out error
+                );
+            }
+
+            var matched = new List<NetherStrategyPartyMember>();
+            foreach (NetherStrategyPartyMember member in party)
+            {
+                NetherTargetMatch match = MatchSelfScopeMember(scope, member);
+                if (match.Kind == NetherTargetMatchKind.Unknown)
+                {
+                    error = match.Detail;
+                    return false;
+                }
+                if (match.Kind == NetherTargetMatchKind.Match)
+                    matched.Add(member);
+            }
+            if (mechanic.PartyCoverage != matched.Count)
+            {
+                error = "native-self-target-scope-coverage-mismatch:"
+                    + mechanic.PartyCoverage + ":" + matched.Count;
+                return false;
+            }
+            int matchedPositionFlags = matched.Aggregate(
+                0,
+                (flags, member) => flags | (int)PositionFlag(member.PartyPosition)
+            );
+            return TryMapSelfScopePositionRow(
+                matchedPositionFlags,
+                out row,
+                out error
+            );
         }
         if (target.Kind != NetherStrategyTargetKind.Friend)
         {
@@ -1147,6 +1213,8 @@ internal static class NetherCodePolicyEvidenceAssembler
             row = NetherCodeTargetRow.Forward;
         else if (target.PartyPositionFlags == NetherPartyPositionFlags.Back)
             row = NetherCodeTargetRow.Back;
+        else if (target.PartyPositionFlags == NetherPartyPositionFlags.Assist)
+            row = NetherCodeTargetRow.Assist;
         else if (target.PartyPositionFlags == (
                 NetherPartyPositionFlags.Forward
                 | NetherPartyPositionFlags.Back
@@ -1160,6 +1228,29 @@ internal static class NetherCodePolicyEvidenceAssembler
         }
         return true;
     }
+
+    private static bool TryMapSelfScopePositionRow(
+        int rawFlags,
+        out NetherCodeTargetRow row,
+        out string error
+    )
+    {
+        row = rawFlags switch
+        {
+            -1 or 0x0e => NetherCodeTargetRow.All,
+            (int)NetherPartyPositionFlags.Forward => NetherCodeTargetRow.Forward,
+            (int)NetherPartyPositionFlags.Back => NetherCodeTargetRow.Back,
+            (int)NetherPartyPositionFlags.Assist => NetherCodeTargetRow.Assist,
+            _ => NetherCodeTargetRow.None,
+        };
+        error = row == NetherCodeTargetRow.None
+            ? "native-self-target-scope-position-combination-unsupported:" + rawFlags
+            : string.Empty;
+        return row != NetherCodeTargetRow.None;
+    }
+
+    private static bool HasOnlyScopeFlagBits(int value, int knownMask) =>
+        value == -1 || value >= 0 && (value & ~knownMask) == 0;
 
     private sealed record NativeSpecialComparisonMapResult(
         bool IsKnown,
@@ -2115,6 +2206,79 @@ internal static class NetherCodePolicyEvidenceAssembler
         );
     }
 
+    private static NetherTargetMatch MatchSelfScopeMember(
+        NetherStrategyAbilityScopeEvidence scope,
+        NetherStrategyPartyMember member
+    )
+    {
+        if (!scope.IsKnown || scope.Kind != NetherStrategyAbilityScopeKind.PlayerSide)
+        {
+            return NetherTargetMatch.Unknown(
+                string.IsNullOrWhiteSpace(scope.UnknownReason)
+                    ? "native-self-target-scope-unavailable"
+                    : scope.UnknownReason
+            );
+        }
+        if (scope.IgnoreDeadUnit && !member.IsAlive)
+            return NetherTargetMatch.NoMatch;
+
+        // Fresh AbilityScopePlayerSide.IsMatch treats the native None/Unknown element values as
+        // unrestricted. Concrete ElementType values 1..6 map to flags 2..64.
+        if (scope.ElementTypeFlags != -1
+            && member.ElementType is not 0 and not 99)
+        {
+            int elementFlag = member.ElementType switch
+            {
+                1 => 2,
+                2 => 4,
+                3 => 8,
+                4 => 16,
+                5 => 32,
+                6 => 64,
+                _ => 0,
+            };
+            if (elementFlag == 0)
+                return NetherTargetMatch.Unknown("native-self-target-scope-element-unavailable");
+            if ((scope.ElementTypeFlags & elementFlag) == 0)
+                return NetherTargetMatch.NoMatch;
+        }
+
+        // General/None mana is an explicit native bypass. Passion and Impact are flags 4 and 8.
+        if (scope.ManaTypeFlags != -1
+            && member.Crest is not NetherCrestIdentity.Unknown and not NetherCrestIdentity.General)
+        {
+            int manaFlag = member.Crest switch
+            {
+                NetherCrestIdentity.Passion => 4,
+                NetherCrestIdentity.Impact => 8,
+                _ => 0,
+            };
+            if (manaFlag == 0)
+                return NetherTargetMatch.Unknown("native-self-target-scope-mana-unavailable");
+            if ((scope.ManaTypeFlags & manaFlag) == 0)
+                return NetherTargetMatch.NoMatch;
+        }
+
+        if (scope.PartyPositionFlags != -1
+            && member.PartyPosition != NetherPartyPosition.Unknown
+            && (scope.PartyPositionFlags & (int)PositionFlag(member.PartyPosition)) == 0)
+        {
+            return NetherTargetMatch.NoMatch;
+        }
+
+        if (scope.UnionTypeFlags != -1
+            || scope.JobGroupFlags != -1
+            || scope.JobSpeciesFlags != -1)
+        {
+            // The immutable Code-offer party model exposes no authoritative union/job identities.
+            // Preserve native uncertainty instead of treating a filtered unit as a non-match.
+            return NetherTargetMatch.Unknown(
+                "native-self-target-scope-live-identity-unavailable"
+            );
+        }
+        return NetherTargetMatch.Match;
+    }
+
     private static NetherTargetMatch MatchTarget(
         NetherStrategyNativeMechanic mechanic,
         NetherStrategyBuffParameterEvidence parameter,
@@ -2124,15 +2288,31 @@ internal static class NetherCodePolicyEvidenceAssembler
     {
         if (!TryMapTargetRow(mechanic, party, out NetherCodeTargetRow row, out string targetError))
             return NetherTargetMatch.Unknown(targetError + ":" + mechanic.MechanicId);
-        bool targetMatches = row switch
+        NetherTargetMatch targetMatch;
+        if (mechanic.Target.Kind == NetherStrategyTargetKind.Self)
         {
-            NetherCodeTargetRow.Forward => member.PartyPosition == NetherPartyPosition.Forward,
-            NetherCodeTargetRow.Back => member.PartyPosition == NetherPartyPosition.Back,
-            NetherCodeTargetRow.All => member.PartyPosition is
-                NetherPartyPosition.Forward or NetherPartyPosition.Back or NetherPartyPosition.Assist,
-            _ => false,
-        };
-        if (!targetMatches)
+            targetMatch = MatchSelfScopeMember(mechanic.Scope, member);
+            if (targetMatch.Kind == NetherTargetMatchKind.Unknown)
+            {
+                return NetherTargetMatch.Unknown(
+                    targetMatch.Detail + ":" + mechanic.MechanicId
+                );
+            }
+        }
+        else
+        {
+            bool targetMatches = row switch
+            {
+                NetherCodeTargetRow.Forward => member.PartyPosition == NetherPartyPosition.Forward,
+                NetherCodeTargetRow.Back => member.PartyPosition == NetherPartyPosition.Back,
+                NetherCodeTargetRow.Assist => member.PartyPosition == NetherPartyPosition.Assist,
+                NetherCodeTargetRow.All => member.PartyPosition is
+                    NetherPartyPosition.Forward or NetherPartyPosition.Back or NetherPartyPosition.Assist,
+                _ => false,
+            };
+            targetMatch = targetMatches ? NetherTargetMatch.Match : NetherTargetMatch.NoMatch;
+        }
+        if (targetMatch.Kind == NetherTargetMatchKind.NoMatch)
             return NetherTargetMatch.NoMatch;
         NetherStrategyBuffTargetFilterEvidence? filter = parameter.TargetFilter;
         if (filter == null)
@@ -2216,9 +2396,12 @@ internal static class NetherCodePolicyEvidenceAssembler
         }
         if (target.Kind == NetherStrategyTargetKind.Self)
         {
-            return TryMapTargetRow(mechanic, party, out _, out string selfError)
-                ? NetherTargetMatch.Match
-                : NetherTargetMatch.Unknown(selfError + ":" + mechanic.MechanicId);
+            if (!TryMapTargetRow(mechanic, party, out _, out string selfError))
+                return NetherTargetMatch.Unknown(selfError + ":" + mechanic.MechanicId);
+            NetherTargetMatch match = MatchSelfScopeMember(mechanic.Scope, member);
+            return match.Kind == NetherTargetMatchKind.Unknown
+                ? NetherTargetMatch.Unknown(match.Detail + ":" + mechanic.MechanicId)
+                : match;
         }
         if (target.Kind != NetherStrategyTargetKind.Friend)
         {
