@@ -1538,9 +1538,9 @@ internal static class NetherCodePolicyEvidenceAssembler
         if (classification.Kind == NetherMechanismClassificationKind.ForceChain)
         {
             return NetherEquipmentCombatTierClassifier.ForQualitative(
-                row is NetherCodeTargetRow.Back or NetherCodeTargetRow.All
+                NetherCodeTargetRowRules.Matches(row, NetherPartyPosition.Back)
                     ? NetherMechanismQualitativePriority.BackForceChainHigh
-                    : row == NetherCodeTargetRow.Forward
+                    : NetherCodeTargetRowRules.Matches(row, NetherPartyPosition.Forward)
                         ? NetherMechanismQualitativePriority.FrontForceChainFallback
                         : NetherMechanismQualitativePriority.None
             );
@@ -1777,21 +1777,7 @@ internal static class NetherCodePolicyEvidenceAssembler
             error = "native-target-live-relationship-unavailable";
             return false;
         }
-        if (rawFlags == -1)
-            row = NetherCodeTargetRow.All;
-        else if (target.PartyPositionFlags == NetherPartyPositionFlags.Forward)
-            row = NetherCodeTargetRow.Forward;
-        else if (target.PartyPositionFlags == NetherPartyPositionFlags.Back)
-            row = NetherCodeTargetRow.Back;
-        else if (target.PartyPositionFlags == NetherPartyPositionFlags.Assist)
-            row = NetherCodeTargetRow.Assist;
-        else if (target.PartyPositionFlags == (
-                NetherPartyPositionFlags.Forward
-                | NetherPartyPositionFlags.Back
-                | NetherPartyPositionFlags.Assist
-            ))
-            row = NetherCodeTargetRow.All;
-        else
+        if (!NetherCodeTargetRowRules.TryMapNativeFlags(rawFlags, out row))
         {
             error = "native-target-position-combination-unsupported:" + rawFlags;
             return false;
@@ -1805,18 +1791,14 @@ internal static class NetherCodePolicyEvidenceAssembler
         out string error
     )
     {
-        row = rawFlags switch
+        if (NetherCodeTargetRowRules.TryMapNativeFlags(rawFlags, out row))
         {
-            -1 or 0x0e => NetherCodeTargetRow.All,
-            (int)NetherPartyPositionFlags.Forward => NetherCodeTargetRow.Forward,
-            (int)NetherPartyPositionFlags.Back => NetherCodeTargetRow.Back,
-            (int)NetherPartyPositionFlags.Assist => NetherCodeTargetRow.Assist,
-            _ => NetherCodeTargetRow.None,
-        };
-        error = row == NetherCodeTargetRow.None
-            ? "native-self-target-scope-position-combination-unsupported:" + rawFlags
-            : string.Empty;
-        return row != NetherCodeTargetRow.None;
+            error = string.Empty;
+            return true;
+        }
+
+        error = "native-self-target-scope-position-combination-unsupported:" + rawFlags;
+        return false;
     }
 
     private static bool HasOnlyScopeFlagBits(int value, int knownMask) =>
@@ -2899,15 +2881,7 @@ internal static class NetherCodePolicyEvidenceAssembler
         }
         else
         {
-            bool targetMatches = row switch
-            {
-                NetherCodeTargetRow.Forward => member.PartyPosition == NetherPartyPosition.Forward,
-                NetherCodeTargetRow.Back => member.PartyPosition == NetherPartyPosition.Back,
-                NetherCodeTargetRow.Assist => member.PartyPosition == NetherPartyPosition.Assist,
-                NetherCodeTargetRow.All => member.PartyPosition is
-                    NetherPartyPosition.Forward or NetherPartyPosition.Back or NetherPartyPosition.Assist,
-                _ => false,
-            };
+            bool targetMatches = NetherCodeTargetRowRules.Matches(row, member.PartyPosition);
             targetMatch = targetMatches ? NetherTargetMatch.Match : NetherTargetMatch.NoMatch;
         }
         if (targetMatch.Kind == NetherTargetMatchKind.NoMatch)

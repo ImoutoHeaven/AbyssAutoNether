@@ -85,15 +85,12 @@ public class NetherContinueSceneTransitionEvidenceTests
         );
         Assert.True(evidence.Begin(ownerGeneration: 10));
 
-        Assert.False(evidence.TryObserveCanceledNativeParentAfterOwnerTransition(canceled));
+        Assert.False(evidence.TryObserveExpectedTerminalNativeParentAfterOwnerTransition(canceled));
         Assert.True(evidence.NativeParentPending);
 
         evidence.ObserveFloorOwnerTerminated();
 
-        Assert.False(evidence.TryObserveCanceledNativeParentAfterOwnerTransition(
-            NetherNativeActionResult.UnknownOutcome("native-start-status-terminal-faulted")
-        ));
-        Assert.True(evidence.TryObserveCanceledNativeParentAfterOwnerTransition(canceled));
+        Assert.True(evidence.TryObserveExpectedTerminalNativeParentAfterOwnerTransition(canceled));
         Assert.False(evidence.NativeParentPending);
         Assert.True(evidence.FloorOwnerTerminated);
         Assert.False(evidence.IsSettledBySceneTransition);
@@ -109,6 +106,42 @@ public class NetherContinueSceneTransitionEvidenceTests
             expectedControllerType: FloorSelectionType,
             registrationSource: SceneRegistrationSource
         ));
+    }
+
+    [Fact]
+    public void Exact_source_less_terminal_fault_after_owner_transition_preserves_lease()
+    {
+        var evidence = new NetherContinueSceneTransitionEvidence();
+        Assert.True(evidence.Begin(ownerGeneration: 10));
+        evidence.ObserveFloorOwnerTerminated();
+
+        Assert.True(evidence.TryObserveExpectedTerminalNativeParentAfterOwnerTransition(
+            NetherNativeActionResult.UnknownOutcome("native-start-status-terminal-faulted")
+        ));
+
+        Assert.False(evidence.NativeParentPending);
+        Assert.True(evidence.FloorOwnerTerminated);
+        Assert.False(evidence.IsSettledBySceneTransition);
+    }
+
+    [Theory]
+    [InlineData(false, "native-start-status-terminal-faulted")]
+    [InlineData(true, "native-start-status-terminal-faulted:InvalidOperationException")]
+    [InlineData(true, "native-result-faulted")]
+    public void Inexact_or_pre_teardown_fault_does_not_preserve_lease(
+        bool ownerTerminated,
+        string detail
+    )
+    {
+        var evidence = new NetherContinueSceneTransitionEvidence();
+        Assert.True(evidence.Begin(ownerGeneration: 10));
+        if (ownerTerminated)
+            evidence.ObserveFloorOwnerTerminated();
+
+        Assert.False(evidence.TryObserveExpectedTerminalNativeParentAfterOwnerTransition(
+            NetherNativeActionResult.UnknownOutcome(detail)
+        ));
+        Assert.True(evidence.NativeParentPending);
     }
 
     [Theory]

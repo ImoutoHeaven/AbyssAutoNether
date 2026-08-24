@@ -8,7 +8,7 @@ namespace AutoNether.Tests;
 public class NetherCodeReloadEpochCoordinatorTests
 {
     [Fact]
-    public void Completed_reroll_requires_changed_authoritative_offer_and_exactly_one_reload_before_epoch_advances()
+    public void Completed_reroll_requires_authoritative_offer_and_exactly_one_reload_before_epoch_advances()
     {
         var coordinator = new NetherCodeReloadEpochCoordinator();
         var owner = new NetherCodeReloadEpochOwner(NetherActionKind.SelectFloor, 3, 7);
@@ -35,15 +35,37 @@ public class NetherCodeReloadEpochCoordinatorTests
         Assert.True(coordinator.IsOwner(owner));
     }
 
-    [Theory]
-    [InlineData(3, 100, 200)] // unchanged candidates
-    [InlineData(3, 300, 400)] // reload count did not move
-    public void Changed_offer_requires_exact_decrement_and_never_retries_after_a_fault(
-        int afterReloadCount,
-        long firstOffer,
-        long secondOffer
-    )
+    [Fact]
+    public void Completed_reroll_advances_epoch_when_authoritative_random_offer_repeats()
     {
+        var coordinator = new NetherCodeReloadEpochCoordinator();
+        var owner = new NetherCodeReloadEpochOwner(NetherActionKind.BattleSettlement, 3, 7);
+        Assert.True(coordinator.Begin(owner, reloadCount: 1, Candidates(100, 200)));
+
+        Assert.Equal(
+            NetherNativeActionResultKind.Started,
+            coordinator.Pump(
+                () => NetherNativeActionResult.Completed("reroll-task-terminal"),
+                () => Refresh(owner, reloadCount: 0, Candidates(100, 200))
+            ).Kind
+        );
+        Assert.Equal(
+            NetherNativeActionResultKind.Completed,
+            coordinator.Pump(
+                () => throw new Xunit.Sdk.XunitException("must-not-repoll-reroll"),
+                () => Refresh(owner, reloadCount: 0, Candidates(100, 200))
+            ).Kind
+        );
+        Assert.Equal(NetherCodeReloadEpochStage.Ready, coordinator.Stage);
+        Assert.Equal(1, coordinator.DecisionEpoch);
+    }
+
+    [Fact]
+    public void Refreshed_offer_requires_exact_decrement_and_never_retries_after_a_fault()
+    {
+        const int afterReloadCount = 3;
+        const long firstOffer = 300;
+        const long secondOffer = 400;
         var coordinator = new NetherCodeReloadEpochCoordinator();
         var owner = new NetherCodeReloadEpochOwner(NetherActionKind.SelectFloor, 3, 7);
         Assert.True(coordinator.Begin(owner, reloadCount: 3, Candidates(100, 200)));
@@ -63,7 +85,7 @@ public class NetherCodeReloadEpochCoordinatorTests
             NetherNativeActionResultKind.BindingUnavailable,
             coordinator.Pump(
                 () => throw new Xunit.Sdk.XunitException("must-not-retry"),
-                () => throw new Xunit.Sdk.XunitException("must-not-recature")
+                () => throw new Xunit.Sdk.XunitException("must-not-recapture")
             ).Kind
         );
     }

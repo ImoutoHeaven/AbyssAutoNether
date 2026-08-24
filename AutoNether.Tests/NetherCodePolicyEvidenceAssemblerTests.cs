@@ -808,11 +808,11 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
-    public void Production_conditional_risk_consumes_exact_selected_route_horizon_candidate_locally()
+    public void Research_family_selection_ignores_equipment_conditional_risk_route_horizon()
     {
-        // Fresh Project.dll 53806a5b...1300 and current m_nether_codes zh-Hant assets:
-        // current Risk cards 40022/40023 are StartBattle + AboveErosion(50) + ChargeMana(5)
-        // effects. There is no native BelowErosion(70) situation; 70 is the strategic route ceiling.
+        // Fresh native evidence keeps MNetherCodes.category separate from effect_type and
+        // effect parameters. Research consumes the configured family category; conditional
+        // erosion mechanics remain Equipment evidence and cannot reject a Research offer.
         NetherSnapshot snapshot = Snapshot();
         NetherCodeCandidate candidate = Candidate(40022, NetherCodeFamily.Risk, power: 99_999);
         NetherStrategyNativeMechanic mechanic = ConditionalRiskManaMechanic(candidate.CodeId);
@@ -864,7 +864,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
             safe.Evidence!.MechanicsByCodeId[candidate.CodeId].RiskRule
         );
         Assert.Equal(
-            NetherCodeDecisionKind.Reload,
+            NetherCodeDecisionKind.Select,
             new NetherCodePolicy().Decide(
                 Portfolio(snapshot),
                 [candidate],
@@ -873,7 +873,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
             ).Kind
         );
         Assert.Equal(
-            NetherCodeDecisionKind.Reload,
+            NetherCodeDecisionKind.Select,
             new NetherCodePolicy().Decide(
                 Portfolio(snapshot),
                 [candidate],
@@ -882,7 +882,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
             ).Kind
         );
         Assert.Equal(
-            NetherCodeDecisionKind.Reload,
+            NetherCodeDecisionKind.Select,
             new NetherCodePolicy().Decide(
                 Portfolio(snapshot),
                 [candidate],
@@ -1193,6 +1193,169 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
+    public void Production_self_scope_accepts_native_back_and_assist_position_mask()
+    {
+        // Fresh current-game offer 30009/40007 evidence carries the native PlayerSide position
+        // mask 12 (Back=4 | Assist=8). AbilityScopePlayerSide evaluates this as a flags mask, so
+        // both matching recipients must survive assembly instead of becoming candidate-local
+        // "scope-position-combination-unsupported:12" evidence.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(30009, NetherCodeFamily.Safe, power: 1) with
+        {
+            PartyCoverage = 2,
+        };
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0);
+        NetherStrategyPartyMember back = Assert.Single(package.Party.Value!.Members);
+        package = package with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Known(
+                new NetherStrategyPartyProfile([
+                    back,
+                    back with
+                    {
+                        CharacterId = 101,
+                        PartyIndex = 1,
+                        PartyPosition = NetherPartyPosition.Assist,
+                    },
+                ])
+            ),
+        };
+        NetherStrategyNativeMechanic mechanic = SelfAttackMechanic(
+            candidate.CodeId,
+            additionPermille: 200,
+            coverageKnown: true,
+            coverage: 2,
+            scopePositionFlags: (int)(
+                NetherPartyPositionFlags.Back | NetherPartyPositionFlags.Assist
+            )
+        );
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [mechanic],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Equipment,
+                CodeReloadReserve = 1,
+            },
+            SafeRouteEvidence()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+        NetherCodeEquipmentMutationEvidence mutation = captured.Evidence
+            .EquipmentMutationValuesByKey[new NetherCodeMutationKey(candidate.CodeId, 0)];
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Equipment,
+                CodeReloadReserve = 1,
+            },
+            captured.Evidence
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.True(
+            value.Kind == NetherCombatValueEvidenceKind.Quantified,
+            value.Detail
+        );
+        Assert.DoesNotContain("position-combination-unsupported", value.Detail);
+        Assert.Equal(NetherEquipmentCombatTier.RearOrFullOffense, mutation.CombatTier);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+    }
+
+    [Theory]
+    [InlineData((int)NetherPartyPositionFlags.Forward, (int)NetherEquipmentCombatTier.FrontFallback)]
+    [InlineData((int)NetherPartyPositionFlags.Back, (int)NetherEquipmentCombatTier.RearOrFullOffense)]
+    [InlineData(
+        (int)(NetherPartyPositionFlags.Forward | NetherPartyPositionFlags.Back),
+        (int)NetherEquipmentCombatTier.RearOrFullOffense
+    )]
+    [InlineData((int)NetherPartyPositionFlags.Assist, (int)NetherEquipmentCombatTier.RearOrFullOffense)]
+    [InlineData(
+        (int)(NetherPartyPositionFlags.Forward | NetherPartyPositionFlags.Assist),
+        (int)NetherEquipmentCombatTier.RearOrFullOffense
+    )]
+    [InlineData(
+        (int)(NetherPartyPositionFlags.Back | NetherPartyPositionFlags.Assist),
+        (int)NetherEquipmentCombatTier.RearOrFullOffense
+    )]
+    [InlineData(
+        (int)(NetherPartyPositionFlags.Forward
+            | NetherPartyPositionFlags.Back
+            | NetherPartyPositionFlags.Assist),
+        (int)NetherEquipmentCombatTier.RearOrFullOffense
+    )]
+    public void Production_assembler_accepts_every_nonzero_known_native_position_mask(
+        int rawPositionFlags,
+        int rawExpectedTier
+    )
+    {
+        // Fresh CharacterPartyPositionFlag is a three-bit [Flags] enum. Exhaust every nonzero
+        // value in its 0x0e domain here; the separate unknown-bit test proves that this exhaustive
+        // support does not admit values outside the current native enum.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(
+            88_900 + rawPositionFlags,
+            NetherCodeFamily.Safe,
+            power: 1
+        );
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0);
+        NetherStrategyPartyMember template = Assert.Single(package.Party.Value!.Members);
+        package = package with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Known(
+                new NetherStrategyPartyProfile([
+                    template with
+                    {
+                        CharacterId = 101,
+                        PartyIndex = 0,
+                        PartyPosition = NetherPartyPosition.Forward,
+                    },
+                    template with
+                    {
+                        CharacterId = 102,
+                        PartyIndex = 1,
+                        PartyPosition = NetherPartyPosition.Back,
+                    },
+                    template with
+                    {
+                        CharacterId = 103,
+                        PartyIndex = 2,
+                        PartyPosition = NetherPartyPosition.Assist,
+                    },
+                ])
+            ),
+        };
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [AttackMechanic(
+                candidate.CodeId,
+                additionPermille: 200,
+                targetFlags: (NetherPartyPositionFlags)rawPositionFlags
+            )],
+            EquipmentSettings(),
+            SafeRouteEvidence()
+        );
+        NetherMechanismValue value = captured.Evidence!.MechanismValuesByCodeId[candidate.CodeId];
+        NetherCodeEquipmentMutationEvidence mutation = captured.Evidence
+            .EquipmentMutationValuesByKey[new NetherCodeMutationKey(candidate.CodeId, 0)];
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.True(
+            value.Kind == NetherCombatValueEvidenceKind.Quantified,
+            value.Detail
+        );
+        Assert.DoesNotContain("position-combination-unsupported", value.Detail);
+        Assert.Equal((NetherEquipmentCombatTier)rawExpectedTier, mutation.CombatTier);
+    }
+
+    [Fact]
     public void Production_assembler_keeps_unsupported_live_target_filter_candidate_local_unknown()
     {
         // Fresh Project.dll 53806a5b...1300: BuffTargetFilter.IsMatchTarget evaluates live
@@ -1486,7 +1649,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
-    public void Production_assembler_maps_active_research_family_and_keeps_unknown_candidate_local()
+    public void Production_assembler_preserves_active_research_metadata_while_research_selects_by_family_and_code_id()
     {
         NetherSnapshot snapshot = Snapshot();
         NetherCodeCandidate unknownHighPower = Candidate(
@@ -1529,7 +1692,12 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         );
 
         Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(knownLowPower.CodeId, decision.SelectedCodeId);
+        Assert.Equal(unknownHighPower.CodeId, decision.SelectedCodeId);
+        NetherCodeCandidateAudit selectedAudit = Assert.Single(
+            decision.CandidateAudits,
+            audit => audit.CodeId == unknownHighPower.CodeId
+        );
+        Assert.Equal(NetherCodeCandidateHardGate.None, selectedAudit.FirstFailingHardGate);
     }
 
     [Fact]

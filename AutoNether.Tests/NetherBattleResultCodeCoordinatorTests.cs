@@ -275,7 +275,7 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     }
 
     [Fact]
-    public void Result_owner_research_uses_exact_active_family_not_reversed_displayed_power()
+    public void Result_owner_research_uses_configured_primary_family_not_reversed_displayed_power()
     {
         NetherCodeCandidate wrongFamilyDisplayedHigh = Candidate(
             39995,
@@ -440,6 +440,89 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         Assert.Equal(NetherBattleResultCodeStepKind.BindingUnavailable, step.Kind);
         Assert.Contains("no-proven-code-candidate", step.Detail, StringComparison.Ordinal);
         Assert.Empty(driver.InvokedActions);
+    }
+
+    [Fact]
+    public void Research_rerolls_once_then_invokes_native_keep_for_unknown_nonconfigured_offers()
+    {
+        NetherCodeCandidate safe = Candidate(40101, NetherCodeCategory.Safe);
+        NetherCodeCandidate rush = Candidate(20101, NetherCodeCategory.Rush);
+        NetherCodeCandidate[] offered = [safe, rush];
+        NetherCodePolicyEvidence evidence = EquipmentEvidence(offered) with
+        {
+            ActiveResearchFamily = NetherCodeFamily.Risk,
+            Research =
+            [
+                new NetherStrategyResearchFamilyState(NetherCodeFamily.Rush, 0, 0, 0),
+                new NetherStrategyResearchFamilyState(NetherCodeFamily.Impact, 0, 0, 0),
+                new NetherStrategyResearchFamilyState(NetherCodeFamily.Safe, 0, 0, 0),
+                new NetherStrategyResearchFamilyState(NetherCodeFamily.Risk, 0, 0, 0),
+            ],
+            MechanicsByCodeId = offered.ToDictionary(
+                candidate => candidate.CodeId,
+                candidate => new NetherCodeHardEligibilityEvidence
+                {
+                    IsKnown = false,
+                    UnknownReason = "unsupported-nether-code-effect-type:" + candidate.CodeId + ":12",
+                }
+            ),
+            MechanismValuesByCodeId = offered.ToDictionary(
+                candidate => candidate.CodeId,
+                candidate => NetherMechanismValue.Missing(
+                    "unsupported-nether-code-effect-type:" + candidate.CodeId + ":12"
+                )
+            ),
+            EquipmentMutationValuesByKey = new Dictionary<
+                NetherCodeMutationKey,
+                NetherCodeEquipmentMutationEvidence
+            >(),
+        };
+        var driver = new Driver
+        {
+            Snapshot = Snapshot() with { CodeReloadCount = 2 },
+            Candidates = new NetherRuntimeCodeCandidatesResult(
+                offered,
+                IsMasterComplete: true,
+                Detail: string.Empty
+            ),
+            Popup = ResultPopup(),
+            PolicyEvidence = evidence,
+        };
+        var flow = new NetherBattleResultCodeCoordinator(maximumPopupPolls: 2);
+        NetherAutoClimbSettings settings = Settings() with
+        {
+            StrategyMode = NetherStrategyMode.Research,
+            ResearchPrimaryFamily = NetherCodeFamily.Risk,
+            ResearchSecondaryFamily = NetherCodeFamily.Impact,
+            CodeReloadReserve = 99,
+        };
+
+        Assert.Equal(
+            NetherBattleResultCodeStepKind.AwaitingNative,
+            flow.Pump(driver, settings, null, allowInvoke: true).Kind
+        );
+        Assert.Equal(NetherActionKind.ReloadCode, Assert.Single(driver.InvokedActions).Kind);
+
+        driver.NativeSteps.Enqueue(NetherBattleResultCodeNativeStep.ReloadReady("fresh-offer"));
+        Assert.Equal(
+            NetherBattleResultCodeStepKind.ReloadReady,
+            flow.Pump(driver, settings, null, allowInvoke: true).Kind
+        );
+
+        driver.Snapshot = driver.Snapshot with { CodeReloadCount = 1 };
+        driver.Popup = ResultPopup() with { DecisionEpoch = 1 };
+        NetherBattleResultCodeStep terminal = flow.Pump(
+            driver,
+            settings,
+            null,
+            allowInvoke: true
+        );
+
+        Assert.Equal(NetherBattleResultCodeStepKind.AwaitingNative, terminal.Kind);
+        Assert.Equal(
+            new[] { NetherActionKind.ReloadCode, NetherActionKind.KeepCode },
+            driver.InvokedActions.Select(action => action.Kind)
+        );
     }
 
     private static NetherRuntimePopupContext ResultPopup() => new()

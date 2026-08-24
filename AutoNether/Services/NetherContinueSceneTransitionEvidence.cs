@@ -45,22 +45,32 @@ internal sealed class NetherContinueSceneTransitionEvidence
 
     /// <summary>
     /// The current native Continue path changes scene and then awaits work with the old
-    /// FloorSelection owner's destroy token.  Cancellation after that exact owner terminated is
-    /// therefore parent-terminal evidence, but it is not scene-settlement evidence.  Keeping this
-    /// lease armed lets the normal new-generation lifecycle gate prove the transition later.
+    /// FloorSelection owner's destroy token.  Cancellation, or the exact source-less terminal
+    /// fault emitted by the pooled generated parent, after that owner terminated is therefore
+    /// parent-terminal evidence, but it is not scene-settlement evidence.  Keeping this lease
+    /// armed lets the normal new-generation lifecycle gate prove the transition later.
     /// </summary>
-    public bool TryObserveCanceledNativeParentAfterOwnerTransition(
+    public bool TryObserveExpectedTerminalNativeParentAfterOwnerTransition(
         NetherNativeActionResult result
     )
     {
         if (OwnerGeneration < 1
             || !NativeParentPending
             || !FloorOwnerTerminated
-            || result.Kind != NetherNativeActionResultKind.UnknownOutcome
-            || result.Detail.IndexOf("canceled", StringComparison.OrdinalIgnoreCase) < 0)
+            || result.Kind != NetherNativeActionResultKind.UnknownOutcome)
         {
             return false;
         }
+
+        bool canceledByDestroyedOwner =
+            result.Detail.IndexOf("canceled", StringComparison.OrdinalIgnoreCase) >= 0;
+        bool exactSourceLessTerminalFault = string.Equals(
+            result.Detail,
+            "native-start-status-terminal-faulted",
+            StringComparison.Ordinal
+        );
+        if (!canceledByDestroyedOwner && !exactSourceLessTerminalFault)
+            return false;
 
         NativeParentPending = false;
         return true;

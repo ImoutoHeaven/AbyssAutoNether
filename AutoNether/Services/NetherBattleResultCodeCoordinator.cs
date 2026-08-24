@@ -341,6 +341,7 @@ internal sealed class NetherBattleResultCodeCoordinator
                 ),
                 Capacity = snapshot.CodeCapacity,
                 ReloadCount = snapshot.CodeReloadCount,
+                DecisionEpoch = popup.DecisionEpoch,
                 IsMasterComplete = candidates.IsMasterComplete,
                 LockedLane = lockedLane ?? _lockedLane,
             },

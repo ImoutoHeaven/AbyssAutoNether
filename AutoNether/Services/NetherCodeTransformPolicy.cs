@@ -142,25 +142,17 @@ internal static class NetherCodeTransformHardExclusionMapper
             _ => NetherCrestIdentity.Unknown,
         };
         if (required == NetherCrestIdentity.Unknown || party == null
-            || mechanic.UniformCrestTargetRow is not (
-                NetherCodeTargetRow.Forward or NetherCodeTargetRow.Back
-                    or NetherCodeTargetRow.All or NetherCodeTargetRow.Assist
-            ))
+            || !NetherCodeTargetRowRules.IsKnown(mechanic.UniformCrestTargetRow))
         {
             return false;
         }
 
         NetherStrategyPartyMember[] recipients = party
             .Where(member => member != null && member.IsAlive)
-            .Where(member => mechanic.UniformCrestTargetRow switch
-            {
-                NetherCodeTargetRow.Forward => member.PartyPosition == NetherPartyPosition.Forward,
-                NetherCodeTargetRow.Back => member.PartyPosition == NetherPartyPosition.Back,
-                NetherCodeTargetRow.Assist => member.PartyPosition == NetherPartyPosition.Assist,
-                NetherCodeTargetRow.All => member.PartyPosition is NetherPartyPosition.Forward
-                    or NetherPartyPosition.Back or NetherPartyPosition.Assist,
-                _ => false,
-            })
+            .Where(member => NetherCodeTargetRowRules.Matches(
+                mechanic.UniformCrestTargetRow,
+                member.PartyPosition
+            ))
             .ToArray();
         compatible = recipients.Length > 0 && recipients.All(member => member.Crest == required);
         return true;

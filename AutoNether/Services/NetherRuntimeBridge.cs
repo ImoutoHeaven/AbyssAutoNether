@@ -8449,15 +8449,16 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private NetherNativeActionResult TerminalCheckpointFailure(NetherNativeActionResult result)
     {
         if (_pendingCheckpointAction?.Kind == NetherActionKind.Continue
-            && _continueSceneTransition.TryObserveCanceledNativeParentAfterOwnerTransition(result))
+            && _continueSceneTransition.TryObserveExpectedTerminalNativeParentAfterOwnerTransition(result))
         {
             // RO current-client ISIL: HandleGameClearedIfNeededAsync calls ChangeScene, then
             // WaitWhile(..., oldController.GetCancellationTokenOnDestroy()).  Preserve the exact
             // Continue transition lease instead of clearing it when that expected destroy-token
-            // cancellation reaches the generated HandleStartEventByStatusAsync parent.
+            // cancellation or exact source-less pooled-parent fault reaches the generated
+            // HandleStartEventByStatusAsync parent.
             CompleteCheckpointNativeFlow();
             return NetherNativeActionResult.Completed(
-                "checkpoint-native-flow-canceled-after-owner-transition:" + result.Detail
+                "checkpoint-native-flow-terminal-after-owner-transition:" + result.Detail
             );
         }
 

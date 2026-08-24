@@ -41,8 +41,10 @@ internal static class NetherAutoClimbController
         NetherBattleSettingsLease.Instance
     );
     private static readonly NetherNativeWaitGate BattleAccessorWait = new(maximumMissingPolls: 3600);
-    // A clear/close lifecycle edge can race the result-owned view. Bound that gap without
-    // issuing a second endpoint request or treating the entry Battle snapshot as failure.
+    // A clear/close lifecycle edge can race the result-owned view. Fresh native evidence shows
+    // that the view and its Code Offer are launched asynchronously from the result animation,
+    // with cancellation/scene ownership rather than an update-count deadline. Bound only the
+    // post-registration snapshot gap; explicit lifecycle loss still terminates the parent flow.
     private static readonly NetherNativeWaitGate BattleResultSettlementWait = new(maximumMissingPolls: 600);
     private static readonly NetherNativeWaitGate ExistingCheckpointWait = new(maximumMissingPolls: 600);
     private static readonly NetherNativeWaitGate FloorSceneReadinessWait = new(maximumMissingPolls: 600);
@@ -1074,6 +1076,7 @@ internal static class NetherAutoClimbController
                 ),
                 Capacity = snapshot.CodeCapacity,
                 ReloadCount = snapshot.CodeReloadCount,
+                DecisionEpoch = popup.DecisionEpoch,
                 IsMasterComplete = candidates.IsMasterComplete,
                 LockedLane = _lockedCombatLane,
             },
@@ -1334,8 +1337,8 @@ internal static class NetherAutoClimbController
             case NetherBattleSettlementStepKind.AwaitingResultView:
                 if (!_bridge.HasObservedNetherBattleResult)
                 {
-                    NetherNativeActionResult wait = BattleResultSettlementWait.AwaitRegistration(
-                        "battle-result-view"
+                    NetherNativeActionResult wait = NetherNativeActionResult.Started(
+                        "awaiting-authoritative-native-battle-result-view"
                     );
                     Audit(
                         NetherDetailedAuditKind.Battle,
@@ -1344,12 +1347,6 @@ internal static class NetherAutoClimbController
                         new NetherDetailedAuditField("result", wait.Kind.ToString()),
                         new NetherDetailedAuditField("detail", wait.Detail),
                         new NetherDetailedAuditField("pending", State.PendingAction?.Kind.ToString() ?? "none")
-                    );
-                    if (wait.Kind == NetherNativeActionResultKind.Started)
-                        return;
-                    FailClosedTerminal(
-                        NetherPauseReason.BattleSettlementUnchanged,
-                        "battle-settlement-unchanged-result-view:" + wait.Detail
                     );
                     return;
                 }
@@ -2315,7 +2312,7 @@ internal static class NetherAutoClimbController
         switch (decision.Kind)
         {
             case NetherPopupDispatchKind.Code:
-                PlanCodeSelection(snapshot, settings);
+                PlanCodeSelection(snapshot, settings, popup.DecisionEpoch);
                 return;
             case NetherPopupDispatchKind.NativeAction:
                 ExecuteNativeAction(
@@ -2525,7 +2522,11 @@ internal static class NetherAutoClimbController
         return true;
     }
 
-    private static void PlanCodeSelection(NetherSnapshot snapshot, NetherAutoClimbSettings settings)
+    private static void PlanCodeSelection(
+        NetherSnapshot snapshot,
+        NetherAutoClimbSettings settings,
+        long decisionEpoch
+    )
     {
         NetherRuntimeCodeCandidatesResult candidates = _bridge.TryGetCodeCandidates();
         if (!candidates.IsSuccess)
@@ -2553,6 +2554,7 @@ internal static class NetherAutoClimbController
                 ),
                 Capacity = snapshot.CodeCapacity,
                 ReloadCount = snapshot.CodeReloadCount,
+                DecisionEpoch = decisionEpoch,
                 IsMasterComplete = candidates.IsMasterComplete,
                 LockedLane = _lockedCombatLane,
             },

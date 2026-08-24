@@ -2582,6 +2582,69 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void Production_controller_accepts_result_code_offer_registered_after_result_view_wait_budget()
+    {
+        var bridge = new ScriptedRuntimeBridge
+        {
+            AutoCompleteBattleResultContinuation = false,
+            BattleResultRebound = false,
+            ObserveBattleResultOnBattleClear = false,
+            CodeCandidates = SafeCodeCandidates(30024),
+            BattleResultCodePopup = new NetherRuntimePopupContext
+            {
+                Kind = NetherRuntimePopupKind.CodeOffer,
+                OwnerAction = NetherActionKind.BattleSettlement,
+                OwnerGeneration = 9,
+                Sequence = 20,
+            },
+        };
+        bridge.BattleSettlementSnapshotOverride = bridge.BattleSnapshot;
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(bridge, lifecycle);
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+            Pump(3);
+            NetherAutoClimbController.OnBattleSettingsAccessorRegistered();
+
+            NetherAutoClimbController.Update(); // acquire battle settings
+            NetherAutoClimbController.Update(); // native clear arrives before result view
+            NetherAutoClimbController.Update(); // one GET-only refresh begins
+            NetherAutoClimbController.Update(); // same Battle snapshot: result owner has not registered yet
+            Pump(610); // exceed the old update-count budget before the authoritative native owner arrives
+
+            Assert.Equal(NetherAutoClimbPhase.AwaitingBattleSettlement, NetherAutoClimbController.Phase);
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Assert.Equal(NetherPauseReason.None, NetherAutoClimbController.PauseReason);
+            Assert.Empty(bridge.BattleResultCodeActions);
+
+            bridge.CurrentSnapshot = bridge.AfterBattle;
+            bridge.HasObservedNetherBattleResult = true;
+            NetherAutoClimbController.Update();
+
+            Assert.Equal(
+                NetherAutoClimbPhase.AwaitingBattleResultContinuation,
+                NetherAutoClimbController.Phase
+            );
+            Assert.Equal(
+                new[] { NetherActionKind.SelectCode },
+                bridge.BattleResultCodeActions.Select(action => action.Kind)
+            );
+            Assert.Equal(0, bridge.BattleResultNextInvokeCount);
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_settles_segment_boss_to_sleep_before_selecting_result_code()
     {
         var bridge = new ScriptedRuntimeBridge();

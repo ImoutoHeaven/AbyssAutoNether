@@ -3,7 +3,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 namespace AutoNether.Services;
 
@@ -37,15 +36,15 @@ internal enum NetherCodeReloadEpochStage
 /// <summary>
 /// Makes the exact native <c>RerollAsync</c> child a bounded intermediate step.  It advances a
 /// same-popup decision epoch only after the returned UniTask has ended and a fresh model proves
-/// both a changed offer and exactly one consumed reload.  It never invokes a reload itself, so
-/// fault/off/owner loss can only pause the already-started action rather than replay it.
+/// exactly one consumed reload. The random result may legitimately repeat the prior offer. It
+/// never invokes a reload itself, so fault/off/owner loss can only pause the already-started
+/// action rather than replay it.
 /// </summary>
 internal sealed class NetherCodeReloadEpochCoordinator
 {
     private readonly int _maximumPendingPumps;
     private NetherCodeReloadEpochOwner? _owner;
     private int _beforeReloadCount;
-    private string _beforeFingerprint = string.Empty;
     private string _faultDetail = string.Empty;
     private int _pendingPumps;
 
@@ -80,7 +79,7 @@ internal sealed class NetherCodeReloadEpochCoordinator
             || owner.Generation <= 0
             || owner.Sequence <= 0
             || reloadCount <= 0
-            || !TryCreateFingerprint(candidates, out string fingerprint))
+            || !TryCreateFingerprint(candidates, out _))
         {
             return false;
         }
@@ -99,7 +98,6 @@ internal sealed class NetherCodeReloadEpochCoordinator
 
         _owner = owner;
         _beforeReloadCount = reloadCount;
-        _beforeFingerprint = fingerprint;
         _faultDetail = string.Empty;
         _pendingPumps = 0;
         Stage = NetherCodeReloadEpochStage.AwaitingRerollTask;
@@ -150,10 +148,8 @@ internal sealed class NetherCodeReloadEpochCoordinator
                     return Fault("code-reload-owner", NetherNativeActionResult.BindingUnavailable("stale-or-missing-code-offer"));
                 if (refresh.ReloadCount != _beforeReloadCount - 1)
                     return Fault("code-reload-count", NetherNativeActionResult.UnknownOutcome("expected-exactly-one-consumed"));
-                if (!TryCreateFingerprint(refresh.Candidates, out string fingerprint))
+                if (!TryCreateFingerprint(refresh.Candidates, out _))
                     return Fault("code-reload-candidates", NetherNativeActionResult.BindingUnavailable("unknown-or-invalid-fresh-offer"));
-                if (string.Equals(fingerprint, _beforeFingerprint, StringComparison.Ordinal))
-                    return Fault("code-reload-candidates", NetherNativeActionResult.UnknownOutcome("unchanged-fresh-offer"));
 
                 try
                 {
@@ -187,7 +183,6 @@ internal sealed class NetherCodeReloadEpochCoordinator
     {
         _owner = null;
         _beforeReloadCount = 0;
-        _beforeFingerprint = string.Empty;
         _faultDetail = string.Empty;
         _pendingPumps = 0;
         DecisionEpoch = 0;
