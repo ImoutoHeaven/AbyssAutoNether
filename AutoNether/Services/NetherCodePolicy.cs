@@ -326,6 +326,22 @@ internal sealed class NetherCodePolicy
                 );
         }
         decision = AttachCandidateAudits(decision, candidateAudits);
+        if (ShouldPauseForCardSpecificEvidenceFailure(
+                decision,
+                portfolio,
+                uniqueCandidates,
+                candidateAudits,
+                evidence
+            ))
+        {
+            decision = AttachCandidateAudits(
+                Pause(
+                    NetherPauseReason.UnknownEffect,
+                    "no-proven-code-candidate-after-reroll-budget:" + decision.Detail
+                ),
+                candidateAudits
+            );
+        }
         if (decision.Kind != NetherCodeDecisionKind.Select)
             return decision;
 
@@ -427,6 +443,48 @@ internal sealed class NetherCodePolicy
                 ? tier
                 : decision.DecisionTier,
         };
+    }
+
+    private static bool ShouldPauseForCardSpecificEvidenceFailure(
+        NetherCodeDecision decision,
+        NetherCodePortfolio portfolio,
+        IReadOnlyList<NetherCodeCandidate> candidates,
+        IReadOnlyList<NetherCodeCandidateAudit> candidateAudits,
+        NetherCodePolicyEvidence evidence
+    )
+    {
+        if (decision.Kind != NetherCodeDecisionKind.Keep)
+            return false;
+
+        var owned = new HashSet<long>(portfolio.CurrentCodes.Select(code => code.CodeId));
+        HashSet<long> unresolvedOfferIds = candidates
+            .Where(candidate => !owned.Contains(candidate.CodeId))
+            .Select(candidate => candidate.CodeId)
+            .ToHashSet();
+        return candidateAudits.Any(audit =>
+        {
+            if (!unresolvedOfferIds.Contains(audit.CodeId)
+                || audit.IsEligible
+                || audit.UnknownReasonCode == NetherStrategyUnknownReasonCode.None)
+            {
+                return false;
+            }
+
+            bool mechanicUnavailable = evidence.MechanicsByCodeId == null
+                || !evidence.MechanicsByCodeId.TryGetValue(
+                    audit.CodeId,
+                    out NetherCodeHardEligibilityEvidence? mechanic
+                )
+                || mechanic == null
+                || !mechanic.IsKnown;
+            bool mechanismValueMissing = evidence.MechanismValuesByCodeId == null
+                || !evidence.MechanismValuesByCodeId.TryGetValue(
+                    audit.CodeId,
+                    out NetherMechanismValue mechanismValue
+                )
+                || mechanismValue.Kind == NetherCombatValueEvidenceKind.Missing;
+            return mechanicUnavailable || mechanismValueMissing;
+        });
     }
 
     private static NetherCodeDecision FinalizeSelectedDecision(

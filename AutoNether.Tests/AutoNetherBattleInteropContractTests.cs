@@ -50,6 +50,52 @@ public sealed class AutoNetherBattleInteropContractTests
     }
 
     [Fact]
+    public void Code_offer_registration_diagnostic_reports_f12_ownership_instead_of_unrelated_child_bindings()
+    {
+        // Fresh current-game Cpp2IL (GameAssembly f2ad9478...767) shows that the result animation
+        // awaits NetherUtility.OpenAbyssCodeSelectPopupIfNeededAsync.  Its confirm and cancel
+        // callbacks are the only terminal paths; all code-received/list/replacement bindings
+        // belong to later, different popup stages and are therefore irrelevant at registration.
+        string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+
+        Assert.Contains("\"code-offer-registered\"", runtime, StringComparison.Ordinal);
+        Assert.Contains("\"automationEnabled\"", runtime, StringComparison.Ordinal);
+        Assert.Contains("\"automationPhase\"", runtime, StringComparison.Ordinal);
+        Assert.Contains("\"disposition\"", runtime, StringComparison.Ordinal);
+        Assert.Contains("automation-paused-no-mutation", runtime, StringComparison.Ordinal);
+        Assert.Contains("player-owned-f12-disabled", runtime, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Runtime_snapshots_convert_native_used_rerolls_to_remaining_availability()
+    {
+        // Fresh current-game Cpp2IL (GameAssembly f2ad9478...767) proves that
+        // AbyssCodeSelectPopupController.CreateModel displays
+        // NetherPointData.MaxCodeReload - NetherData.CodeReload. The latter is therefore the
+        // consumed count, while policy snapshots intentionally expose the remaining count.
+        string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+        const string mapping = "CodeReloadCount = NetherCodeReloadAvailability.FromNative(";
+
+        Assert.Equal(2, runtime.Split(mapping, StringSplitOptions.None).Length - 1);
+        Assert.Equal(
+            2,
+            runtime.Split("pointData.MaxCodeReload,", StringSplitOptions.None).Length - 1
+        );
+        Assert.DoesNotContain("CodeReloadCount = data.CodeReload", runtime, StringComparison.Ordinal);
+        Assert.Contains("new(\"codeReloadUsed\", data.CodeReload.ToString())", runtime, StringComparison.Ordinal);
+        Assert.Contains(
+            "new(\"codeReloadMaximum\", pointData.MaxCodeReload.ToString())",
+            runtime,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "new(\"codeReloadRemaining\", state.CodeReloadCount.ToString())",
+            runtime,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
     public void Authoritative_floor_scene_registration_primes_the_transition_cache_for_result_owned_code()
     {
         // Fresh current-game Cpp2IL: FloorSelection.SubViewController owns

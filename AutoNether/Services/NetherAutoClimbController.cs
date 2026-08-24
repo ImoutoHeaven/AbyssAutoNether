@@ -67,6 +67,8 @@ internal static class NetherAutoClimbController
 
     public static NetherAutoClimbPhase Phase => State.Phase;
 
+    internal static bool HasDeferredEnableIntent => _deferredEnableRemainingUpdates > 0;
+
     public static NetherPauseReason PauseReason => State.PauseReason;
 
     public static string PauseDetail => State.PauseDetail;

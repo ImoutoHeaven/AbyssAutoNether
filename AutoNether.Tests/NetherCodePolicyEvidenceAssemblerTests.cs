@@ -559,7 +559,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
-    public void Production_result_owned_ordinary_addition_still_requires_party_evidence()
+    public void Production_result_owned_ordinary_addition_pauses_without_discarding_unknown_party_offer()
     {
         // An ordinary BuffController mutation resolves concrete recipients. Unlike a typed
         // ForceChain payoff, it cannot be assigned a complete marginal when Party is unavailable.
@@ -588,7 +588,9 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         );
 
         Assert.True(captured.IsSuccess, captured.Detail);
-        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Pause, decision.Kind);
+        Assert.Equal(NetherPauseReason.UnknownEffect, decision.PauseReason);
+        Assert.Contains("no-proven-code-candidate", decision.Detail, StringComparison.Ordinal);
     }
 
     [Fact]

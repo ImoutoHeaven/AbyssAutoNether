@@ -1201,7 +1201,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 SignalCount = dataStore.GetSignalCount(),
                 TreasureKeyCount = treasureKey,
                 NetherGold = netherGold,
-                CodeReloadCount = data.CodeReload,
+                CodeReloadCount = NetherCodeReloadAvailability.FromNative(
+                    pointData.MaxCodeReload,
+                    data.CodeReload
+                ),
                 CodeCapacity = pointData.MaxNetherCode,
                 LockReward = pointData.LockReward,
                 ContinuationTarget = continuationTarget,
@@ -3425,7 +3428,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 SignalCount = dataStore.GetSignalCount(),
                 TreasureKeyCount = data.TreasureKey,
                 NetherGold = data.NetherGold,
-                CodeReloadCount = data.CodeReload,
+                CodeReloadCount = NetherCodeReloadAvailability.FromNative(
+                    pointData.MaxCodeReload,
+                    data.CodeReload
+                ),
                 CodeCapacity = pointData.MaxNetherCode,
                 LockReward = pointData.LockReward,
                 ContinuationTarget = status == NetherSessionStatus.Sleep
@@ -3455,6 +3461,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         : "exact-master-coordinate"),
                 new("resolvedFloorId", result.Snapshot?.CurrentFloorId.ToString() ?? "0"),
                 new("requireFreshCharacters", requireFreshCharacters.ToString()),
+                new("codeReloadUsed", data.CodeReload.ToString()),
+                new("codeReloadMaximum", pointData.MaxCodeReload.ToString()),
+                new("codeReloadRemaining", state.CodeReloadCount.ToString()),
                 new("codeCount", codes!.Count.ToString()),
                 new("itemCount", items!.Count.ToString()),
                 new("detail", result.Detail)
@@ -5293,6 +5302,41 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 );
             }
         }
+        if (typeName == CodeSelectPopupControllerTypeName)
+        {
+            bool automationEnabled = NetherAutoClimbController.IsEnabled;
+            bool automationArmed = NetherAutoClimbController.HasDeferredEnableIntent;
+            NetherAutoClimbPhase automationPhase = NetherAutoClimbController.Phase;
+            string disposition = !automationEnabled
+                ? automationArmed
+                    ? "automation-armed-awaiting-owner"
+                    : "player-owned-f12-disabled"
+                : automationPhase == NetherAutoClimbPhase.Paused
+                    ? "automation-paused-no-mutation"
+                    : automationPhase == NetherAutoClimbPhase.Completed
+                        ? "automation-completed-no-mutation"
+                        : "automation-owned";
+            // A Code Select registration precedes its asynchronous _model readiness boundary.
+            // The received/list/replacement booleans below describe different child popup types;
+            // reporting them here as False made a healthy Code Select owner look unbound.
+            NetherAutoClimbController.LogDiagnostic(
+                "code-offer-registered",
+                new("action", "popup-registered"),
+                new("type", typeName),
+                new("sequence", sequence.ToString()),
+                new("owner", ownerAction.ToString()),
+                new("ownerGeneration", ownerGeneration.ToString()),
+                new("runtimeGeneration", runtimeGeneration.ToString()),
+                new("automationEnabled", automationEnabled.ToString()),
+                new("automationArmed", automationArmed.ToString()),
+                new("automationPhase", automationPhase.ToString()),
+                new("disposition", disposition),
+                new("readiness", "deferred-to-controller-model-poll"),
+                new("hasClose", (close != null).ToString())
+            );
+            return;
+        }
+
         NetherAutoClimbController.LogDiagnostic(
             "runtime-lifecycle",
             new("action", recognized ? "popup-registered" : "popup-unrecognized"),

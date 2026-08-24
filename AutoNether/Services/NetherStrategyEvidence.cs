@@ -1572,37 +1572,83 @@ internal static class NetherStrategyEvidenceMapper
                     "invalid-party-profile-member"
                 );
             }
-            if (member.CharacterAbilityEffects == null
-                || member.EquipmentAbilityEffects == null
-                || member.GeneralAbilityEffects == null
-                || !TryCopyEffectiveParameters(
-                    member,
-                    out IReadOnlyList<NetherStrategyEffectiveParameter>? effectiveParameters,
-                    out IReadOnlyList<NetherStrategyParameterCalculationEvidence>? calculations
-                )
-                || member.AbilityMechanicsKnown
-                    && member.CharacterAbilityEffects.Concat(member.EquipmentAbilityEffects)
-                        .Concat(member.GeneralAbilityEffects)
-                        .Any(effect => effect.Mechanic == null)
-                || !member.AbilityMechanicsKnown
-                    && string.IsNullOrWhiteSpace(member.AbilityMechanicsUnknownReason)
-                || !TryCopyNamed(member.NativeParameters, out IReadOnlyList<NetherStrategyNamedValue>? parameters)
-                || !TryCopyEffects(member.CharacterAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? character)
-                || !TryCopyEffects(member.EquipmentAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? equipment)
-                || !TryCopyEffects(member.GeneralAbilityEffects, out IReadOnlyList<NetherStrategyAbilityEffect>? general))
+            bool parameterEvidenceCopied = TryCopyEffectiveParameters(
+                member,
+                out IReadOnlyList<NetherStrategyEffectiveParameter>? effectiveParameters,
+                out IReadOnlyList<NetherStrategyParameterCalculationEvidence>? calculations
+            );
+            if (!parameterEvidenceCopied)
             {
-                return NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Unknown(
-                    "invalid-party-profile-native-input"
-                );
+                effectiveParameters = Array.Empty<NetherStrategyEffectiveParameter>();
+                calculations = Array.Empty<NetherStrategyParameterCalculationEvidence>();
             }
+
+            bool nativeParametersCopied = TryCopyNamed(
+                member.NativeParameters,
+                out IReadOnlyList<NetherStrategyNamedValue>? parameters
+            );
+            if (!nativeParametersCopied)
+                parameters = Array.Empty<NetherStrategyNamedValue>();
+
+            IReadOnlyList<NetherStrategyAbilityEffect>? character = null;
+            IReadOnlyList<NetherStrategyAbilityEffect>? equipment = null;
+            IReadOnlyList<NetherStrategyAbilityEffect>? general = null;
+            bool abilityContractValid = member.CharacterAbilityEffects != null
+                && member.EquipmentAbilityEffects != null
+                && member.GeneralAbilityEffects != null
+                && (!member.AbilityMechanicsKnown
+                    || !member.CharacterAbilityEffects.Concat(member.EquipmentAbilityEffects)
+                        .Concat(member.GeneralAbilityEffects)
+                        .Any(effect => effect.Mechanic == null))
+                && (member.AbilityMechanicsKnown
+                    || !string.IsNullOrWhiteSpace(member.AbilityMechanicsUnknownReason));
+            bool abilityEvidenceCopied = abilityContractValid
+                && TryCopyEffects(member.CharacterAbilityEffects, out character)
+                && TryCopyEffects(member.EquipmentAbilityEffects, out equipment)
+                && TryCopyEffects(member.GeneralAbilityEffects, out general);
+            if (!abilityEvidenceCopied)
+            {
+                character = Array.Empty<NetherStrategyAbilityEffect>();
+                equipment = Array.Empty<NetherStrategyAbilityEffect>();
+                general = Array.Empty<NetherStrategyAbilityEffect>();
+            }
+
+            // Character identity, row, element, crest and life state are direct fields on the
+            // native NetherPartyCharacterModel. Parameter calculators, raw diagnostic tables and
+            // ability graphs are optional dependent components. A malformed optional component
+            // must remain unknown locally; erasing the whole party also erases authoritative target
+            // matching and turns every otherwise usable Code into a false evidence failure.
             members.Add(member with
             {
+                EffectiveParametersKnown = parameterEvidenceCopied
+                    && member.EffectiveParametersKnown,
                 EffectiveParameters = effectiveParameters!,
+                EffectiveParametersUnknownReason = parameterEvidenceCopied
+                    ? member.EffectiveParametersUnknownReason
+                    : "invalid-effective-party-parameter-native-input",
+                ParameterCalculationsKnown = parameterEvidenceCopied
+                    && member.ParameterCalculationsKnown,
                 ParameterCalculations = calculations!,
+                ParameterCalculationsUnknownReason = parameterEvidenceCopied
+                    ? member.ParameterCalculationsUnknownReason
+                    : "invalid-party-parameter-calculation-native-input",
+                ContinuousAttackCountMaximumKnown = parameterEvidenceCopied
+                    && member.ContinuousAttackCountMaximumKnown,
+                ContinuousAttackCountMaximumUnknownReason = parameterEvidenceCopied
+                    ? member.ContinuousAttackCountMaximumUnknownReason
+                    : "invalid-live-continuous-attack-maximum-native-input",
                 NativeParameters = parameters!,
                 CharacterAbilityEffects = character!,
                 EquipmentAbilityEffects = equipment!,
                 GeneralAbilityEffects = general!,
+                AbilityMechanicsKnown = abilityEvidenceCopied
+                    && member.AbilityMechanicsKnown,
+                AbilityMechanicsUnknownReason = abilityEvidenceCopied
+                    ? member.AbilityMechanicsUnknownReason
+                    : !member.AbilityMechanicsKnown
+                        && !string.IsNullOrWhiteSpace(member.AbilityMechanicsUnknownReason)
+                        ? member.AbilityMechanicsUnknownReason
+                        : "invalid-party-ability-evidence-native-input",
             });
         }
         return NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Known(

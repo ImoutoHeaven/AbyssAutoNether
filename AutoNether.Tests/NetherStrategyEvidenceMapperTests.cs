@@ -256,6 +256,55 @@ public sealed class NetherStrategyEvidenceMapperTests
     }
 
     [Fact]
+    public void Invalid_optional_party_ability_rows_do_not_erase_targetable_core_party_identity()
+    {
+        // The current native Code-offer owner stores identity/position/element fields directly on
+        // NetherPartyCharacterModel. Optional ability rows are a separate evidence component and
+        // cannot erase those fields when their graph fails validation.
+        NetherSnapshot snapshot = Snapshot();
+        const long duplicateEffectId = 78_001;
+        NetherStrategyPartyMember member = new(
+            11,
+            0,
+            NetherPartyPosition.Back,
+            3,
+            NetherCrestIdentity.Impact,
+            875,
+            true,
+            90,
+            5
+        )
+        {
+            AbilityMechanicsKnown = false,
+            AbilityMechanicsUnknownReason = "native-party-ability-graph-incomplete",
+            EquipmentAbilityEffects =
+            [
+                new NetherStrategyAbilityEffect(duplicateEffectId, 1, 0, 0),
+                new NetherStrategyAbilityEffect(duplicateEffectId, 2, 0, 0),
+            ],
+        };
+
+        NetherStrategyEvidenceMapResult mapped = NetherStrategyEvidenceMapper.Map(
+            new NetherStrategyEvidenceMapRequest(Identity(snapshot), snapshot)
+            {
+                Party = [member],
+            }
+        );
+
+        Assert.True(mapped.IsMapped, mapped.Detail);
+        Assert.True(mapped.Package!.Party.IsKnown, mapped.Package.Party.UnknownReason);
+        NetherStrategyPartyMember copied = Assert.Single(mapped.Package.Party.Value!.Members);
+        Assert.Equal(member.CharacterId, copied.CharacterId);
+        Assert.Equal(member.PartyPosition, copied.PartyPosition);
+        Assert.Equal(member.ElementType, copied.ElementType);
+        Assert.False(copied.AbilityMechanicsKnown);
+        Assert.Equal(member.AbilityMechanicsUnknownReason, copied.AbilityMechanicsUnknownReason);
+        Assert.Empty(copied.CharacterAbilityEffects);
+        Assert.Empty(copied.EquipmentAbilityEffects);
+        Assert.Empty(copied.GeneralAbilityEffects);
+    }
+
+    [Fact]
     public void Runtime_capture_error_survives_exactly_in_only_its_dependent_component()
     {
         // Fresh Project.dll SHA-256 53806a5b...1300: NetherPartyCharacterModel exposes

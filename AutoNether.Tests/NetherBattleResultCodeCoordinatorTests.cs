@@ -386,6 +386,62 @@ public sealed class NetherBattleResultCodeCoordinatorTests
         Assert.Equal(forceChain.CodeId, Assert.Single(driver.InvokedActions).CodeId);
     }
 
+    [Fact]
+    public void Exhausted_reroll_with_only_evidence_failed_candidates_pauses_without_native_cancel()
+    {
+        // Live log 729+ (2026-08-24): the first offer consumed the one available reroll, then
+        // 20001/20002 failed on target/party evidence and 40026 failed on native effect evidence.
+        // Card-Specific Evidence Failure must hand the still-open popup to the player; KeepCode is
+        // the native cancel path and would irreversibly discard the complete offer.
+        NetherCodeCandidate first = Candidate(20001, NetherCodeCategory.Rush);
+        NetherCodeCandidate second = Candidate(20002, NetherCodeCategory.Rush);
+        NetherCodeCandidate third = Candidate(40026, NetherCodeCategory.Risk);
+        NetherCodeCandidate[] offered = [first, second, third];
+        NetherCodePolicyEvidence evidence = EquipmentEvidence(offered) with
+        {
+            MechanicsByCodeId = offered.ToDictionary(
+                candidate => candidate.CodeId,
+                candidate => new NetherCodeHardEligibilityEvidence
+                {
+                    IsKnown = false,
+                    UnknownReason = candidate.CodeId == 40026
+                        ? "unsupported-nether-code-effect-type:40026:12"
+                        : "native-target-filter-parameters-unavailable:" + candidate.CodeId,
+                }
+            ),
+            MechanismValuesByCodeId = offered.ToDictionary(
+                candidate => candidate.CodeId,
+                candidate => NetherMechanismValue.Missing(
+                    candidate.CodeId == 40026
+                        ? "unsupported-nether-code-effect-type:40026:12"
+                        : "native-target-filter-parameters-unavailable:" + candidate.CodeId
+                )
+            ),
+            EquipmentMutationValuesByKey = new Dictionary<
+                NetherCodeMutationKey,
+                NetherCodeEquipmentMutationEvidence
+            >(),
+        };
+        var driver = new Driver
+        {
+            Snapshot = Snapshot() with { CodeReloadCount = 0 },
+            Candidates = new NetherRuntimeCodeCandidatesResult(
+                offered,
+                IsMasterComplete: true,
+                Detail: string.Empty
+            ),
+            Popup = ResultPopup() with { DecisionEpoch = 1 },
+            PolicyEvidence = evidence,
+        };
+        var flow = new NetherBattleResultCodeCoordinator(maximumPopupPolls: 2);
+
+        NetherBattleResultCodeStep step = flow.Pump(driver, Settings(), null, allowInvoke: true);
+
+        Assert.Equal(NetherBattleResultCodeStepKind.BindingUnavailable, step.Kind);
+        Assert.Contains("no-proven-code-candidate", step.Detail, StringComparison.Ordinal);
+        Assert.Empty(driver.InvokedActions);
+    }
+
     private static NetherRuntimePopupContext ResultPopup() => new()
     {
         Kind = NetherRuntimePopupKind.CodeOffer,
