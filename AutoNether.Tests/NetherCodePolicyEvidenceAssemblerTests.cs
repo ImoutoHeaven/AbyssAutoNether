@@ -449,6 +449,149 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
+    public void Production_result_owned_live_force_chain_offer_selects_the_eligible_code()
+    {
+        // Live 2026-08-23 offer evidence: capacity 27, held 20013, offered 20026/30013/30027.
+        // Fresh Project.dll 033a5d1e...c75f4 proves 20026's native AbilityEffect is a Forward
+        // ForceChain trigger. The optional full Party evidence can be unavailable when one unrelated
+        // owned ability fails to map, but this result-page free addition removes nothing and its typed
+        // value does not consume Party. The two sibling failures remain candidate-local and must not
+        // turn this independently proven positive addition into Keep.
+        NetherCodeState held = HeldCode(20013, NetherCodeFamily.Rush);
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            Status = NetherSessionStatus.Sleep,
+            CodeCapacity = 27,
+            Codes = [held],
+        };
+        NetherCodeCandidate forceChain = Candidate(20026, NetherCodeFamily.Rush, power: 300);
+        NetherCodeCandidate futureUnknown = Candidate(30013, NetherCodeFamily.Safe, power: 200);
+        NetherCodeCandidate unsupported = Candidate(30027, NetherCodeFamily.Safe, power: 300) with
+        {
+            MasterEffectType = (NetherCodeMasterEffectType)12,
+        };
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Unknown(
+                "live-result-party-evidence-unavailable"
+            ),
+            NativeMechanics = NetherStrategyEvidenceComponent<NetherStrategyNativeMechanicsEvidence>
+                .Known(new NetherStrategyNativeMechanicsEvidence([
+                    SelfAttackMechanic(
+                        held.CodeId,
+                        additionPermille: 100,
+                        coverageKnown: false,
+                        coverage: 0
+                    ),
+                ])),
+        };
+        NetherStrategyNativeMechanic unsupportedMechanic = UnknownMechanic(unsupported.CodeId) with
+        {
+            UnknownReason = "unsupported-nether-code-effect-type:30027:12",
+        };
+        NetherAutoClimbSettings settings = EquipmentSettings();
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [forceChain, futureUnknown, unsupported],
+            [
+                ForceChainMechanic(forceChain.CodeId, NetherPartyPositionFlags.Forward),
+                OrdinaryMechanic(futureUnknown.CodeId),
+                unsupportedMechanic,
+            ],
+            settings,
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [forceChain, futureUnknown, unsupported],
+            settings,
+            captured.Evidence!
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(forceChain.CodeId, decision.SelectedCodeId);
+        Assert.Equal(0, decision.RemoveCodeId);
+    }
+
+    [Fact]
+    public void Production_result_owned_force_chain_replacement_still_requires_complete_party_evidence()
+    {
+        // The result-owned shortcut is valid only for a free-slot addition. At capacity, removing a
+        // held Code changes the retained portfolio and therefore cannot bypass missing Party evidence.
+        NetherCodeState held = HeldCode(20013, NetherCodeFamily.Rush);
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            CodeCapacity = 1,
+            Codes = [held],
+        };
+        NetherCodeCandidate candidate = Candidate(20026, NetherCodeFamily.Rush, power: 300);
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Unknown(
+                "live-result-party-evidence-unavailable"
+            ),
+            NativeMechanics = NetherStrategyEvidenceComponent<NetherStrategyNativeMechanicsEvidence>
+                .Known(new NetherStrategyNativeMechanicsEvidence([
+                    SelfAttackMechanic(held.CodeId, 100, coverageKnown: false, coverage: 0),
+                ])),
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [ForceChainMechanic(candidate.CodeId, NetherPartyPositionFlags.Forward)],
+            EquipmentSettings(),
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence!
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+    }
+
+    [Fact]
+    public void Production_result_owned_ordinary_addition_still_requires_party_evidence()
+    {
+        // An ordinary BuffController mutation resolves concrete recipients. Unlike a typed
+        // ForceChain payoff, it cannot be assigned a complete marginal when Party is unavailable.
+        NetherSnapshot snapshot = Snapshot();
+        NetherCodeCandidate candidate = Candidate(88304, NetherCodeFamily.Safe, power: 1);
+        NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
+        {
+            Party = NetherStrategyEvidenceComponent<NetherStrategyPartyProfile>.Unknown(
+                "live-result-party-evidence-unavailable"
+            ),
+        };
+
+        NetherRuntimeCodePolicyEvidenceResult captured = NetherCodePolicyEvidenceAssembler.Assemble(
+            package,
+            snapshot,
+            [candidate],
+            [AttackMechanic(candidate.CodeId, 100)],
+            EquipmentSettings(),
+            NetherCodePolicyRouteEvidence.BattleResultBeforeFloorRebind()
+        );
+        NetherCodeDecision decision = new NetherCodePolicy().Decide(
+            Portfolio(snapshot),
+            [candidate],
+            EquipmentSettings(),
+            captured.Evidence!
+        );
+
+        Assert.True(captured.IsSuccess, captured.Detail);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+    }
+
+    [Fact]
     public void Production_result_owned_offer_keeps_timed_higher_value_addition_unknown_without_future_route_rebind()
     {
         // Fresh current-game BuffController still has HigherValue coexistence. A short stronger

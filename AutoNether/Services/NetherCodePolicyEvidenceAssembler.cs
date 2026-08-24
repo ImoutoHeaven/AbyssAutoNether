@@ -1976,7 +1976,7 @@ internal static class NetherCodePolicyEvidenceAssembler
     {
         comparison = new NetherNativePortfolioComparisonInput([], [], BossDurationSeconds: 1);
         error = string.Empty;
-        if (candidate == null || party == null || ownedMechanics == null)
+        if (candidate == null || ownedMechanics == null)
         {
             error = "native-retained-portfolio-input-unavailable";
             return false;
@@ -2001,6 +2001,12 @@ internal static class NetherCodePolicyEvidenceAssembler
                 BossDurationSeconds: 1
             );
             return true;
+        }
+
+        if (party == null)
+        {
+            error = "native-retained-portfolio-party-unavailable";
+            return false;
         }
 
         int comparisonSeconds;

@@ -98,6 +98,20 @@ public sealed class AutoNetherBattleInteropContractTests
     }
 
     [Fact]
+    public void Party_core_evidence_survives_an_optional_owned_ability_graph_capture_failure()
+    {
+        // Fresh current-game Project.dll 033a5d1e...c75f4 exposes identity, position, crest, HP and
+        // the three AbilityEffectModel arrays as independent NetherPartyCharacterModel properties.
+        // One unsupported owned ability graph must therefore degrade only AbilityMechanicsKnown;
+        // otherwise every ordinary Code offer loses the otherwise authoritative Party profile.
+        string runtime = Read("AutoNether", "Services", "NetherRuntimeBridge.cs");
+
+        Assert.Contains("TryMapStrategyPartyAbilityEffects(", runtime, StringComparison.Ordinal);
+        Assert.Contains("AbilityMechanicsKnown = abilityMechanicsKnown", runtime, StringComparison.Ordinal);
+        Assert.Contains("party-ability-mechanics-unavailable:", runtime, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Battle_result_code_decision_emits_the_same_complete_audit_as_direct_code_policy()
     {
         string controller = Read("AutoNether", "Services", "NetherAutoClimbController.cs");

@@ -9235,33 +9235,15 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 }
             }
 
-            if (!TryMapStrategyAbilityEffects(
-                    character,
-                    "CharacterAbilityEffectModels",
-                    buffStrategyStore,
-                    buffStrategyError,
-                    out IReadOnlyList<NetherStrategyAbilityEffect>? characterEffects,
-                    out error
-                )
-                || !TryMapStrategyAbilityEffects(
-                    character,
-                    "EquipmentAbilityEffectModels",
-                    buffStrategyStore,
-                    buffStrategyError,
-                    out IReadOnlyList<NetherStrategyAbilityEffect>? equipmentEffects,
-                    out error
-                )
-                || !TryMapStrategyAbilityEffects(
-                    character,
-                    "GeneralAbilityEffectModels",
-                    buffStrategyStore,
-                    buffStrategyError,
-                    out IReadOnlyList<NetherStrategyAbilityEffect>? generalEffects,
-                    out error
-                ))
-            {
-                return false;
-            }
+            bool abilityMechanicsKnown = TryMapStrategyPartyAbilityEffects(
+                character,
+                buffStrategyStore,
+                buffStrategyError,
+                out IReadOnlyList<NetherStrategyAbilityEffect> characterEffects,
+                out IReadOnlyList<NetherStrategyAbilityEffect> equipmentEffects,
+                out IReadOnlyList<NetherStrategyAbilityEffect> generalEffects,
+                out string abilityMechanicsError
+            );
 
             mapped.Add(new NetherStrategyPartyMember(
                 characterId,
@@ -9289,11 +9271,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ContinuousAttackCountMaximumUnknownReason =
                     "code-offer-party-model-has-no-live-i-character-status",
                 NativeParameters = parameters,
-                CharacterAbilityEffects = characterEffects!,
-                EquipmentAbilityEffects = equipmentEffects!,
-                GeneralAbilityEffects = generalEffects!,
-                AbilityMechanicsKnown = true,
-                AbilityMechanicsUnknownReason = string.Empty,
+                CharacterAbilityEffects = characterEffects,
+                EquipmentAbilityEffects = equipmentEffects,
+                GeneralAbilityEffects = generalEffects,
+                AbilityMechanicsKnown = abilityMechanicsKnown,
+                AbilityMechanicsUnknownReason = abilityMechanicsKnown
+                    ? string.Empty
+                    : "party-ability-mechanics-unavailable:" + abilityMechanicsError,
             });
         }
         if (mapped.Count == 0)
@@ -9386,33 +9370,15 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 return false;
             }
 
-            if (!TryMapStrategyAbilityEffects(
-                    character,
-                    "CharacterAbilityEffectModels",
-                    buffStrategyStore,
-                    buffStrategyError,
-                    out IReadOnlyList<NetherStrategyAbilityEffect>? characterEffects,
-                    out error
-                )
-                || !TryMapStrategyAbilityEffects(
-                    character,
-                    "EquipmentAbilityEffectModels",
-                    buffStrategyStore,
-                    buffStrategyError,
-                    out IReadOnlyList<NetherStrategyAbilityEffect>? equipmentEffects,
-                    out error
-                )
-                || !TryMapStrategyAbilityEffects(
-                    character,
-                    "GeneralAbilityEffectModels",
-                    buffStrategyStore,
-                    buffStrategyError,
-                    out IReadOnlyList<NetherStrategyAbilityEffect>? generalEffects,
-                    out error
-                ))
-            {
-                return false;
-            }
+            bool abilityMechanicsKnown = TryMapStrategyPartyAbilityEffects(
+                character,
+                buffStrategyStore,
+                buffStrategyError,
+                out IReadOnlyList<NetherStrategyAbilityEffect> characterEffects,
+                out IReadOnlyList<NetherStrategyAbilityEffect> equipmentEffects,
+                out IReadOnlyList<NetherStrategyAbilityEffect> generalEffects,
+                out string abilityMechanicsError
+            );
 
             mapped.Add(new NetherStrategyPartyMember(
                 characterId,
@@ -9437,11 +9403,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ContinuousAttackCountMaximumUnknownReason =
                     "code-offer-party-model-has-no-live-i-character-status",
                 NativeParameters = Array.Empty<NetherStrategyNamedValue>(),
-                CharacterAbilityEffects = characterEffects!,
-                EquipmentAbilityEffects = equipmentEffects!,
-                GeneralAbilityEffects = generalEffects!,
-                AbilityMechanicsKnown = true,
-                AbilityMechanicsUnknownReason = string.Empty,
+                CharacterAbilityEffects = characterEffects,
+                EquipmentAbilityEffects = equipmentEffects,
+                GeneralAbilityEffects = generalEffects,
+                AbilityMechanicsKnown = abilityMechanicsKnown,
+                AbilityMechanicsUnknownReason = abilityMechanicsKnown
+                    ? string.Empty
+                    : "party-ability-mechanics-unavailable:" + abilityMechanicsError,
             });
         }
         if (mapped.Count == 0)
@@ -9485,6 +9453,54 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         Project.Master.ParameterType.SkillCharge => NetherCharacterParameterKind.SkillCharge,
         _ => NetherCharacterParameterKind.None,
     };
+
+    private static bool TryMapStrategyPartyAbilityEffects(
+        object character,
+        Project.Ingame.BuffTypeStrategies? buffStrategyStore,
+        string buffStrategyError,
+        out IReadOnlyList<NetherStrategyAbilityEffect> characterEffects,
+        out IReadOnlyList<NetherStrategyAbilityEffect> equipmentEffects,
+        out IReadOnlyList<NetherStrategyAbilityEffect> generalEffects,
+        out string error
+    )
+    {
+        characterEffects = Array.Empty<NetherStrategyAbilityEffect>();
+        equipmentEffects = Array.Empty<NetherStrategyAbilityEffect>();
+        generalEffects = Array.Empty<NetherStrategyAbilityEffect>();
+        if (!TryMapStrategyAbilityEffects(
+                character,
+                "CharacterAbilityEffectModels",
+                buffStrategyStore,
+                buffStrategyError,
+                out IReadOnlyList<NetherStrategyAbilityEffect>? mappedCharacterEffects,
+                out error
+            )
+            || !TryMapStrategyAbilityEffects(
+                character,
+                "EquipmentAbilityEffectModels",
+                buffStrategyStore,
+                buffStrategyError,
+                out IReadOnlyList<NetherStrategyAbilityEffect>? mappedEquipmentEffects,
+                out error
+            )
+            || !TryMapStrategyAbilityEffects(
+                character,
+                "GeneralAbilityEffectModels",
+                buffStrategyStore,
+                buffStrategyError,
+                out IReadOnlyList<NetherStrategyAbilityEffect>? mappedGeneralEffects,
+                out error
+            ))
+        {
+            return false;
+        }
+
+        characterEffects = mappedCharacterEffects!;
+        equipmentEffects = mappedEquipmentEffects!;
+        generalEffects = mappedGeneralEffects!;
+        error = string.Empty;
+        return true;
+    }
 
     private static bool TryMapStrategyAbilityEffects(
         object character,

@@ -218,6 +218,44 @@ public sealed class NetherStrategyEvidenceMapperTests
     }
 
     [Fact]
+    public void Optional_party_ability_graph_failure_preserves_the_core_party_profile()
+    {
+        NetherSnapshot snapshot = Snapshot();
+        const string exactAbilityError =
+            "party-ability-mechanics-unavailable:invalid-strategy-ability-effect:EquipmentAbilityEffectModels";
+        NetherStrategyPartyMember member = new(
+            11,
+            0,
+            NetherPartyPosition.Forward,
+            3,
+            NetherCrestIdentity.Impact,
+            875,
+            true,
+            90,
+            5
+        )
+        {
+            AbilityMechanicsKnown = false,
+            AbilityMechanicsUnknownReason = exactAbilityError,
+        };
+
+        NetherStrategyEvidenceMapResult mapped = NetherStrategyEvidenceMapper.Map(
+            new NetherStrategyEvidenceMapRequest(Identity(snapshot), snapshot)
+            {
+                Party = [member],
+            }
+        );
+
+        Assert.True(mapped.IsMapped, mapped.Detail);
+        Assert.True(mapped.Package!.Party.IsKnown, mapped.Package.Party.UnknownReason);
+        NetherStrategyPartyMember copied = Assert.Single(mapped.Package.Party.Value!.Members);
+        Assert.Equal(member.CharacterId, copied.CharacterId);
+        Assert.Equal(member.PartyPosition, copied.PartyPosition);
+        Assert.False(copied.AbilityMechanicsKnown);
+        Assert.Equal(exactAbilityError, copied.AbilityMechanicsUnknownReason);
+    }
+
+    [Fact]
     public void Runtime_capture_error_survives_exactly_in_only_its_dependent_component()
     {
         // Fresh Project.dll SHA-256 53806a5b...1300: NetherPartyCharacterModel exposes

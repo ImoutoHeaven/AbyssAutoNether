@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AutoNether.Services;
 
@@ -193,6 +194,11 @@ internal sealed record NetherStrategyEvidenceAudit
         NetherResearchTargetState.NotApplicable;
     public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
     public string UnknownReason { get; init; } = string.Empty;
+    public bool PartyEvidenceKnown { get; init; }
+    public string PartyEvidenceDetail { get; init; } = "party-evidence-audit-unavailable";
+    public bool NativeMechanicsEvidenceKnown { get; init; }
+    public string NativeMechanicsEvidenceDetail { get; init; } =
+        "native-mechanics-evidence-audit-unavailable";
     public long OwnerGeneration { get; init; }
     public long EnteredSubsceneGeneration { get; init; }
     public NetherSnapshotFingerprint SnapshotFingerprint { get; init; }
@@ -203,7 +209,9 @@ internal sealed record NetherStrategyEvidenceAudit
         NetherStrategyMode mode,
         NetherCodeFamily primary,
         NetherCodeFamily secondary,
-        NetherStrategyEvidenceComponent<NetherStrategyResearchEvidence> research
+        NetherStrategyEvidenceComponent<NetherStrategyPartyProfile> party,
+        NetherStrategyEvidenceComponent<NetherStrategyResearchEvidence> research,
+        NetherStrategyEvidenceComponent<NetherStrategyNativeMechanicsEvidence> nativeMechanics
     )
     {
         var audit = new NetherStrategyEvidenceAudit
@@ -212,6 +220,15 @@ internal sealed record NetherStrategyEvidenceAudit
             Mode = mode,
             PrimaryResearchFamily = primary,
             SecondaryResearchFamily = secondary,
+            PartyEvidenceKnown = party.IsKnown,
+            PartyEvidenceDetail = DescribePartyEvidence(party),
+            NativeMechanicsEvidenceKnown = nativeMechanics.IsKnown,
+            NativeMechanicsEvidenceDetail = nativeMechanics.IsKnown
+                ? "known:" + (nativeMechanics.Value?.Mechanics.Count ?? 0)
+                : ExactOrFallback(
+                    nativeMechanics.UnknownReason,
+                    "native-mechanics-evidence-unavailable"
+                ),
             OwnerGeneration = identity.ControllerOwnerGeneration,
             EnteredSubsceneGeneration = identity.EnteredSubsceneGeneration,
             SnapshotFingerprint = identity.SnapshotFingerprint,
@@ -260,6 +277,28 @@ internal sealed record NetherStrategyEvidenceAudit
             UnknownReason = objective.UsesConservativePriority ? objective.Detail : string.Empty,
         };
     }
+
+    private static string DescribePartyEvidence(
+        NetherStrategyEvidenceComponent<NetherStrategyPartyProfile> party
+    )
+    {
+        if (!party.IsKnown || party.Value?.Members == null)
+            return ExactOrFallback(party.UnknownReason, "party-evidence-unavailable");
+        NetherStrategyPartyMember[] mechanicsUnknown = party.Value.Members
+            .Where(member => member != null && !member.AbilityMechanicsKnown)
+            .ToArray();
+        if (mechanicsUnknown.Length == 0)
+            return "known-core-and-ability-mechanics:" + party.Value.Members.Count;
+        string firstReason = ExactOrFallback(
+            mechanicsUnknown[0].AbilityMechanicsUnknownReason,
+            "party-ability-mechanics-unavailable"
+        );
+        return "known-core;ability-mechanics-unavailable:"
+            + mechanicsUnknown.Length + ":" + firstReason;
+    }
+
+    private static string ExactOrFallback(string value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value;
 }
 
 /// <summary>
@@ -298,6 +337,23 @@ internal static class NetherStrategyAuditFormatting
             new NetherDetailedAuditField(
                 "strategyUnknownReasonCode",
                 audit?.UnknownReasonCode.ToString() ?? "UnknownEvidence"
+            ),
+            new NetherDetailedAuditField(
+                "partyEvidenceKnown",
+                audit?.PartyEvidenceKnown.ToString() ?? "unknown"
+            ),
+            new NetherDetailedAuditField(
+                "partyEvidenceDetail",
+                audit?.PartyEvidenceDetail ?? "party-evidence-audit-unavailable"
+            ),
+            new NetherDetailedAuditField(
+                "nativeMechanicsEvidenceKnown",
+                audit?.NativeMechanicsEvidenceKnown.ToString() ?? "unknown"
+            ),
+            new NetherDetailedAuditField(
+                "nativeMechanicsEvidenceDetail",
+                audit?.NativeMechanicsEvidenceDetail
+                    ?? "native-mechanics-evidence-audit-unavailable"
             ),
             new NetherDetailedAuditField(
                 "ownerGeneration",

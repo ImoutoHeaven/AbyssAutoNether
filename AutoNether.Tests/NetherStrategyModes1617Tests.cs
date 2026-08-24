@@ -306,6 +306,10 @@ public sealed class NetherStrategyModes1617Tests
         Assert.Contains(fields, field => field.Name == "activeResearchTarget" && field.Value == "Rush");
         Assert.Contains(fields, field => field.Name == "ownerGeneration" && field.Value == "8");
         Assert.Contains(fields, field => field.Name == "enteredSubsceneGeneration" && field.Value == "9");
+        Assert.Contains(fields, field => field.Name == "partyEvidenceKnown");
+        Assert.Contains(fields, field => field.Name == "partyEvidenceDetail");
+        Assert.Contains(fields, field => field.Name == "nativeMechanicsEvidenceKnown");
+        Assert.Contains(fields, field => field.Name == "nativeMechanicsEvidenceDetail");
         Assert.Contains(fields, field => field.Name == "snapshotFingerprint");
 
         string vector = NetherStrategyAuditFormatting.SemanticVector(

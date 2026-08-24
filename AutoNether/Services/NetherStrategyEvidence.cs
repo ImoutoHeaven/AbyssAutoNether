@@ -1508,7 +1508,9 @@ internal static class NetherStrategyEvidenceMapper
                 request.StrategyMode,
                 request.ResearchPrimaryFamily,
                 request.ResearchSecondaryFamily,
-                research
+                party,
+                research,
+                nativeMechanics
             ),
             Server = CopyServer(snapshot),
             Party = party,
