@@ -229,6 +229,38 @@ public class NetherBattleSettlementCoordinatorTests
     }
 
     [Fact]
+    public void Predicted_erosion_decrease_that_matches_the_authoritative_settlement_is_settled()
+    {
+        NetherSnapshot before = BattleSnapshot() with { ErosionPoint = 35 };
+        NetherSnapshot after = Snapshot(NetherSessionStatus.Play, mapId: 2, floorId: 10) with
+        {
+            ErosionPoint = 30,
+        };
+        var driver = new FakeDriver(
+            lifecycle: new[] { NetherNativeActionResult.Completed("battle-clear-parent-terminal") },
+            clearObserved: true,
+            closeObserved: false,
+            appliedSnapshot: after
+        );
+        var coordinator = new NetherBattleSettlementCoordinator(driver, driver, driver);
+
+        Assert.True(coordinator.Begin(
+            Action(projectedMinimum: 30, projectedMaximum: 30, preBattleErosion: 35),
+            before
+        ));
+        coordinator.Pump();
+        coordinator.Pump();
+
+        NetherBattleSettlementStep result = coordinator.Pump();
+
+        Assert.Equal(NetherBattleSettlementStepKind.Settled, result.Kind);
+        Assert.Equal(NetherPauseReason.None, result.PauseReason);
+        Assert.Contains("actual-delta=-5", result.Detail);
+        Assert.Equal(1, driver.GetOnlyBeginCalls);
+        Assert.Equal(0, driver.StartOrMutationCalls);
+    }
+
+    [Fact]
     public void Changed_authoritative_code_hash_is_named_drift_after_get_only_settlement()
     {
         NetherSnapshot before = BattleSnapshot();
@@ -255,7 +287,11 @@ public class NetherBattleSettlementCoordinatorTests
         Assert.Contains("code-hash", result.Detail);
     }
 
-    private static NetherPlannedAction Action(int projectedMinimum = 20) => new(NetherActionKind.BattleSettlement)
+    private static NetherPlannedAction Action(
+        int projectedMinimum = 20,
+        int projectedMaximum = 30,
+        int preBattleErosion = 20
+    ) => new(NetherActionKind.BattleSettlement)
     {
         BattleSettlement = new NetherBattleSettlementContract(
             EntryMapId: 2,
@@ -270,11 +306,11 @@ public class NetherBattleSettlementCoordinatorTests
             EntryProjection = new NetherBattleProjectionPayload(
                 MapId: 2,
                 FloorId: 10,
-                PreBattleErosion: 20,
+                PreBattleErosion: preBattleErosion,
                 FloorMinimumErosion: 0,
                 FloorMaximumErosion: 10,
                 ProjectedMinimumErosion: projectedMinimum,
-                ProjectedMaximumErosion: 30,
+                ProjectedMaximumErosion: projectedMaximum,
                 CodeHash: "active-code-hash",
                 ProjectionIdentity: "battle-2-10"
             ),

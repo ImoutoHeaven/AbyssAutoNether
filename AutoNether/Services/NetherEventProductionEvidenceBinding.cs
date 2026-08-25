@@ -13,11 +13,20 @@ namespace AutoNether.Services;
 /// </summary>
 internal static class NetherEventProductionEvidenceBinding
 {
+    private static readonly NetherErosionPolicy ErosionPolicy = new();
+    private static readonly NetherActiveCodeErosionProjection EmptyActiveCodeErosion = new()
+    {
+        ErosionProjectionKnown = true,
+        CodeHash = "nether-codes:none",
+        ErosionEffects = Array.Empty<NetherCodeEffect>(),
+    };
+
     public static NetherRuntimePopupContext Bind(
         NetherRuntimePopupContext popup,
         NetherStrategyEvidencePackage? package,
         NetherRuntimeInteractivePreEntryInputsResult? interactive,
-        NetherAutoClimbSettings settings
+        NetherAutoClimbSettings settings,
+        NetherActiveCodeErosionProjection? activeCodeErosion = null
     )
     {
         if (popup == null)
@@ -85,7 +94,13 @@ internal static class NetherEventProductionEvidenceBinding
             researchError
         );
         IReadOnlyDictionary<NetherEventCommitmentKey, NetherEventCommitment> commitments =
-            BuildCommitments(boundPopup, package, exactInteractive);
+            BuildCommitments(
+                boundPopup,
+                package,
+                exactInteractive,
+                settings,
+                activeCodeErosion ?? EmptyActiveCodeErosion
+            );
 
         return boundPopup with
         {
@@ -803,19 +818,27 @@ internal static class NetherEventProductionEvidenceBinding
     private static IReadOnlyDictionary<NetherEventCommitmentKey, NetherEventCommitment> BuildCommitments(
         NetherRuntimePopupContext popup,
         NetherStrategyEvidencePackage? package,
-        NetherRuntimeInteractivePreEntryInputsResult? interactive
+        NetherRuntimeInteractivePreEntryInputsResult? interactive,
+        NetherAutoClimbSettings settings,
+        NetherActiveCodeErosionProjection activeCodeErosion
     )
     {
+        var commitments = new Dictionary<NetherEventCommitmentKey, NetherEventCommitment>();
         if (package?.Server == null
             || interactive == null
             || !interactive.IsSuccess
             || interactive.SnapshotFingerprint is not NetherSnapshotFingerprint fingerprint
-            || fingerprint != package.Identity.SnapshotFingerprint)
+            || fingerprint != package.Identity.SnapshotFingerprint
+            || !activeCodeErosion.ErosionProjectionKnown
+            || !NetherBattleRouteProjectionBuilder.TryMapModifiers(
+                activeCodeErosion.ErosionEffects,
+                out IReadOnlyList<NetherErosionModifier>? erosionModifiers,
+                out _
+            ))
         {
-            return new Dictionary<NetherEventCommitmentKey, NetherEventCommitment>();
+            return commitments;
         }
 
-        var commitments = new Dictionary<NetherEventCommitmentKey, NetherEventCommitment>();
         foreach (NetherEventOption option in popup.Options.Where(option => option.RequiresExactBinding))
         {
             if (option.StrategyEvidence?.IsKnown != true
@@ -871,12 +894,22 @@ internal static class NetherEventProductionEvidenceBinding
             {
                 continue;
             }
+            NetherErosionProjection projectedErosion = ErosionPolicy.ProjectEffects(
+                package.Server.ErosionPoint,
+                option.Effects,
+                erosionModifiers!,
+                settings.SoftErosionLimit,
+                isMandatoryBoss: false
+            );
+            if (!projectedErosion.IsAllowed)
+                continue;
+
             NetherEventCommitment commitment = new NetherEventCommitment(
                 projection.EventId,
                 projection.EventPartId,
                 projection.OptionNumber,
                 option.Effects,
-                checked(package.Server.ErosionPoint + projection.ErosionDelta),
+                projectedErosion.ProjectedErosion,
                 projection.HpDelta
             )
             {

@@ -284,6 +284,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private NetherStrategyEvidencePackage? _latestStrategyEvidencePackage;
     private NetherRuntimeInteractivePreEntryInputsResult? _latestInteractivePreEntryInputs;
     private NetherAutoClimbSettings? _latestStrategySettings;
+    private NetherActiveCodeErosionProjection? _latestRouteActiveCodeErosionProjection;
+    private NetherSnapshotFingerprint? _latestRouteActiveCodeErosionFingerprint;
     private IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> _committedEventProcurementByOption =
         new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
     private IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> _pendingEventProcurementByOption =
@@ -349,10 +351,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     public static NetherRuntimeBridge Instance { get; } = new();
 
+    /// <summary>Requires <see cref="_gate"/>; retires the route-scoped code projection.</summary>
+    private void ClearRouteActiveCodeErosionProjectionCore()
+    {
+        _latestRouteActiveCodeErosionProjection = null;
+        _latestRouteActiveCodeErosionFingerprint = null;
+    }
+
     public void BeginRouteReplan(NetherSnapshotFingerprint snapshotFingerprint)
     {
         lock (_gate)
         {
+            ClearRouteActiveCodeErosionProjectionCore();
             _routeOwnedEventProcurementProducer.Clear();
             _committedEventProcurementByOption =
                 new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
@@ -382,6 +392,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _latestStrategyEvidencePackage = null;
                 _latestInteractivePreEntryInputs = null;
                 _latestStrategySettings = null;
+                ClearRouteActiveCodeErosionProjectionCore();
                 _routeOwnedEventProcurementProducer.Clear();
                 _committedEventProcurementByOption =
                     new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
@@ -1279,21 +1290,34 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     /// plus MNetherCodes.  No endpoint or floor action is issued here.
     /// </summary>
     public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(IReadOnlyList<NetherFloorNode> floors) =>
-        TryCaptureRouteSafetyCore(floors, null);
+        TryCaptureRouteSafetyCore(floors, null, null);
 
     public NetherRuntimeRouteSafetyData TryCaptureRouteSafety(NetherSnapshot snapshot)
     {
         if (snapshot == null)
             return UnknownRouteSafety("missing-route-safety-snapshot");
         ObserveAuthoritativeRouteSnapshot(snapshot.Fingerprint);
-        return TryCaptureRouteSafetyCore(snapshot.Floors, snapshot.Fingerprint);
+        return TryCaptureRouteSafetyCore(
+            snapshot.Floors,
+            snapshot.Fingerprint,
+            snapshot.Codes
+        );
     }
 
     private NetherRuntimeRouteSafetyData TryCaptureRouteSafetyCore(
         IReadOnlyList<NetherFloorNode> floors,
-        NetherSnapshotFingerprint? snapshotFingerprint
+        NetherSnapshotFingerprint? snapshotFingerprint,
+        IReadOnlyList<NetherCodeState>? snapshotCodes
     )
     {
+        if (snapshotFingerprint is NetherSnapshotFingerprint captureFingerprint)
+        {
+            lock (_gate)
+            {
+                if (_authoritativeRouteSnapshotFingerprint == captureFingerprint)
+                    ClearRouteActiveCodeErosionProjectionCore();
+            }
+        }
         if (floors == null)
             return UnknownRouteSafety("missing-server-floor-graph");
 
@@ -1339,11 +1363,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     package?.EvidenceAudit
                 );
             }
-            return new NetherRuntimeRouteSafetyData
+            NetherActiveCodeErosionProjection activeCodeErosion =
+                snapshotFingerprint is NetherSnapshotFingerprint activeFingerprint
+                    ? CaptureAndCacheRouteActiveCodeErosionProjection(
+                        activeFingerprint,
+                        snapshotCodes
+                    )
+                    : TryCaptureActiveCodeErosionProjection();
+            NetherRuntimeRouteSafetyData captured = new()
             {
                 FloorBoundsByFloorId = bounds,
                 ActivePartyHp = TryMapRuntimeActivePartyHpSafety(netherModel),
-                ActiveCodeErosion = TryCaptureActiveCodeErosionProjection(),
+                ActiveCodeErosion = activeCodeErosion,
                 EventProcurementCommitments = commitments,
                 RouteIdentity = snapshotFingerprint is NetherSnapshotFingerprint routeFingerprint
                     ? _routeOwnedEventProcurementProducer.IdentityForSnapshot(routeFingerprint)
@@ -1352,6 +1383,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 ResearchIncomplete = researchIncomplete,
                 Detail = string.Empty,
             };
+            return captured;
         }
         catch (Exception ex)
         {
@@ -1584,6 +1616,66 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 "active-code-erosion-extraction-exception:" + ex.GetType().Name
             );
         }
+    }
+
+    private NetherActiveCodeErosionProjection CaptureAndCacheRouteActiveCodeErosionProjection(
+        NetherSnapshotFingerprint snapshotFingerprint,
+        IReadOnlyList<NetherCodeState>? snapshotCodes
+    )
+    {
+        NetherActiveCodeErosionProjection projection = TryCaptureActiveCodeErosionProjection();
+        if (projection.ErosionProjectionKnown
+            && !HasMatchingActiveCodePortfolio(snapshotCodes, projection.Entries))
+        {
+            projection = NetherActiveCodeErosionProjectionMapper.Unknown(
+                "route-active-code-erosion-snapshot-portfolio-mismatch"
+            );
+        }
+
+        lock (_gate)
+        {
+            if (_authoritativeRouteSnapshotFingerprint == snapshotFingerprint)
+            {
+                _latestRouteActiveCodeErosionProjection = projection;
+                _latestRouteActiveCodeErosionFingerprint = snapshotFingerprint;
+            }
+        }
+        return projection;
+    }
+
+    private static bool HasMatchingActiveCodePortfolio(
+        IReadOnlyList<NetherCodeState>? snapshotCodes,
+        IReadOnlyList<NetherActiveCodeErosionEntry>? activeEntries
+    )
+    {
+        if (snapshotCodes == null || activeEntries == null
+            || snapshotCodes.Count != activeEntries.Count
+            || snapshotCodes.Any(code => code == null))
+        {
+            return false;
+        }
+
+        NetherCodeState[] expected = snapshotCodes.OrderBy(code => code.CodeId).ToArray();
+        NetherActiveCodeErosionEntry[] actual = activeEntries
+            .OrderBy(entry => entry.CodeId)
+            .ToArray();
+        for (int index = 0; index < expected.Length; index++)
+        {
+            NetherCodeState code = expected[index];
+            NetherActiveCodeErosionEntry entry = actual[index];
+            if (code == null
+                || code.CodeId != entry.CodeId
+                || code.PossessionAmount != entry.PossessionAmount
+                || (int)code.Category != entry.Category
+                || (int)code.MasterEffectType != entry.EffectType
+                || code.EffectParameter1 != entry.EffectParameter1
+                || code.EffectParameter2 != entry.EffectParameter2
+                || code.EffectParameter3 != entry.EffectParameter3)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static NetherRuntimeRouteSafetyData UnknownRouteSafety(string detail) => new()
@@ -2244,6 +2336,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             bool requireCompleteRecoveryBranchSafety;
             IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryBranchSafetyByPartId;
             NetherRouteBranchIdentity? routeBranchIdentity;
+            NetherActiveCodeErosionProjection? routeActiveCodeErosion;
             lock (_gate)
             {
                 strategyPackage = _latestStrategyEvidencePackage;
@@ -2258,6 +2351,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 routeBranchIdentity =
                     authoritativeSnapshotFingerprint is NetherSnapshotFingerprint routeFingerprint
                         ? _routeOwnedEventProcurementProducer.IdentityForSnapshot(routeFingerprint)
+                        : null;
+                routeActiveCodeErosion =
+                    authoritativeSnapshotFingerprint is NetherSnapshotFingerprint erosionFingerprint
+                    && _latestRouteActiveCodeErosionFingerprint == erosionFingerprint
+                        ? _latestRouteActiveCodeErosionProjection
                         : null;
             }
             if (authoritativeSnapshotFingerprint is not NetherSnapshotFingerprint currentPackageFingerprint
@@ -2275,6 +2373,16 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     mapped.Popup,
                     rankFiveKeyProcurement
                 ).ShopProcurementCommitment;
+            NetherActiveCodeErosionProjection? activeEventCodeErosion = context.Kind is (
+                NetherRuntimePopupKind.Event
+                or NetherRuntimePopupKind.Recovery
+                or NetherRuntimePopupKind.Treasure
+            )
+                ? routeActiveCodeErosion
+                    ?? NetherActiveCodeErosionProjectionMapper.Unknown(
+                        "route-active-code-erosion-projection-unavailable"
+                    )
+                : null;
             context = NetherEventProductionEvidenceBinding.Bind(
                 context with
                 {
@@ -2290,7 +2398,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 },
                 strategyPackage,
                 interactiveInputs,
-                strategySettings ?? new NetherAutoClimbSettings()
+                strategySettings ?? new NetherAutoClimbSettings(),
+                activeEventCodeErosion
             );
             IReadOnlyDictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget> popupCommitments =
                 NetherRouteOwnedEventProcurementProducer.FromCommitments(
@@ -2346,6 +2455,15 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 "strategy-evidence-owner-not-fully-entered"
             );
         }
+
+        // Stable-boundary strategy capture precedes foreground Event dispatch. Refresh the same
+        // snapshot-scoped code projection here so enabling F12 on an already-open Event retains
+        // exact Safe/Risk erosion semantics without making popup mapping load native assemblies.
+        ObserveAuthoritativeRouteSnapshot(snapshot.Fingerprint);
+        _ = CaptureAndCacheRouteActiveCodeErosionProjection(
+            snapshot.Fingerprint,
+            snapshot.Codes
+        );
 
         NetherStrategyEvidenceMapRequest request;
         try
@@ -4593,6 +4711,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _floorSelectionController = null;
             _latestStrategyEvidencePackage = null;
             _latestInteractivePreEntryInputs = null;
+            ClearRouteActiveCodeErosionProjectionCore();
             _typedSemanticProviderFactory = null;
             _nativeEventPopupCaptureFactory = null;
             _managedShopPopupCaptureFactory = null;
@@ -4788,6 +4907,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _latestStrategyEvidencePackage = null;
         _latestInteractivePreEntryInputs = null;
         _latestStrategySettings = null;
+        ClearRouteActiveCodeErosionProjectionCore();
         _committedEventProcurementByOption =
             new Dictionary<NetherInteractiveEventOptionKey, NetherEventProcurementBudget>();
         _pendingEventProcurementByOption =
@@ -4850,6 +4970,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _latestStrategyEvidencePackage = null;
                 _latestInteractivePreEntryInputs = null;
                 _latestStrategySettings = null;
+                ClearRouteActiveCodeErosionProjectionCore();
                 _battleResultPopupReadiness.Clear();
                 _sceneObservedRuntimeGeneration = 0;
                 _sceneEnteredRuntimeGeneration = 0;

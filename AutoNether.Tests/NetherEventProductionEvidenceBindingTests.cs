@@ -298,6 +298,103 @@ public sealed class NetherEventProductionEvidenceBindingTests
         Assert.True(bound.Options[0].StrategyEvidence!.IsKnown);
     }
 
+    [Theory]
+    [InlineData(
+        (int)NetherEffectKind.ErosionHeal,
+        20,
+        (int)NetherCodeEffectKind.ErosionAdditionDown,
+        -20,
+        0
+    )]
+    [InlineData(
+        (int)NetherEffectKind.Erosion,
+        10,
+        (int)NetherCodeEffectKind.ErosionAdditionUp,
+        10,
+        40
+    )]
+    public void Production_binding_and_dispatch_share_all_active_code_erosion_additions(
+        int rawEventEffectKind,
+        int eventAmount,
+        int rawModifierKind,
+        int rawErosionDelta,
+        int expectedProjectedErosion
+    )
+    {
+        // Current-game 2026-08-25 evidence: Event 42 part 20112 heals 20 erosion, while
+        // the live floor-24 popup retains that exact part until OnPanelSelected/ExecuteEvent.
+        // Category threshold and per-code modifiers can contribute more than one active row.
+        NetherEventOption option = new(
+            2,
+            [new NetherEffect((NetherEffectKind)rawEventEffectKind, eventAmount)]
+        )
+        {
+            EventId = 42,
+            EventPartId = 20112,
+            FloorId = 106,
+            NodeId = 107374182405,
+            RequiresExactBinding = true,
+        };
+        NetherSnapshot snapshot = Snapshot() with
+        {
+            CurrentFloorId = option.FloorId,
+            CurrentNodeId = option.NodeId,
+            ErosionPoint = 25,
+            NetherGold = 295,
+        };
+        NetherAutoClimbSettings settings = new()
+        {
+            StrategyMode = NetherStrategyMode.Equipment,
+            SoftErosionLimit = 90,
+        };
+        NetherCodeEffectKind modifierKind = (NetherCodeEffectKind)rawModifierKind;
+        NetherActiveCodeErosionProjection activeCodeErosion = new()
+        {
+            ErosionProjectionKnown = true,
+            CodeHash = "active-event-code-erosion:" + rawModifierKind,
+            ErosionEffects =
+            [
+                new NetherCodeEffect(30024, modifierKind, 2),
+                new NetherCodeEffect(30025, modifierKind, 3),
+            ],
+        };
+        NetherRuntimePopupContext popup = new()
+        {
+            Kind = NetherRuntimePopupKind.Event,
+            RawFloorType = (int)NetherFloorNodeType.Event,
+            TargetCharacterId = 101,
+            FloorId = option.FloorId,
+            NodeId = option.NodeId,
+            RouteOwnedNodeId = option.NodeId,
+            Options = [option],
+        };
+
+        NetherRuntimePopupContext bound = NetherEventProductionEvidenceBinding.Bind(
+            popup,
+            PackageWithOptions(snapshot, [], [option]),
+            InteractiveOptions(
+                snapshot,
+                [option],
+                option,
+                erosionDelta: rawErosionDelta
+            ),
+            settings,
+            activeCodeErosion
+        );
+        NetherPopupDispatchDecision dispatch = NetherPopupDispatchPolicy.Decide(
+            snapshot,
+            bound,
+            settings,
+            activeCodeErosion
+        );
+
+        NetherEventCommitment commitment = Assert.Single(bound.ExpectedEventCommitments).Value;
+        Assert.Equal(expectedProjectedErosion, commitment.ProjectedErosion);
+        Assert.Equal(NetherPopupDispatchKind.NativeAction, dispatch.Kind);
+        Assert.Equal(expectedProjectedErosion, dispatch.ProjectedErosion);
+        Assert.Equal(expectedProjectedErosion, dispatch.Action.EventCommitment!.ProjectedErosion);
+    }
+
     [Fact]
     public void Equipment_dispatch_prefers_gold_reward_that_crosses_its_committed_threshold_over_code_offer()
     {
@@ -1638,13 +1735,15 @@ public sealed class NetherEventProductionEvidenceBindingTests
     private static NetherRuntimeInteractivePreEntryInputsResult InteractiveOptions(
         NetherSnapshot snapshot,
         IReadOnlyList<NetherEventOption> options,
-        NetherEventOption selected
+        NetherEventOption selected,
+        int erosionDelta = 0,
+        int hpDelta = 0
     )
     {
         var projection = new NetherInteractiveOptionProjection(
             selected.OptionNumber,
-            ErosionDelta: 0,
-            HpDelta: 0,
+            ErosionDelta: erosionDelta,
+            HpDelta: hpDelta,
             ExpectedEffects: selected.Effects
         )
         {

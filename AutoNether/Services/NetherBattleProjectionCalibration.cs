@@ -71,8 +71,21 @@ internal sealed class NetherBattleProjectionCalibration
         }
         if (after.ErosionPoint < 0)
             return Unknown("battle-authoritative-erosion-invalid");
-        if (actualDelta < 0)
-            return Drift("battle-actual-erosion-decreased:" + actualDelta.ToString(CultureInfo.InvariantCulture));
+        // A decrease is valid when the immutable entry projection explicitly predicted it
+        // (for example, an active ErosionAdditionDown/Safe code).  Only fail closed when the
+        // authoritative value falls below that predicted range; otherwise the exact native
+        // settlement is the new baseline just like any other in-range result.
+        if (actualDelta < 0 && after.ErosionPoint < projection.ProjectedMinimumErosion)
+        {
+            return Drift(
+                "battle-actual-erosion-decreased-below-projection:actual="
+                    + after.ErosionPoint.ToString(CultureInfo.InvariantCulture)
+                    + ":minimum="
+                    + projection.ProjectedMinimumErosion.ToString(CultureInfo.InvariantCulture)
+                    + ":actual-delta="
+                    + actualDelta.ToString(CultureInfo.InvariantCulture)
+            );
+        }
         // The upper bound is the fail-closed safety boundary.  A lower, non-decreasing
         // snapshot can be the authoritative pre-offer state; the code workflow rebases again.
         if (after.ErosionPoint > projection.ProjectedMaximumErosion)

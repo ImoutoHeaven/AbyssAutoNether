@@ -156,28 +156,45 @@ public class NetherActiveCodeErosionProjectionMapperTests
         Assert.Equal("nether-codes:none", projection.CodeHash);
     }
 
-    [Fact]
-    public void ActiveCategorySkill_ProjectsItsErosionModifierAtTheExactCodeThreshold()
+    [Theory]
+    [InlineData(
+        (int)NetherCodeCategory.Safe,
+        7,
+        30000,
+        (int)NetherCodeEffectKind.ErosionAdditionDown
+    )]
+    [InlineData(
+        (int)NetherCodeCategory.Risk,
+        6,
+        40000,
+        (int)NetherCodeEffectKind.ErosionAdditionUp
+    )]
+    public void ActiveCategorySkill_ProjectsItsErosionModifierAtTheExactCodeThreshold(
+        int category,
+        int effectType,
+        long skillId,
+        int expectedEffectKind
+    )
     {
         NetherPossessionCodeErosionInput[] possessions = Enumerable.Range(1, 5)
             .Select(id => Possession(id))
             .ToArray();
         NetherCodeErosionMasterInput[] masters = Enumerable.Range(1, 5)
-            .Select(id => CategorizedMaster(id, category: 3))
+            .Select(id => CategorizedMaster(id, category))
             .ToArray();
 
         NetherActiveCodeErosionProjection projection = new NetherActiveCodeErosionProjectionMapper().Map(
             possessions,
             masters,
-            new[] { CategorySkill(30000, counter: 5, category: 3, effectType: 7, parameter1: 5) },
+            new[] { CategorySkill(skillId, counter: 5, category, effectType, parameter1: 5) },
             activeNetherId: 1
         );
 
         Assert.True(projection.ErosionProjectionKnown, projection.Detail);
         Assert.True(Assert.Single(projection.CategorySkillEntries).IsActive);
         NetherCodeEffect effect = Assert.Single(projection.ErosionEffects);
-        Assert.Equal(30000, effect.CodeId);
-        Assert.Equal(NetherCodeEffectKind.ErosionAdditionDown, effect.EffectKind);
+        Assert.Equal(skillId, effect.CodeId);
+        Assert.Equal((NetherCodeEffectKind)expectedEffectKind, effect.EffectKind);
         Assert.Equal(5, effect.Amount);
     }
 
