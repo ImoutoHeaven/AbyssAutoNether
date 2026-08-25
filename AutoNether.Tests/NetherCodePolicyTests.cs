@@ -10,9 +10,10 @@ public class NetherCodePolicyTests
     [Fact]
     public void Mixed_back_row_rejects_uniform_crest_grant_by_mechanics_not_identifier()
     {
-        // Fresh Project.dll 53806a5b...1300 / GameAssembly.dll 573fa800...c1fb:
-        // PartyPositionType.Back=2 and ManaType.Passion/Impact=2/3. The candidate identifier is
-        // deliberately unrelated to current IDs; the typed native grant relationship is authority.
+        // Fresh Project.dll 033a5d1e...75f4 / GameAssembly.dll f2ad9478...767:
+        // CharacterPartyPositionFlag.Back=4 and the native scope predicate applies that exact bit
+        // to each member. The candidate identifier is deliberately unrelated to current IDs; the
+        // typed native grant relationship is authority.
         NetherCodeCandidate candidate = Candidate(990001, NetherCodeFamily.Impact);
         NetherCodePolicyEvidence uniformGrant = Evidence(
             candidate.CodeId,
@@ -38,6 +39,49 @@ public class NetherCodePolicyTests
 
         Assert.Equal(NetherCodeDecisionKind.Keep, rejected.Kind);
         Assert.Equal(NetherCodeDecisionKind.Select, accepted.Kind);
+    }
+
+    [Theory]
+    [InlineData((int)NetherCodeTargetRow.Forward, (int)NetherCodeDecisionKind.Select)]
+    [InlineData((int)NetherCodeTargetRow.ForwardAndAssist, (int)NetherCodeDecisionKind.Select)]
+    [InlineData((int)NetherCodeTargetRow.Back, (int)NetherCodeDecisionKind.Keep)]
+    [InlineData((int)NetherCodeTargetRow.BackAndAssist, (int)NetherCodeDecisionKind.Keep)]
+    [InlineData((int)NetherCodeTargetRow.All, (int)NetherCodeDecisionKind.Keep)]
+    public void Equipment_uniform_crest_gate_uses_only_exact_native_scope_recipients(
+        int targetRowRaw,
+        int expectedRaw
+    )
+    {
+        NetherCodeTargetRow targetRow = (NetherCodeTargetRow)targetRowRaw;
+        NetherCodeCandidate candidate = Candidate(
+            990100 + targetRowRaw,
+            NetherCodeFamily.Impact
+        );
+        NetherCodePolicyEvidence evidence = Evidence(
+            candidate.CodeId,
+            new NetherCodeHardEligibilityEvidence
+            {
+                IsKnown = true,
+                UniformCrestFamily = NetherCodeFamily.Impact,
+                UniformCrestTargetRow = targetRow,
+            },
+            Party(
+                Member(1, partyIndex: 0, position: 1, manaType: 3),
+                Member(2, partyIndex: 1, position: 2, manaType: 3),
+                Member(3, partyIndex: 2, position: 2, manaType: 2),
+                Member(4, partyIndex: 3, position: 3, manaType: 3)
+            )
+        );
+
+        NetherCodeDecision decision = Decide(Portfolio(), evidence, candidate);
+
+        Assert.Equal((NetherCodeDecisionKind)expectedRaw, decision.Kind);
+        Assert.Equal(
+            decision.Kind == NetherCodeDecisionKind.Select
+                ? NetherCodeCandidateHardGate.None
+                : NetherCodeCandidateHardGate.CrestCompatibility,
+            Assert.Single(decision.CandidateAudits).FirstFailingHardGate
+        );
     }
 
     [Fact]
@@ -1392,7 +1436,7 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
-    public void Research_capacity_replacement_preserves_primary_before_nonconfigured_family()
+    public void Research_capacity_saturation_never_replaces_a_held_code_for_primary()
     {
         NetherCodeState rush = Code(10, NetherCodeFamily.Rush);
         NetherCodeState impact = Code(20, NetherCodeFamily.Impact);
@@ -1421,8 +1465,8 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(impact.CodeId, decision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]
@@ -1608,7 +1652,7 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
-    public void Research_capacity_removes_hard_excluded_opposed_code_before_ordinary_non_target_code()
+    public void Research_capacity_saturation_does_not_replace_even_a_hard_excluded_opposed_code()
     {
         NetherCodeState active = Code(992020, NetherCodeFamily.Rush);
         NetherCodeState hardOpposed = Code(992021, NetherCodeFamily.Impact);
@@ -1638,12 +1682,12 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(hardOpposed.CodeId, decision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]
-    public void Research_removes_a_hard_excluded_nonconfigured_family_before_accepting_primary()
+    public void Research_capacity_saturation_does_not_replace_a_hard_excluded_nonconfigured_family()
     {
         NetherCodeState active = Code(992024, NetherCodeFamily.Rush);
         NetherCodeState completedHardExcluded = Code(992025, NetherCodeFamily.Safe);
@@ -1675,12 +1719,12 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(completedHardExcluded.CodeId, decision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]
-    public void Research_replaces_all_opposing_families_in_both_orientations()
+    public void Research_capacity_saturation_does_not_replace_opposing_families_in_either_orientation()
     {
         NetherCodeState impact = Code(992027, NetherCodeFamily.Impact);
         NetherCodeCandidate rushOffer = Candidate(992028, NetherCodeFamily.Rush);
@@ -1726,14 +1770,14 @@ public class NetherCodePolicyTests
             impactEvidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, rushDecision.Kind);
-        Assert.Equal(impact.CodeId, rushDecision.RemoveCodeId);
-        Assert.Equal(NetherCodeDecisionKind.Select, impactDecision.Kind);
-        Assert.Equal(rush.CodeId, impactDecision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, rushDecision.Kind);
+        Assert.Equal(0, rushDecision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, impactDecision.Kind);
+        Assert.Equal(0, impactDecision.RemoveCodeId);
     }
 
     [Fact]
-    public void Research_capacity_replacement_preserves_primary_before_secondary_without_equipment_swap_evidence()
+    public void Research_capacity_saturation_does_not_replace_secondary_for_primary()
     {
         NetherCodeState active = Code(992030, NetherCodeFamily.Rush);
         NetherCodeState completed = Code(992031, NetherCodeFamily.Safe);
@@ -1765,8 +1809,8 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(completed.CodeId, decision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]
@@ -1805,7 +1849,7 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
-    public void Research_selects_secondary_immediately_and_uses_deterministic_capacity_replacement_rush_to_impact()
+    public void Research_full_secondary_portfolio_keeps_without_replacement_rush_to_impact()
     {
         NetherCodeDecision first = SecondaryFallbackDecision(
             NetherCodeFamily.Rush,
@@ -1823,19 +1867,19 @@ public class NetherCodePolicyTests
             reloadCount: 0
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, first.Kind);
-        Assert.Equal(NetherCodeDecisionKind.Select, second.Kind);
-        Assert.Equal(NetherCodeDecisionKind.Select, exhausted.Kind);
-        Assert.Equal(993201, first.RemoveCodeId);
-        Assert.Equal(993201, second.RemoveCodeId);
-        Assert.Equal(993201, exhausted.RemoveCodeId);
-        Assert.Equal(993203, first.SelectedCodeId);
-        Assert.Equal(993203, second.SelectedCodeId);
-        Assert.Equal(993203, exhausted.SelectedCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, first.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, second.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, exhausted.Kind);
+        Assert.Equal(0, first.RemoveCodeId);
+        Assert.Equal(0, second.RemoveCodeId);
+        Assert.Equal(0, exhausted.RemoveCodeId);
+        Assert.Equal(0, first.SelectedCodeId);
+        Assert.Equal(0, second.SelectedCodeId);
+        Assert.Equal(0, exhausted.SelectedCodeId);
     }
 
     [Fact]
-    public void Research_selects_secondary_immediately_and_uses_deterministic_capacity_replacement_impact_to_rush()
+    public void Research_full_secondary_portfolio_keeps_without_replacement_impact_to_rush()
     {
         NetherCodeDecision first = SecondaryFallbackDecision(
             NetherCodeFamily.Impact,
@@ -1853,19 +1897,19 @@ public class NetherCodePolicyTests
             reloadCount: 0
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, first.Kind);
-        Assert.Equal(NetherCodeDecisionKind.Select, second.Kind);
-        Assert.Equal(NetherCodeDecisionKind.Select, exhausted.Kind);
-        Assert.Equal(993301, first.RemoveCodeId);
-        Assert.Equal(993301, second.RemoveCodeId);
-        Assert.Equal(993301, exhausted.RemoveCodeId);
-        Assert.Equal(993303, first.SelectedCodeId);
-        Assert.Equal(993303, second.SelectedCodeId);
-        Assert.Equal(993303, exhausted.SelectedCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, first.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, second.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, exhausted.Kind);
+        Assert.Equal(0, first.RemoveCodeId);
+        Assert.Equal(0, second.RemoveCodeId);
+        Assert.Equal(0, exhausted.RemoveCodeId);
+        Assert.Equal(0, first.SelectedCodeId);
+        Assert.Equal(0, second.SelectedCodeId);
+        Assert.Equal(0, exhausted.SelectedCodeId);
     }
 
     [Fact]
-    public void Research_secondary_target_propagates_through_mixed_portfolio_replacement_both_orientations()
+    public void Research_capacity_saturation_keeps_mixed_and_same_family_portfolios_in_both_orientations()
     {
         foreach ((NetherCodeFamily primary, NetherCodeFamily secondary, long baseId) in new[]
         {
@@ -1907,23 +1951,23 @@ public class NetherCodePolicyTests
                 evidence
             );
 
-            Assert.Equal(NetherCodeDecisionKind.Select, mixed.Kind);
-            Assert.Equal(secondaryOffer.CodeId, mixed.SelectedCodeId);
-            Assert.Equal(hardExcludedPrimary.CodeId, mixed.RemoveCodeId);
+            Assert.Equal(NetherCodeDecisionKind.Keep, mixed.Kind);
+            Assert.Equal(0, mixed.SelectedCodeId);
+            Assert.Equal(0, mixed.RemoveCodeId);
 
             NetherCodeDecision sameFamily = SecondaryFallbackDecision(
                 primary,
                 secondary,
                 reloadCount: 0
             );
-            Assert.Equal(NetherCodeDecisionKind.Select, sameFamily.Kind);
-            Assert.Equal(baseId == 993701L ? 993201 : 993301, sameFamily.RemoveCodeId);
-            Assert.Equal(baseId == 993701L ? 993203 : 993303, sameFamily.SelectedCodeId);
+            Assert.Equal(NetherCodeDecisionKind.Keep, sameFamily.Kind);
+            Assert.Equal(0, sameFamily.RemoveCodeId);
+            Assert.Equal(0, sameFamily.SelectedCodeId);
         }
     }
 
     [Fact]
-    public void Research_hard_excluded_primary_code_is_removed_before_other_primary_capacity_entries()
+    public void Research_capacity_saturation_does_not_replace_hard_excluded_primary_entries()
     {
         NetherCodeState hardExcludedActive = Code(993401, NetherCodeFamily.Rush);
         NetherCodeState ordinary = Code(993402, NetherCodeFamily.Safe);
@@ -1951,12 +1995,12 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(hardExcludedActive.CodeId, decision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]
-    public void Research_hard_excluded_secondary_code_is_removed_before_other_secondary_capacity_entries()
+    public void Research_capacity_saturation_does_not_replace_hard_excluded_secondary_entries()
     {
         NetherCodeState hardExcludedSecondary = Code(993501, NetherCodeFamily.Impact);
         NetherCodeState ordinary = Code(993502, NetherCodeFamily.Safe);
@@ -1989,12 +2033,12 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(hardExcludedSecondary.CodeId, decision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]
-    public void Research_nonexcluded_primary_code_is_preserved_before_nonconfigured_family()
+    public void Research_capacity_saturation_does_not_replace_a_nonconfigured_family()
     {
         NetherCodeState active = Code(993601, NetherCodeFamily.Rush);
         NetherCodeState ordinary = Code(993602, NetherCodeFamily.Safe);
@@ -2021,8 +2065,8 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
-        Assert.Equal(ordinary.CodeId, decision.RemoveCodeId);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(0, decision.RemoveCodeId);
     }
 
     [Fact]

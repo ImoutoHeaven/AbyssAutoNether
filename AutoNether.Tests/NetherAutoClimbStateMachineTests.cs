@@ -173,6 +173,24 @@ public class NetherAutoClimbStateMachineTests
     }
 
     [Fact]
+    public void Prior_finish_evidence_retires_when_settlement_rewards_change_ticket_balance_before_the_new_run()
+    {
+        NetherAutoClimbStateMachine machine = DisabledMachineWithPendingFinish(
+            out NetherSnapshot finished,
+            finishedTicketCount: 5
+        );
+        NetherSnapshot freshRun = PristineNewRunAfter(finished) with { TicketCount = 14 };
+
+        Assert.True(machine.TryRetireFinishEvidenceForNewRun(freshRun));
+
+        Assert.False(machine.IsEnabled);
+        Assert.Equal(NetherAutoClimbPhase.Disabled, machine.Phase);
+        Assert.Null(machine.PendingAction);
+        Assert.Null(machine.PreActionSnapshot);
+        Assert.Equal("prior-finish-retired-at-authoritative-new-run", machine.PauseDetail);
+    }
+
+    [Fact]
     public void Prior_finish_evidence_survives_every_incomplete_new_run_snapshot_contract()
     {
         NetherAutoClimbStateMachine machine = DisabledMachineWithPendingFinish(out NetherSnapshot finished);
@@ -185,7 +203,6 @@ public class NetherAutoClimbStateMachineTests
             freshRun with { CurrentNodeId = 0 },
             freshRun with { Floors = System.Array.Empty<NetherFloorNode>() },
             freshRun with { ErosionPoint = 1 },
-            freshRun with { TicketCount = finished.TicketCount },
             freshRun with { MapHash = finished.MapHash },
         };
 
@@ -568,7 +585,8 @@ public class NetherAutoClimbStateMachineTests
     }
 
     private static NetherAutoClimbStateMachine DisabledMachineWithPendingFinish(
-        out NetherSnapshot finished
+        out NetherSnapshot finished,
+        int finishedTicketCount = 2
     )
     {
         finished = new NetherSnapshot
@@ -581,7 +599,7 @@ public class NetherAutoClimbStateMachineTests
             FloorLevel = 100,
             FloorIndex = 10,
             ErosionPoint = 30,
-            TicketCount = 2,
+            TicketCount = finishedTicketCount,
             Floors = new[]
             {
                 new NetherFloorNode(474, 100, 10, NetherFloorNodeType.Boss)

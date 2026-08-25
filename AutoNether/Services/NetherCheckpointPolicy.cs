@@ -75,6 +75,16 @@ internal sealed class NetherCheckpointPolicy
         {
             if (snapshot.FloorLevel >= target || snapshot.TicketCount < 1)
                 return new NetherCheckpointDecision { Kind = NetherCheckpointDecisionKind.FinishNormally, EffectiveMaxDepth = target };
+            if (settings.StrategyMode == NetherStrategyMode.Research
+                && IsCodeCapacitySaturated(snapshot))
+            {
+                return new NetherCheckpointDecision
+                {
+                    Kind = NetherCheckpointDecisionKind.FinishNormally,
+                    EffectiveMaxDepth = target,
+                    Detail = "research-code-capacity-saturated-next-boss-settlement",
+                };
+            }
             return new NetherCheckpointDecision
             {
                 Kind = NetherCheckpointDecisionKind.ContinueOneTicket,
@@ -101,6 +111,11 @@ internal sealed class NetherCheckpointPolicy
 
         return new NetherCheckpointDecision { Kind = NetherCheckpointDecisionKind.None, EffectiveMaxDepth = target };
     }
+
+    private static bool IsCodeCapacitySaturated(NetherSnapshot snapshot) =>
+        snapshot.CodeCapacity > 0
+        && snapshot.Codes != null
+        && snapshot.Codes.Count == snapshot.CodeCapacity;
 
     public bool CanEnterFloor(NetherSnapshot snapshot, NetherAutoClimbSettings settings, int floorLevel)
     {

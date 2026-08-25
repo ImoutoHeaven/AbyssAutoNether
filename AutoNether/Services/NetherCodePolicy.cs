@@ -313,12 +313,20 @@ internal sealed class NetherCodePolicy
         {
             NetherCodeCandidateAudit[] researchAudits = CreateResearchCandidateAudits(
                 uniqueCandidates,
-                settings
+                settings,
+                evidence
             );
+            HashSet<long> researchEligibleCodeIds = researchAudits
+                .Where(audit => audit.IsEligible)
+                .Select(audit => audit.CodeId)
+                .ToHashSet();
+            NetherCodeCandidate[] researchEligible = uniqueCandidates
+                .Where(candidate => researchEligibleCodeIds.Contains(candidate.CodeId))
+                .ToArray();
             NetherCodeDecision researchDecision = AttachCandidateAudits(
                 DecideResearch(
                     portfolio,
-                    uniqueCandidates,
+                    researchEligible,
                     settings,
                     evidence,
                     lane
@@ -626,27 +634,107 @@ internal sealed class NetherCodePolicy
 
     private static NetherCodeCandidateAudit[] CreateResearchCandidateAudits(
         IReadOnlyList<NetherCodeCandidate> candidates,
-        NetherAutoClimbSettings settings
+        NetherAutoClimbSettings settings,
+        NetherCodePolicyEvidence evidence
     ) => candidates
-        .Select(candidate => candidate.Family == settings.ResearchPrimaryFamily
+        .Select(candidate => CreateResearchCandidateAudit(candidate, settings, evidence))
+        .ToArray();
+
+    private static NetherCodeCandidateAudit CreateResearchCandidateAudit(
+        NetherCodeCandidate candidate,
+        NetherAutoClimbSettings settings,
+        NetherCodePolicyEvidence evidence
+    )
+    {
+        bool isPrimary = candidate.Family == settings.ResearchPrimaryFamily;
+        bool isSecondary = settings.ResearchSecondaryFamily != NetherCodeFamily.Unknown
+            && candidate.Family == settings.ResearchSecondaryFamily;
+        if (!isPrimary && !isSecondary)
+        {
+            return new NetherCodeCandidateAudit(
+                candidate.CodeId,
+                NetherCodeCandidateHardGate.ResearchTarget,
+                "research-nonconfigured-family"
+            );
+        }
+
+        string familyDetail = isPrimary
+            ? "research-primary-family-candidate"
+            : "research-secondary-family-candidate";
+        if (evidence.MechanicsByCodeId == null
+            || !evidence.MechanicsByCodeId.TryGetValue(
+                candidate.CodeId,
+                out NetherCodeHardEligibilityEvidence? mechanic
+            )
+            || mechanic == null)
+        {
+            // Research is deliberately family-driven. Missing general combat-value evidence does
+            // not block a configured family; only a positively identified uniform-crest grant
+            // activates the mixed-party safety gate below.
+            return new NetherCodeCandidateAudit(
+                candidate.CodeId,
+                NetherCodeCandidateHardGate.None,
+                familyDetail
+            );
+        }
+
+        bool hasUniformCrestGrant = mechanic.UniformCrestTargetRow != NetherCodeTargetRow.None
+            || mechanic.UniformCrestFamily is NetherCodeFamily.Rush or NetherCodeFamily.Impact;
+        if (!hasUniformCrestGrant)
+        {
+            return new NetherCodeCandidateAudit(
+                candidate.CodeId,
+                NetherCodeCandidateHardGate.None,
+                familyDetail
+            );
+        }
+
+        if (mechanic.UniformCrestFamily is not (NetherCodeFamily.Rush or NetherCodeFamily.Impact)
+            || !NetherCodeTargetRowRules.IsKnown(mechanic.UniformCrestTargetRow)
+            || evidence.ActiveParty == null)
+        {
+            return new NetherCodeCandidateAudit(
+                candidate.CodeId,
+                NetherCodeCandidateHardGate.CrestCompatibility,
+                "research-uniform-crest-evidence-unavailable"
+            )
+            {
+                UnknownReasonCode = NetherStrategyUnknownReasonCode.CrestEvidenceUnavailable,
+            };
+        }
+
+        NetherCrestIdentity requiredCrest = CrestForFamily(mechanic.UniformCrestFamily);
+        NetherStrategyPartyMember[] recipients = evidence.ActiveParty
+            .Where(member => member != null && member.IsAlive)
+            .Where(member => NetherCodeTargetRowRules.Matches(
+                mechanic.UniformCrestTargetRow,
+                PartyPositionOf(member)
+            ))
+            .ToArray();
+        if (requiredCrest == NetherCrestIdentity.Unknown || recipients.Length == 0)
+        {
+            return new NetherCodeCandidateAudit(
+                candidate.CodeId,
+                NetherCodeCandidateHardGate.CrestCompatibility,
+                "research-uniform-crest-recipient-evidence-unavailable"
+            )
+            {
+                UnknownReasonCode = NetherStrategyUnknownReasonCode.CrestEvidenceUnavailable,
+            };
+        }
+
+        return recipients.All(member => CrestOf(member) == requiredCrest)
             ? new NetherCodeCandidateAudit(
                 candidate.CodeId,
                 NetherCodeCandidateHardGate.None,
-                "research-primary-family-candidate"
+                familyDetail + ";uniform-crest-scope-compatible"
             )
-            : settings.ResearchSecondaryFamily != NetherCodeFamily.Unknown
-                && candidate.Family == settings.ResearchSecondaryFamily
-                ? new NetherCodeCandidateAudit(
-                    candidate.CodeId,
-                    NetherCodeCandidateHardGate.None,
-                    "research-secondary-family-candidate"
-                )
-                : new NetherCodeCandidateAudit(
-                    candidate.CodeId,
-                    NetherCodeCandidateHardGate.ResearchTarget,
-                    "research-nonconfigured-family"
-                ))
-        .ToArray();
+            : new NetherCodeCandidateAudit(
+                candidate.CodeId,
+                NetherCodeCandidateHardGate.CrestCompatibility,
+                "research-uniform-crest-scope-incompatible"
+            );
+    }
 
     private static NetherCodeCandidateAudit[] CreateIncompleteCandidateAudits(
         IReadOnlyList<NetherCodeCandidate> candidates
@@ -959,15 +1047,37 @@ internal sealed class NetherCodePolicy
             );
         }
 
+        if (portfolio.CurrentCodes.Count == portfolio.Capacity)
+        {
+            return new NetherCodeDecision
+            {
+                Kind = NetherCodeDecisionKind.Keep,
+                LockedLane = lane,
+                Detail = "research-code-capacity-saturated:no-replacement:keep",
+            };
+        }
+
+        NetherResearchObjectiveResolution objective = NetherResearchObjectivePolicy.Resolve(
+            settings.ResearchPrimaryFamily,
+            settings.ResearchSecondaryFamily,
+            evidence.Research
+        );
+        NetherCodeFamily preferredFamily = objective.IsValid && objective.HasIncompleteTargets
+            ? objective.ActiveFamily
+            : settings.ResearchPrimaryFamily;
+        NetherCodeFamily fallbackFamily = preferredFamily == settings.ResearchPrimaryFamily
+            ? settings.ResearchSecondaryFamily
+            : settings.ResearchPrimaryFamily;
         NetherCodeCandidate? selected = offered
-            .Where(candidate => candidate.Family == settings.ResearchPrimaryFamily)
+            .Where(candidate => candidate.Family == preferredFamily)
             .OrderBy(candidate => candidate.CodeId)
             .FirstOrDefault();
-        bool selectedPrimary = selected != null;
-        if (selected == null && settings.ResearchSecondaryFamily != NetherCodeFamily.Unknown)
+        if (selected == null
+            && fallbackFamily != NetherCodeFamily.Unknown
+            && fallbackFamily != preferredFamily)
         {
             selected = offered
-                .Where(candidate => candidate.Family == settings.ResearchSecondaryFamily)
+                .Where(candidate => candidate.Family == fallbackFamily)
                 .OrderBy(candidate => candidate.CodeId)
                 .FirstOrDefault();
         }
@@ -994,34 +1104,13 @@ internal sealed class NetherCodePolicy
             };
         }
 
+        bool selectedPrimary = selected.Family == settings.ResearchPrimaryFamily;
         string selectionDetail = selectedPrimary
             ? "research-target;primary-family"
             : "research-target;secondary-family";
-        bool alreadyOwned = portfolio.CurrentCodes.Any(code => code.CodeId == selected.CodeId);
-        if (portfolio.CurrentCodes.Count < portfolio.Capacity || alreadyOwned)
+        return Select(selected, 0, lane, Array.Empty<long>()) with
         {
-            return Select(selected, 0, lane, Array.Empty<long>()) with
-            {
-                Detail = selectionDetail,
-            };
-        }
-
-        long[] removable = portfolio.CurrentCodes
-            .OrderByDescending(code => ResearchRemovalPriority(code, settings, evidence))
-            .ThenBy(code => code.CodeId)
-            .Select(code => code.CodeId)
-            .ToArray();
-        if (removable.Length == 0)
-        {
-            return Pause(
-                NetherPauseReason.UnknownMasterData,
-                "research-capacity-replacement-unavailable"
-            );
-        }
-
-        return Select(selected, removable[0], lane, removable) with
-        {
-            Detail = selectionDetail + ";ordered-capacity-replacement",
+            Detail = selectionDetail,
         };
     }
 
@@ -1098,118 +1187,6 @@ internal sealed class NetherCodePolicy
             || settings.ResearchSecondaryFamily == activeFamily
             ? activeFamily
             : settings.ResearchSecondaryFamily;
-    }
-
-    private static bool IsResearchFamilyComplete(
-        NetherCodeFamily family,
-        NetherCodePolicyEvidence evidence
-    ) => NetherResearchObjectivePolicy.IsFamilyComplete(family, evidence.Research);
-
-    private static bool CanResearchRemove(
-        NetherCodePortfolio portfolio,
-        NetherCodeCandidate candidate,
-        NetherCodeState removal,
-        NetherCodeFamily targetFamily,
-        NetherAutoClimbSettings settings,
-        NetherCodePolicyEvidence evidence
-    )
-    {
-        if (removal == null || removal.CodeId <= 0)
-            return false;
-
-        bool hardExcluded = evidence.HardExcludedCodeIds.Contains(removal.CodeId);
-        if (!hardExcluded && removal.Family == targetFamily)
-            return false;
-
-        bool completedFamily = settings.StrategyMode == NetherStrategyMode.Research
-            && (removal.Family == settings.ResearchPrimaryFamily
-                || removal.Family == settings.ResearchSecondaryFamily)
-            && IsResearchFamilyComplete(removal.Family, evidence);
-        if (completedFamily
-            && !hardExcluded
-            && !evidence.ProvablySurplusCompletedCodeIds.Contains(removal.CodeId))
-        {
-            return false;
-        }
-
-        IReadOnlyList<NetherCodeState> after = ApplyDecision(
-            portfolio.CurrentCodes,
-            candidate,
-            removal.CodeId
-        );
-        return IsPortfolioHardSafe(after, evidence.ActiveParty)
-            || IsIncrementalOpposedFamilyRepair(
-                portfolio.CurrentCodes,
-                after,
-                candidate.Family,
-                removal.CodeId,
-                targetFamily,
-                settings,
-                evidence
-            );
-    }
-
-    private static int ResearchRemovalPriority(
-        NetherCodeState code,
-        NetherAutoClimbSettings settings,
-        NetherCodePolicyEvidence evidence
-    )
-    {
-        if (evidence.HardExcludedCodeIds.Contains(code.CodeId))
-            return 4;
-        if (code.Family != settings.ResearchPrimaryFamily
-            && code.Family != settings.ResearchSecondaryFamily)
-        {
-            return 3;
-        }
-        if (code.Family == settings.ResearchSecondaryFamily
-            && settings.ResearchSecondaryFamily != settings.ResearchPrimaryFamily)
-        {
-            return 2;
-        }
-        return 1;
-    }
-
-    private static EquipmentValueChoice? FindResearchSameFamilySwap(
-        NetherCodePortfolio portfolio,
-        IReadOnlyList<NetherCodeCandidate> candidates,
-        NetherCodeFamily targetFamily,
-        NetherAutoClimbSettings settings,
-        NetherCodePolicyEvidence evidence
-    )
-    {
-        var valuePolicy = new NetherEquipmentCodeValuePolicy();
-        EquipmentValueChoice? best = null;
-        foreach (NetherCodeCandidate candidate in candidates)
-        {
-            foreach (NetherCodeState removal in portfolio.CurrentCodes
-                         .Where(code => code.Family == targetFamily)
-                         .OrderBy(code => code.CodeId))
-            {
-                IReadOnlyList<NetherCodeState> after = ApplyDecision(
-                    portfolio.CurrentCodes,
-                    candidate,
-                    removal.CodeId
-                );
-                if (!IsPortfolioHardSafe(after, evidence.ActiveParty))
-                    continue;
-                if (!evidence.EquipmentMutationValuesByKey.TryGetValue(
-                        new NetherCodeMutationKey(candidate.CodeId, removal.CodeId),
-                        out NetherCodeEquipmentMutationEvidence? mutation
-                    )
-                    || mutation == null)
-                {
-                    continue;
-                }
-                NetherEquipmentMutationValue value = valuePolicy.Evaluate(mutation);
-                if (!value.CanSelect)
-                    continue;
-                var choice = new EquipmentValueChoice(candidate, removal.CodeId, value, 0);
-                if (best == null || CompareEquipmentChoice(choice, best.Value, valuePolicy) > 0)
-                    best = choice;
-            }
-        }
-        return best;
     }
 
     private static int GetEquipmentRemovalPriority(

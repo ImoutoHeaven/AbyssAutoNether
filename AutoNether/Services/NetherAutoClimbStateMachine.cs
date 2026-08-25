@@ -529,6 +529,8 @@ internal sealed class NetherAutoClimbStateMachine
     /// Runtime/controller generation, current-owner identity, matching OnEntered, and the
     /// authoritative capture itself are proved by the caller's FloorScene readiness result;
     /// this method proves the remaining cross-run snapshot contract before discarding anything.
+    /// TicketCount is deliberately excluded: native GetTicketCount reads account-level item
+    /// 200002, whose balance can be changed by Result records/rewards before the next Start.
     /// </summary>
     public bool TryRetireFinishEvidenceForNewRun(NetherSnapshot snapshot)
     {
@@ -541,7 +543,6 @@ internal sealed class NetherAutoClimbStateMachine
             || finished.Status != NetherSessionStatus.Sleep
             || finished.FloorLevel <= 0
             || finished.CurrentFloorId <= 0
-            || finished.TicketCount <= 0
             || string.IsNullOrEmpty(finished.MapHash)
             || snapshot.Status != NetherSessionStatus.Play
             || snapshot.FloorLevel != 0
@@ -550,7 +551,6 @@ internal sealed class NetherAutoClimbStateMachine
             || snapshot.Floors == null
             || snapshot.Floors.Count == 0
             || snapshot.ErosionPoint != 0
-            || snapshot.TicketCount != finished.TicketCount - 1
             || string.IsNullOrEmpty(snapshot.MapHash)
             || string.Equals(snapshot.MapHash, finished.MapHash, System.StringComparison.Ordinal))
         {

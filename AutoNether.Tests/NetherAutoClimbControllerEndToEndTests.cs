@@ -1255,7 +1255,7 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
-    public void Result_timeout_is_retired_only_after_a_new_entered_floor_zero_run_is_authoritative()
+    public void Result_timeout_is_retired_only_after_an_authoritative_new_run_even_when_settlement_changes_tickets()
     {
         int previousMaximumDepth = Config.NetherAutoClimbMaxDepth.Value;
         var bridge = new ScriptedRuntimeBridge();
@@ -1267,7 +1267,7 @@ public class NetherAutoClimbControllerEndToEndTests
             MasterMaxFloorLevel = 130,
             ContinuanceFloorLevel = 90,
             ContinuationTarget = null,
-            TicketCount = 2,
+            TicketCount = 5,
             MapHash = "finished-run-floor-100",
         };
         bridge.CurrentSnapshot = finishedRun;
@@ -1307,7 +1307,8 @@ public class NetherAutoClimbControllerEndToEndTests
             // The player settles Result manually and starts a genuinely new run.  This is the
             // production proof bundle: a strictly newer FloorSelection generation, its matching
             // SubScene.OnEntered, and an authoritative Play snapshot at the pristine floor-0
-            // boundary with the exact one-ticket entry cost.
+            // boundary. Result settlement may change the account-level ticket balance before the
+            // next Start consumes its entry ticket, so that balance is not a cross-run identity.
             bridge.CurrentRuntimeGeneration = 2;
             bridge.HasRegisteredFloorSelection = true;
             bridge.FloorSceneEntered = false;
@@ -1320,7 +1321,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 FloorLevel = 0,
                 FloorIndex = 1,
                 ErosionPoint = 0,
-                TicketCount = finishedRun.TicketCount - 1,
+                TicketCount = 14,
                 TreasureKeyCount = 0,
                 NetherGold = 30,
                 Codes = Array.Empty<NetherCodeState>(),

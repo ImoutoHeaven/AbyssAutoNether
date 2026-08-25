@@ -174,6 +174,10 @@ internal static class NetherLifecycleInteropBindings
             "Project.Nether.NetherContentAcquiredPopup.NetherContentAcquiredPopup"
         ),
         Popup(
+            "Project.Nether.ErosionPointNotificationPopupController",
+            "Project.Nether.ErosionPointNotificationPopup"
+        ),
+        Popup(
             "Project.Nether.NetherFloorEventHintBox.NetherFloorEventHintBoxPopupController",
             "Project.Nether.NetherFloorEventHintBox.NetherFloorEventHintBoxPopup"
         ),
@@ -219,6 +223,24 @@ internal static class NetherLifecycleInteropBindings
         "_SetupPopupEvent_b__3_0",
         "<SetupPopupEvent>b__3_0",
         new[] { UnitTypeName, Il2CppActionTypeName },
+        "System.Void"
+    ) { IsStatic = false };
+
+    /// <summary>
+    /// Exact callback behind the erosion 80–99 notification's "confirm and continue" tap.
+    /// Current native ISIL proves that it persists the suppression date only when the player
+    /// checked the toggle, then invokes the SetupPopupEvent close action.  Supplying the current
+    /// controller preserves that native preference/close path without changing the toggle.
+    /// </summary>
+    public static NetherCodePopupInteropMethodBinding ErosionPointNotificationConfirmCallback { get; } = new(
+        "_SetupPopupEvent_b__4_0",
+        "<SetupPopupEvent>b__4_0",
+        new[]
+        {
+            UnitTypeName,
+            Il2CppActionTypeName,
+            "Project.Nether.ErosionPointNotificationPopupController",
+        },
         "System.Void"
     ) { IsStatic = false };
 

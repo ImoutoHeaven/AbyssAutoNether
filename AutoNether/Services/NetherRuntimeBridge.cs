@@ -223,6 +223,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private const string BoostPopupControllerTypeName = "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopupController";
     private const string ContentAcquiredPopupControllerTypeName =
         "Project.Nether.NetherContentAcquiredPopup.NetherContentAcquiredPopupController";
+    private const string ErosionPointNotificationPopupControllerTypeName =
+        "Project.Nether.ErosionPointNotificationPopupController";
     private const string FloorEventHintPopupControllerTypeName =
         "Project.Nether.NetherFloorEventHintBox.NetherFloorEventHintBoxPopupController";
     private static readonly NetherReturnItemPolicy ReturnItemPolicy = new();
@@ -263,6 +265,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherFloorEventSequenceTaskFlow _recoveredFloorEventSequenceTaskFlow =
         new(maximumMissingPolls: 600);
     private readonly NetherContentAcquiredConfirmLease _contentAcquiredConfirmLease = new();
+    private readonly NetherContentAcquiredConfirmLease _erosionPointNotificationConfirmLease = new();
     private readonly NetherContentAcquiredConfirmLease _floorEventHintConfirmLease = new();
     private readonly NetherTreasureConfirmLease _treasureConfirmLease = new();
     private readonly NetherCodeReceivedConfirmLease _codeReceivedConfirmLease = new();
@@ -322,6 +325,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private PopupRegistration? _returnPopup;
     private PopupRegistration? _continuePopup;
     private PopupRegistration? _boostPopup;
+    private PopupRegistration? _erosionPointNotificationPopup;
     private PopupRegistration? _floorEventHintPopup;
     private CheckpointControllerRegistration? _returnScrollController;
     private object? _nativeActionTask;
@@ -2095,8 +2099,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _floorParentGeneration = generation;
             _floorEventSequenceTaskFlow.Reset();
             _contentAcquiredConfirmLease.Reset();
+            _erosionPointNotificationConfirmLease.Reset();
             _floorEventHintConfirmLease.Reset();
             ClearTreasureConfirmationFlow();
+            _erosionPointNotificationPopup = null;
             _floorEventHintPopup = null;
             if (!_floorEventSequenceTaskFlow.Begin())
             {
@@ -3779,6 +3785,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 if (hintConfirm.Kind != NetherNativeActionResultKind.Completed)
                     return hintConfirm;
 
+                NetherNativeActionResult erosionNotificationConfirm =
+                    ConfirmErosionPointNotificationPopupIfNeeded(recovered: true);
+                if (erosionNotificationConfirm.Kind != NetherNativeActionResultKind.Completed)
+                    return erosionNotificationConfirm;
+
                 NetherNativeActionResult recovered = _recoveredFloorEventSequenceTaskFlow.Pump(
                     PollResultTask
                 );
@@ -3786,6 +3797,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 {
                     ClearTreasureConfirmationFlow();
                     _contentAcquiredConfirmLease.Reset();
+                    _erosionPointNotificationConfirmLease.Reset();
                     _floorEventHintConfirmLease.Reset();
                 }
                 return recovered;
@@ -3854,6 +3866,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         );
         if (hintConfirm.Kind != NetherNativeActionResultKind.Completed)
             return hintConfirm;
+
+        // Fresh native PlayFloorEventEffectSequenceAsync awaits the normal result hint before
+        // CheckWithOpenErosionPointNotificationPopupAsync, so preserve that exact child order.
+        NetherNativeActionResult erosionNotificationConfirm =
+            ConfirmErosionPointNotificationPopupIfNeeded(recovered: false);
+        if (erosionNotificationConfirm.Kind != NetherNativeActionResultKind.Completed)
+            return erosionNotificationConfirm;
 
         // Event/Treasure callbacks can be UniTask.Void.  Do not treat their return as a
         // settlement: wait for the owning floor parent task below.
@@ -4166,6 +4185,66 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherAutoClimbController.LogDiagnostic(
             "runtime-lifecycle",
             new("action", "floor-event-hint-confirm-invoked"),
+            new("mode", recovered ? "recovered" : "owned"),
+            new("sequence", claim.Sequence.ToString()),
+            new("runtimeGeneration", _runtimeGeneration.ToString()),
+            new("ownerGeneration", _floorParentGeneration.ToString()),
+            new("outcome", invoked.Kind.ToString()),
+            new("detail", invoked.Detail)
+        );
+        return invoked;
+    }
+
+    private NetherNativeActionResult ConfirmErosionPointNotificationPopupIfNeeded(bool recovered)
+    {
+        NetherContentAcquiredConfirmClaim claim = recovered
+            ? _erosionPointNotificationConfirmLease.ClaimRecovered(_runtimeGeneration)
+            : _erosionPointNotificationConfirmLease.ClaimOwned(_floorParentGeneration);
+        if (claim.Kind == NetherContentAcquiredConfirmClaimKind.None)
+        {
+            return NetherNativeActionResult.Completed(
+                "no-erosion-point-notification-confirm"
+            );
+        }
+
+        PopupRegistration? registration = _erosionPointNotificationPopup;
+        if (claim.Kind != NetherContentAcquiredConfirmClaimKind.Claimed
+            || claim.Close == null
+            || registration is not PopupRegistration current
+            || current.Sequence != claim.Sequence)
+        {
+            string detail = claim.Kind switch
+            {
+                NetherContentAcquiredConfirmClaimKind.CorrelationMismatch =>
+                    "erosion-point-notification-popup-correlation-mismatch",
+                NetherContentAcquiredConfirmClaimKind.MissingClose =>
+                    "erosion-point-notification-popup-missing-close",
+                _ => "erosion-point-notification-registration-lost",
+            };
+            NetherAutoClimbController.LogDiagnostic(
+                "runtime-lifecycle",
+                new("action", "erosion-point-notification-confirm-rejected"),
+                new("mode", recovered ? "recovered" : "owned"),
+                new("sequence", claim.Sequence.ToString()),
+                new("runtimeGeneration", _runtimeGeneration.ToString()),
+                new("ownerGeneration", _floorParentGeneration.ToString()),
+                new("detail", detail)
+            );
+            return NetherNativeActionResult.BindingUnavailable(detail);
+        }
+
+        // Fresh packaged ISIL: b__4_0 calls TrySave only when the toggle was already selected,
+        // then invokes this exact close action.  Do not mutate the toggle and do not substitute
+        // the semantically different erosion over-check confirm/cancel popup.
+        NetherNativeActionResult invoked = TryInvokeVersionedGeneratedCallback(
+            current.Controller,
+            NetherLifecycleInteropBindings.ErosionPointNotificationConfirmCallback,
+            new object?[] { null, claim.Close, current.Controller },
+            "erosion-point-notification-confirm"
+        );
+        NetherAutoClimbController.LogDiagnostic(
+            "runtime-lifecycle",
+            new("action", "erosion-point-notification-confirm-invoked"),
             new("mode", recovered ? "recovered" : "owned"),
             new("sequence", claim.Sequence.ToString()),
             new("runtimeGeneration", _runtimeGeneration.ToString()),
@@ -4742,6 +4821,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _recoveredFloorEventTaskLease.Reset();
             _recoveredFloorEventSequenceTaskFlow.Reset();
             _contentAcquiredConfirmLease.Reset();
+            _erosionPointNotificationConfirmLease.Reset();
             _floorEventHintConfirmLease.Reset();
             ClearTreasureConfirmationFlow();
             _popupOwnership.Clear();
@@ -4760,6 +4840,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _returnPopup = null;
             _continuePopup = null;
             _boostPopup = null;
+            _erosionPointNotificationPopup = null;
             _floorEventHintPopup = null;
             _returnScrollController = null;
             _nativeActionTask = null;
@@ -4828,8 +4909,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _recoveredFloorEventTaskLease.Reset();
                 _recoveredFloorEventSequenceTaskFlow.Reset();
                 _contentAcquiredConfirmLease.Reset();
+                _erosionPointNotificationConfirmLease.Reset();
                 _floorEventHintConfirmLease.Reset();
                 ClearTreasureConfirmationFlow();
+                _erosionPointNotificationPopup = null;
                 _floorEventHintPopup = null;
             }
             _floorSelectionController = controller;
@@ -4935,6 +5018,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _returnPopup = null;
         _continuePopup = null;
         _boostPopup = null;
+        _erosionPointNotificationPopup = null;
         _floorEventHintPopup = null;
         _returnScrollController = null;
         _nativeActionTask = null;
@@ -4978,6 +5062,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _recoveredFloorEventTaskLease.Reset();
                 _recoveredFloorEventSequenceTaskFlow.Reset();
                 _contentAcquiredConfirmLease.Reset();
+                _erosionPointNotificationConfirmLease.Reset();
                 _floorEventHintConfirmLease.Reset();
                 ClearTreasureConfirmationFlow();
                 // Let the per-Continue evidence decide whether this exact owner termination is
@@ -5001,6 +5086,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _codeReplacementCompletePopup = null;
                 _codeTransformConfirmPopup = null;
                 _codeTransformCompletePopup = null;
+                _erosionPointNotificationPopup = null;
                 _floorEventHintPopup = null;
                 ClearCodeSelectionFlow();
                 if (_pendingCheckpointAction == null)
@@ -5058,6 +5144,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             or CodeTransformCompletePopupControllerTypeName;
         bool isShopConfirmPopup = typeName == ShopConfirmPopupControllerTypeName;
         bool isContentAcquiredPopup = typeName == ContentAcquiredPopupControllerTypeName;
+        bool isErosionPointNotificationPopup =
+            typeName == ErosionPointNotificationPopupControllerTypeName;
         bool isFloorEventHintPopup = typeName == FloorEventHintPopupControllerTypeName;
         bool isCodeReceivedPopup = typeName == CodeReceivedPopupControllerTypeName;
         bool isBattleResultCodePopup = typeName is (
@@ -5066,6 +5154,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         bool isFloorChildPopup = isTransformSupportPopup
             || isShopConfirmPopup
             || isContentAcquiredPopup
+            || isErosionPointNotificationPopup
             || isFloorEventHintPopup;
         NetherActionKind ownerAction;
         long ownerGeneration;
@@ -5074,6 +5163,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         bool recognized = true;
         bool recoveredTaskBound = false;
         bool contentConfirmBound = false;
+        bool erosionNotificationConfirmBound = false;
         bool hintConfirmBound = false;
         bool codeReceivedConfirmBound = false;
         bool codeListInitializationBound = false;
@@ -5394,6 +5484,18 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         _runtimeGeneration
                     );
                     break;
+                case ErosionPointNotificationPopupControllerTypeName:
+                    _erosionPointNotificationPopup = registration;
+                    erosionNotificationConfirmBound =
+                        _erosionPointNotificationConfirmLease.Register(
+                            popup,
+                            close,
+                            sequence,
+                            ownerAction,
+                            ownerGeneration,
+                            _runtimeGeneration
+                        );
+                    break;
                 case FloorEventHintPopupControllerTypeName:
                     _floorEventHintPopup = registration;
                     hintConfirmBound = _floorEventHintConfirmLease.Register(
@@ -5468,6 +5570,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("runtimeGeneration", runtimeGeneration.ToString()),
             new("recoveredTaskBound", recoveredTaskBound.ToString()),
             new("contentConfirmBound", contentConfirmBound.ToString()),
+            new("erosionNotificationConfirmBound", erosionNotificationConfirmBound.ToString()),
             new("hintConfirmBound", hintConfirmBound.ToString()),
             new("codeReceivedConfirmBound", codeReceivedConfirmBound.ToString()),
             new("codeListInitializationBound", codeListInitializationBound.ToString()),
@@ -5485,6 +5588,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         {
             _recoveredFloorEventTaskLease.InvalidatePopup(popup);
             _contentAcquiredConfirmLease.InvalidatePopup(popup);
+            _erosionPointNotificationConfirmLease.InvalidatePopup(popup);
             _floorEventHintConfirmLease.InvalidatePopup(popup);
             if (_treasureConfirmLease.InvalidatePopup(popup))
                 _treasureSkipTask = null;
@@ -5510,6 +5614,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             InvalidatePopup(ref _returnPopup, popup);
             InvalidatePopup(ref _continuePopup, popup);
             InvalidatePopup(ref _boostPopup, popup);
+            InvalidatePopup(ref _erosionPointNotificationPopup, popup);
             InvalidatePopup(ref _floorEventHintPopup, popup);
             if (_returnScrollController is CheckpointControllerRegistration scroll
                 && (ReferenceEquals(scroll.Controller, popup)
@@ -5614,11 +5719,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         ClearFloorPopup(ref _codeReplacementCompletePopup, generation);
         ClearFloorPopup(ref _codeTransformConfirmPopup, generation);
         ClearFloorPopup(ref _codeTransformCompletePopup, generation);
+        ClearFloorPopup(ref _erosionPointNotificationPopup, generation);
         ClearFloorPopup(ref _floorEventHintPopup, generation);
         _floorParentAction = null;
         _floorParentGeneration = 0;
         _floorEventSequenceTaskFlow.Reset();
         _contentAcquiredConfirmLease.Reset();
+        _erosionPointNotificationConfirmLease.Reset();
         _floorEventHintConfirmLease.Reset();
         ClearTreasureConfirmationFlow();
         ResetOwnedPopupStages();
@@ -6054,6 +6161,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 if (accepted)
                 {
                     _contentAcquiredConfirmLease.Reset();
+                    _erosionPointNotificationConfirmLease.Reset();
                     _floorEventHintConfirmLease.Reset();
                     ClearTreasureConfirmationFlow();
                 }

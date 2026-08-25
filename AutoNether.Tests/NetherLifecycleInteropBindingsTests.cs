@@ -349,10 +349,10 @@ public sealed class NetherLifecycleInteropBindingsTests
             resolvedNames.Add(method!.Name);
         }
 
-        Assert.Equal(28, bindings.Length);
+        Assert.Equal(29, bindings.Length);
         Assert.Empty(failures);
         Assert.Contains("Project_ISubService_Terminate", resolvedNames);
-        Assert.Equal(17, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
+        Assert.Equal(18, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
         Assert.Equal(
             new[] { "OnEntered", "OnInitializeAsync", "OnRefreshAsync" },
             bindings
@@ -577,6 +577,50 @@ public sealed class NetherLifecycleInteropBindingsTests
         );
         Assert.NotNull(singleton);
         Assert.Equal("_SetupPopupEvent_b__3_0", callback!.Name);
+    }
+
+    [Fact]
+    public void Packaged_erosion_notification_exposes_the_exact_native_confirm_and_close_contract()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        Type controller = packaged.RequireType(
+            "Project.Nether.ErosionPointNotificationPopupController"
+        );
+        NetherInteropPatchBinding binding = Assert.Single(
+            NetherLifecycleInteropBindings.All,
+            candidate => candidate.TypeName == controller.FullName
+        );
+
+        Assert.True(
+            NetherLifecycleInteropBindings.TryResolve(
+                new[] { packaged.Assembly },
+                binding,
+                out string setupError,
+                out MethodInfo? setup
+            ),
+            setupError
+        );
+        Assert.Equal(
+            new[]
+            {
+                "Project.Nether.ErosionPointNotificationPopup",
+                "Il2CppSystem.Action",
+            },
+            setup!.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()
+        );
+
+        Assert.True(
+            NetherCodePopupInteropResolver.TryResolveGeneratedCallbackTarget(
+                controller,
+                NetherLifecycleInteropBindings.ErosionPointNotificationConfirmCallback,
+                out string callbackError,
+                out MemberInfo? singleton,
+                out MethodInfo? callback
+            ),
+            callbackError
+        );
+        Assert.NotNull(singleton);
+        Assert.Equal("_SetupPopupEvent_b__4_0", callback!.Name);
     }
 
     [Fact]

@@ -92,6 +92,70 @@ public class NetherCheckpointPolicyTests
     }
 
     [Fact]
+    public void Research_full_code_capacity_finishes_normally_at_the_next_boss_checkpoint()
+    {
+        NetherSnapshot snapshot = Snapshot(
+            NetherSessionStatus.Sleep,
+            floor: 50,
+            max: 100,
+            masterMax: 100,
+            tickets: 5
+        ) with
+        {
+            CodeCapacity = 3,
+            Codes =
+            [
+                Code(1, NetherCodeFamily.Rush),
+                Code(2, NetherCodeFamily.Rush),
+                Code(3, NetherCodeFamily.Safe),
+            ],
+        };
+
+        NetherCheckpointDecision decision = Decide(
+            snapshot,
+            Settings(maxDepth: 100) with { StrategyMode = NetherStrategyMode.Research }
+        );
+
+        Assert.Equal(NetherCheckpointDecisionKind.FinishNormally, decision.Kind);
+        Assert.Equal(70, decision.EffectiveMaxDepth);
+        Assert.Equal("research-code-capacity-saturated-next-boss-settlement", decision.Detail);
+    }
+
+    [Fact]
+    public void Research_nonfull_code_capacity_continues_and_equipment_full_capacity_does_not_early_finish()
+    {
+        NetherSnapshot snapshot = Snapshot(
+            NetherSessionStatus.Sleep,
+            floor: 50,
+            max: 100,
+            masterMax: 100,
+            tickets: 5
+        ) with
+        {
+            CodeCapacity = 3,
+            Codes =
+            [
+                Code(1, NetherCodeFamily.Rush),
+                Code(2, NetherCodeFamily.Safe),
+            ],
+        };
+        NetherCheckpointDecision research = Decide(
+            snapshot,
+            Settings(maxDepth: 100) with { StrategyMode = NetherStrategyMode.Research }
+        );
+        NetherCheckpointDecision equipment = Decide(
+            snapshot with
+            {
+                Codes = snapshot.Codes.Append(Code(3, NetherCodeFamily.Safe)).ToArray(),
+            },
+            Settings(maxDepth: 70) with { StrategyMode = NetherStrategyMode.Equipment }
+        );
+
+        Assert.Equal(NetherCheckpointDecisionKind.ContinueOneTicket, research.Kind);
+        Assert.Equal(NetherCheckpointDecisionKind.ContinueOneTicket, equipment.Kind);
+    }
+
+    [Fact]
     public void Sleep_at_target_finishes_normally()
     {
         NetherCheckpointDecision decision = Decide(Snapshot(NetherSessionStatus.Sleep, floor: 50, max: 100, masterMax: 100, tickets: 5), Settings(maxDepth: 50));
@@ -142,6 +206,11 @@ public class NetherCheckpointPolicyTests
     private static NetherCheckpointDecision Decide(NetherSnapshot snapshot, NetherAutoClimbSettings settings) => new NetherCheckpointPolicy().Decide(snapshot, settings);
 
     private static NetherAutoClimbSettings Settings(int maxDepth = 130) => new() { MaxDepth = maxDepth };
+
+    private static NetherCodeState Code(long id, NetherCodeFamily family) => new(id, family, 1)
+    {
+        PossessionAmount = 1,
+    };
 
     private static NetherSnapshot Snapshot(
         NetherSessionStatus status,
