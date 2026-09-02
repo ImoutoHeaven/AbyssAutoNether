@@ -7,6 +7,7 @@ using Xunit;
 
 namespace AutoNether.Tests
 {
+    [Collection("nether-controller-runtime")]
     public sealed class NetherErosionPointNotificationOrderingTests
     {
         [Fact]
@@ -41,6 +42,40 @@ namespace AutoNether.Tests
             }
         }
 
+        [Fact]
+        public void Late_ownerless_erosion_notification_is_confirmed_only_for_paused_automation()
+        {
+            var bridge = new NetherRuntimeBridge();
+            object close = new Il2CppSystem.Action();
+            ErosionNotificationCallbackProbe.Reset();
+
+            using IDisposable controllerScope =
+                NetherAutoClimbController.PushRuntimeBridgeForTests(bridge);
+            try
+            {
+                RegisterFloorSelection(bridge);
+                NetherAutoClimbStateMachine state = GetControllerState();
+                state.Toggle(isInNether: true);
+                state.Pause(NetherPauseReason.NoSafeRoute, "route:no-safe-frontier");
+
+                RegisterErosionNotification(bridge, close);
+
+                Assert.Equal(NetherAutoClimbPhase.Paused, NetherAutoClimbController.Phase);
+                Assert.Equal(1, ErosionNotificationCallbackProbe.InvocationCount);
+
+                bridge.PollNativeFlow();
+                state.Toggle(isInNether: true);
+                RegisterErosionNotification(bridge, close);
+
+                Assert.False(NetherAutoClimbController.IsEnabled);
+                Assert.Equal(1, ErosionNotificationCallbackProbe.InvocationCount);
+            }
+            finally
+            {
+                bridge.ClearRegistrations();
+            }
+        }
+
         private static void RegisterFloorSelection(NetherRuntimeBridge bridge) =>
             GetPrivateMethod("RegisterFloorSelectionCore").Invoke(
                 bridge,
@@ -55,6 +90,11 @@ namespace AutoNether.Tests
 
         private static MethodInfo GetPrivateMethod(string name) =>
             typeof(NetherRuntimeBridge).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        private static NetherAutoClimbStateMachine GetControllerState() =>
+            (NetherAutoClimbStateMachine)typeof(NetherAutoClimbController)
+                .GetField("State", BindingFlags.Static | BindingFlags.NonPublic)!
+                .GetValue(null)!;
     }
 
     public static class ErosionNotificationCallbackProbe

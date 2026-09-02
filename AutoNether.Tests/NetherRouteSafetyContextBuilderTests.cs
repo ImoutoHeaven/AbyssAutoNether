@@ -130,6 +130,49 @@ public class NetherRouteSafetyContextBuilderTests
     }
 
     [Fact]
+    public void Recovery_is_not_pruned_when_it_brings_later_combat_below_the_soft_limit()
+    {
+        NetherRouteSafetyFloorInput[] floors =
+        [
+            Floor(1, 44, NetherFloorNodeType.Battle, currentErosion: 85),
+            Floor(
+                2,
+                45,
+                NetherFloorNodeType.Recovery,
+                currentErosion: 85,
+                minimum: -30,
+                maximum: -30,
+                previous: new long[] { 1 }
+            ),
+            Floor(
+                3,
+                46,
+                NetherFloorNodeType.Battle,
+                currentErosion: 85,
+                minimum: 5,
+                maximum: 5,
+                previous: new long[] { 2 }
+            ),
+            Floor(
+                4,
+                50,
+                NetherFloorNodeType.Boss,
+                currentErosion: 85,
+                minimum: 5,
+                maximum: 5,
+                previous: new long[] { 3 }
+            ),
+        ];
+
+        NetherRouteSafetyContext context = Build(floors, terminals: new HashSet<long> { 4 });
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(Snapshot(1, 85, floors), context);
+
+        Assert.True(context.IsHardSafe(2));
+        Assert.Equal(65, context.HorizonEvaluation(2)!.FinalErosion);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.SelectedNode).FloorId);
+    }
+
+    [Fact]
     public void MissingSafeExitKey_ProducesAllExplicitUnsafeDictionaryEntriesForThatCandidate()
     {
         NetherRouteSafetyFloorInput[] floors =

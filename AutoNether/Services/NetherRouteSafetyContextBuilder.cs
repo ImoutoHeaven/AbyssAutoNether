@@ -162,17 +162,14 @@ internal sealed class NetherRouteSafetyContextBuilder
             );
             states[floorId] = new FloorState(
                 IsKnown: true,
-                // HP is an entry gate, not permission to erase an otherwise known terminal
-                // path. A proved Recovery may be selected, reconciled, and then followed by a
-                // fresh Boss decision; the Boss itself remains HP-ineligible at this snapshot.
-                // The evaluator deliberately reports that Boss as UnsafeHp.  It still has a
-                // known erosion cost for reverse reachability, otherwise a proven Recovery
-                // would be rejected merely because its eventual Boss is not enterable *yet*.
-                // Only that narrowly-scoped combat/HP case may contribute a terminal path;
-                // every other evaluator pause remains terminal-unsafe.
+                // HP and the optional soft erosion limit are entry gates, not proof that an
+                // otherwise known terminal path does not exist. The evolving horizon below
+                // applies an earlier Recovery before judging later combat and still rejects 100.
                 IsEligibleForTerminalPath: (evaluation.IsSafe
                         || (evaluation.PauseReason == NetherPauseReason.UnsafeHp
-                            && IsCombat(floor.EvaluationInput.NodeType)))
+                            && IsCombat(floor.EvaluationInput.NodeType))
+                        || (evaluation.PauseReason == NetherPauseReason.UnsafeErosion
+                            && evaluation.Detail == "optional-soft-erosion-limit"))
                     && projectedErosion != UnknownErosion,
                 ProjectedErosionDelta: projectedErosion
             );

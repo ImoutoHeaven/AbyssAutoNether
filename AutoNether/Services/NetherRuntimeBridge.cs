@@ -5564,6 +5564,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             new("checkpointGeneratedParentAttached", checkpointGeneratedParentAttached.ToString()),
             new("hasClose", (close != null).ToString())
         );
+        if (isErosionPointNotificationPopup
+            && ownerAction == NetherActionKind.None
+            && erosionNotificationConfirmBound
+            && NetherAutoClimbController.IsEnabled
+            && NetherAutoClimbController.Phase == NetherAutoClimbPhase.Paused)
+        {
+            ConfirmErosionPointNotificationPopupIfNeeded(recovered: true);
+        }
     }
 
     private void InvalidatePopupCore(object popup)
