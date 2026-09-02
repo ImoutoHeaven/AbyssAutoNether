@@ -43,7 +43,7 @@ internal sealed record NetherAuthoritativeTransitionState
 /// battle scene the graph no longer has a live controller, but the GET-only response still owns
 /// session status, current floor coordinates, resources and code portfolio.  This cache joins
 /// those two sources only when Nether/map identity and the exact current node coordinate agree.
-/// A zero master floor ID is tolerated only during Battle, or on its result-page Play/Sleep
+/// A zero master floor ID is tolerated only during Battle, or on its result-page Play/Sleep/Clear
 /// state when fresh battle-result characters prove that the transition belongs to this combat.
 /// </summary>
 internal sealed class NetherTransitionSnapshotCache
@@ -107,14 +107,14 @@ internal sealed class NetherTransitionSnapshotCache
         }
         // The packaged client clears m_nether_map_floor_id to zero twice around a combat:
         // while Status=Battle, and again on the result page after the clear response has
-        // already changed Status to Play or (for a segment-ending Boss) Sleep.  Those latter
+        // already changed Status to Play, Sleep, or (for the final Boss) Clear.  Those latter
         // states are distinguishable from invalid ordinary snapshots only by fresh, validated
-        // battle-result characters owned by this cache.  All transitions may recover the
-        // master floor solely from one exact cached (floor_level, floor_index) coordinate.
+        // battle-result characters owned by this cache.  All transitions may recover the master
+        // floor solely from one exact cached (floor_level, floor_index) coordinate.
         bool battleCoordinateFallback = state.Status == NetherSessionStatus.Battle
             && state.CurrentFloorId == 0;
         bool postBattleCoordinateFallback = state.Status is (
-                NetherSessionStatus.Play or NetherSessionStatus.Sleep
+                NetherSessionStatus.Play or NetherSessionStatus.Sleep or NetherSessionStatus.Clear
             )
             && state.CurrentFloorId == 0
             && requireFreshBattleCharacters

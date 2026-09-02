@@ -87,6 +87,23 @@ public class NetherAutoClimbRouteSafetyWiringTests
         );
     }
 
+    [Fact]
+    public void Final_boss_route_carries_clear_as_its_exact_postbattle_settlement_status()
+    {
+        NetherAutoClimbRouteSafetyDecision decision = DecideBoss(
+            20,
+            Bounds((2, 0, 0)),
+            bossFloorLevel: 130
+        );
+
+        Assert.True(decision.Route.HasSelection);
+        Assert.NotNull(decision.SelectedBattleProjection);
+        Assert.Equal(
+            NetherSessionStatus.Clear,
+            decision.SelectedBattleProjection!.ExpectedSettlementStatus
+        );
+    }
+
     private static NetherAutoClimbRouteSafetyDecision Decide(
         int erosion = 40,
         NetherActivePartyHpSafety? hp = null,
@@ -123,7 +140,8 @@ public class NetherAutoClimbRouteSafetyWiringTests
 
     private static NetherAutoClimbRouteSafetyDecision DecideBoss(
         int erosion,
-        IReadOnlyDictionary<long, NetherFloorMasterBounds> bounds
+        IReadOnlyDictionary<long, NetherFloorMasterBounds> bounds,
+        int bossFloorLevel = 2
     )
     {
         NetherSnapshot snapshot = new()
@@ -133,11 +151,12 @@ public class NetherAutoClimbRouteSafetyWiringTests
             CurrentFloorId = 1,
             CurrentNodeId = 1,
             ErosionPoint = erosion,
+            MasterMaxFloorLevel = 130,
             Characters = new[] { new NetherCharacterState(1, 500, IsActive: true) },
             Floors = new[]
             {
                 Floor(1, 1, NetherFloorNodeType.Recovery),
-                Floor(2, 2, NetherFloorNodeType.Boss, previous: new[] { 1L }),
+                Floor(2, bossFloorLevel, NetherFloorNodeType.Boss, previous: new[] { 1L }),
             },
         };
         return PlanWithCapturedVisibleEvidence(

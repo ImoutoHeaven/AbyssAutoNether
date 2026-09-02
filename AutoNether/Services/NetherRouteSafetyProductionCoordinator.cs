@@ -1672,9 +1672,12 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             ProjectionIdentity: projection.ProjectionIdentity
         )
         {
-            ExpectedSettlementStatus = floor.NodeType == NetherFloorNodeType.Boss
-                ? NetherSessionStatus.Sleep
-                : NetherSessionStatus.Play,
+            ExpectedSettlementStatus = floor.NodeType != NetherFloorNodeType.Boss
+                ? NetherSessionStatus.Play
+                : snapshot.MasterMaxFloorLevel > 0
+                    && floor.FloorLevel == snapshot.MasterMaxFloorLevel
+                        ? NetherSessionStatus.Clear
+                        : NetherSessionStatus.Sleep,
         };
     }
 

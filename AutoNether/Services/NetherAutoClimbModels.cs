@@ -627,7 +627,7 @@ internal sealed record NetherBattleProjectionPayload(
 {
     /// <summary>
     /// Exact server status expected after this combat is settled. Ordinary battles and
-    /// minibosses return to Play; a segment-ending Boss enters the Sleep checkpoint flow.
+    /// minibosses return to Play; a segment Boss enters Sleep and the final Boss enters Clear.
     /// </summary>
     public NetherSessionStatus ExpectedSettlementStatus { get; init; } = NetherSessionStatus.Play;
 }
