@@ -35,6 +35,9 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
         string plugin = File.ReadAllText(
             Path.Combine(root, "AutoNether", "Core", "Plugin.cs")
         );
+        string nativeCatalog = File.ReadAllText(
+            Path.Combine(root, "AutoNether", "Services", "NetherNativeCompatibilityPreflight.cs")
+        );
 
         Assert.DoesNotContain("NetherAutoClimbBattleStartLifecyclePatch", autoClimbPatch);
         Assert.DoesNotContain("NetherAutoClimbBattleClearLifecyclePatch", autoClimbPatch);
@@ -46,7 +49,7 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
 
         Assert.Contains(
             "Project_Ingame_Exploration_IExplorationQuestAPIService_StartQuestAsync",
-            battleStartPatch
+            nativeCatalog
         );
         Assert.DoesNotContain(
             "Project_Ingame_Exploration_IExplorationQuestAPIService_ClearQuestAsync",
@@ -67,7 +70,8 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
         Assert.Contains("ref UniTask<BattleSessionStatusResponseEntity> __result", battleStartPatch);
         Assert.DoesNotContain("ref UniTask<IFinishQuestResponseEntity> __result", battleStartPatch);
 
-        Assert.Contains("BattleResultUtility.CreateBattleResultModel", terminalPatch);
+        Assert.Contains("NetherNativeBindingCatalog.BattleTerminal", terminalPatch);
+        Assert.Contains("CreateBattleResultModel", nativeCatalog);
         Assert.Contains("NetherBattleTerminalObservationPolicy.Classify", terminalPatch);
         Assert.Contains("NetherRuntimeBridge.ObserveBattleClear()", terminalPatch);
         Assert.Contains("NetherRuntimeBridge.ObserveBattleClose()", terminalPatch);
@@ -76,7 +80,7 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
             Regex.Matches(
                 manager,
                 Regex.Escape(
-                    "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbBattleResultLifecyclePatch));"
+                    "typeof(NetherAutoClimbBattleResultLifecyclePatch)"
                 )
             ).Cast<Match>()
         );
@@ -95,7 +99,7 @@ public sealed class NetherBattleLifecyclePatchSafetyTests
 
         Assert.Contains("NetherAutoClimbBattleSettingsDestroyPrefixPatch", autoClimbPatch);
         Assert.Contains(
-            "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbBattleSettingsDestroyPrefixPatch));",
+            "typeof(NetherAutoClimbBattleSettingsDestroyPrefixPatch)",
             manager
         );
     }

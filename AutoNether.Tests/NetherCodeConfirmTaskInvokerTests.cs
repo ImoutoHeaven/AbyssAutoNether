@@ -31,6 +31,7 @@ public class NetherCodeConfirmTaskInvokerTests
         Assert.Same(controller, FakeUtility.Controller);
         Assert.Equal(20016, FakeUtility.CodeId);
         Assert.Same(party, FakeUtility.Party);
+        Assert.True(FakeUtility.ShowAbyssCodeReceivedPopup);
         Assert.Equal(token, FakeUtility.Token);
     }
 
@@ -65,6 +66,7 @@ public class NetherCodeConfirmTaskInvokerTests
             typeof(TController).FullName!,
             "System.Int64",
             typeof(FakePartyModel).FullName!,
+            "System.Boolean",
             typeof(FakeCancellationToken).FullName!,
         },
         typeof(FakeUniTask).FullName!
@@ -110,12 +112,14 @@ public class NetherCodeConfirmTaskInvokerTests
         public static FakeController? Controller { get; private set; }
         public static long CodeId { get; private set; }
         public static FakePartyModel? Party { get; private set; }
+        public static bool ShowAbyssCodeReceivedPopup { get; private set; }
         public static FakeCancellationToken Token { get; private set; }
 
         public static FakeUniTask Confirm(
             FakeController controller,
             long codeId,
             FakePartyModel party,
+            bool showAbyssCodeReceivedPopup,
             FakeCancellationToken token
         )
         {
@@ -123,6 +127,7 @@ public class NetherCodeConfirmTaskInvokerTests
             Controller = controller;
             CodeId = codeId;
             Party = party;
+            ShowAbyssCodeReceivedPopup = showAbyssCodeReceivedPopup;
             Token = token;
             return ReturnedTask;
         }
@@ -133,6 +138,7 @@ public class NetherCodeConfirmTaskInvokerTests
             Controller = null;
             CodeId = 0;
             Party = null;
+            ShowAbyssCodeReceivedPopup = false;
             Token = default;
         }
     }
@@ -145,6 +151,7 @@ public class NetherCodeConfirmTaskInvokerTests
             MissingTokenController controller,
             long codeId,
             FakePartyModel party,
+            bool showAbyssCodeReceivedPopup,
             FakeCancellationToken token
         )
         {

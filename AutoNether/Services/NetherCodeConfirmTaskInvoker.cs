@@ -50,9 +50,10 @@ internal static class NetherCodeConfirmTaskInvoker
         }
 
         ParameterInfo[] parameters = taskMethod!.GetParameters();
-        if (parameters.Length != 4
+        if (parameters.Length != 5
             || parameters[0].ParameterType != controllerType
-            || parameters[1].ParameterType != typeof(long))
+            || parameters[1].ParameterType != typeof(long)
+            || parameters[3].ParameterType != typeof(bool))
         {
             error = "binding-unavailable:code-confirm:unexpected-task-signature";
             taskMethod = null;
@@ -69,7 +70,7 @@ internal static class NetherCodeConfirmTaskInvoker
             || !TryResolveExactMember(
                 controllerType,
                 CancellationTokenFieldName,
-                parameters[3].ParameterType,
+                parameters[4].ParameterType,
                 out error,
                 out cancellationTokenMember
             ))
@@ -130,7 +131,7 @@ internal static class NetherCodeConfirmTaskInvoker
 
             task = taskMethod!.Invoke(
                 null,
-                new[] { controller, (object)selectedCodeId, partyModel, cancellationToken }
+                new[] { controller, (object)selectedCodeId, partyModel, true, cancellationToken }
             );
             if (task == null)
             {

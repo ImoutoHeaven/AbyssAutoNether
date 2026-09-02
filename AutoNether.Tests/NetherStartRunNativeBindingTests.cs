@@ -8,12 +8,11 @@ namespace AutoNether.Tests;
 public sealed class NetherStartRunNativeBindingTests
 {
     [Fact]
-    public void Native_invocation_preserves_current_use_ticket_start_floor_party_number_position_order()
+    public void Native_invocation_preserves_current_party_ticket_start_floor_position_order()
     {
-        // Fresh Project.dll 53806a5b...1300:
-        // Project.Party.Top.SubViewController.
-        // Method_Internal_Static_UniTask_Int32_Int32_Int32_CancellationToken_PDM_0
-        // is (useTicket, startFloorLevel, partyNo, ct).  Deliberately distinct values keep
+        // Fresh Project.dll 075179ed...07ea:
+        // NetherUtility.TransitionNetherFloorSelectionSceneFromPartyAsync
+        // is (partyNo, useTicket, startFloorLevel, ct). Deliberately distinct values keep
         // semantic request fields from masking a positional swap.
         NetherStartRunNativeInvocation invocation = NetherStartRunNativeBinding.ToNativeInvocation(
             new NetherStartRunNativeRequest(
@@ -23,7 +22,7 @@ public sealed class NetherStartRunNativeBindingTests
             )
         );
 
-        Assert.Equal(new NetherStartRunNativeInvocation(3, 70, 7), invocation);
+        Assert.Equal(new NetherStartRunNativeInvocation(7, 3, 70), invocation);
     }
 
     [Fact]

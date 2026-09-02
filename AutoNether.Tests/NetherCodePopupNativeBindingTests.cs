@@ -122,7 +122,7 @@ public class NetherCodePopupNativeBindingTests
             NetherCodePopupNativeBinding.CancelSequenceDescriptor(controller),
             [
                 new NetherNativeMethodDescriptor(
-                    "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_0",
+                    "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_PDM_0",
                     new[] { controller, "Il2CppSystem.Threading.CancellationToken" },
                     "Cysharp.Threading.Tasks.UniTask"
                 ) { IsStatic = true },

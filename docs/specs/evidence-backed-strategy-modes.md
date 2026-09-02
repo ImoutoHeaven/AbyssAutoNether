@@ -1,431 +1,304 @@
-# Evidence-Backed Equipment and Research Strategy Modes
+# Evidence-Backed Strategy Modes
 
-Status: ready for tracker publication
+This specification defines the current normative behavior of Equipment and Research automation. The domain vocabulary is defined in [`CONTEXT.md`](../../CONTEXT.md); runtime and compatibility boundaries are defined in [`docs/design/autonether-architecture.md`](../design/autonether-architecture.md).
 
-## Problem Statement
+## Authority
 
-Abyss AutoNether's lifecycle and transaction handling are now stable enough to climb reliably, but its strategy layer still makes decisions from a small set of generic settings and shallow proxies. It does not distinguish an early Research run from a late Equipment run, cannot use the server-authoritative family research wallet as a completion objective, and ranks Code offers primarily from structural family counts and displayed coverage instead of the configured party's real combat interactions.
+Strategy decisions use only the current authoritative server snapshot, native MasterData, live party models, native ability assets, native buff strategies, and popup/controller ownership.
 
-That gap produces materially wrong choices. A uniform crest grant can overwrite the required crest of characters in a mixed row. A card that looks strong on paper can have no reachable trigger, be saturated by a native cap, lose to native buff coexistence rules, or require an unsafe erosion state. Conversely, a back-row Force Chain payoff can be strategically excellent even when exact cadence is unavailable. At capacity, candidate-only power cannot determine whether replacing a held Code improves the retained portfolio. A previously assumed current 5/10/15-percent research-rate Code mechanic is not exposed by the current client and must not be inferred from technology or settlement data.
+The following are never decision authorities:
 
-Route selection has the same problem. The current planner filters basic HP and erosion safety, then orders immediate nodes by generic reward and erosion fields. It does not compare the complete visible branch to the next terminal Boss, resolve Event choices into their exact semantic value, reserve Gold for a known rank-5 Treasure key, recognize an eligible late Shop, or apply the approved Treasure HP-payment exceptions. A locally attractive option can therefore consume a committed resource or select a lower-value branch even when authoritative information already proves a better one.
+- displayed combat power;
+- translated description text;
+- hidden or future floors;
+- guessed battle tiers, probabilities, cadence, or settlement points;
+- stale snapshots or popup models from another owner generation;
+- raw API requests that bypass the proven native client flow.
 
-The strategy must remain evidence-backed and fail closed without returning to the deadlocks that the lifecycle work removed. Missing evidence for one candidate or Event option must exclude only that choice. Every mutation must still run as one owned transaction, reconcile against an authoritative snapshot, and invalidate all unexecuted route valuation before planning again.
+Missing evidence excludes the smallest dependent candidate, option, inventory row, or branch. Automation pauses only when no proven legal action remains or structural ownership is ambiguous.
 
-## Solution
+## Configuration
 
-Add two explicit strategy modes: Equipment and Research. Equipment is the default and maximizes actual combat value while safely climbing to a Boss-aligned equipment target. Research starts at floor zero, pursues explicitly configured primary and secondary Code families using the server-authoritative research wallet plus projected normal settlement, and exits through the next terminal Boss settlement once its objective is complete, with the floor-70 Boss as a hard ceiling.
+`StrategyMode` is explicit and defaults to `Equipment`. AutoNether never infers Research intent from the party, research tree, Code list, or UI.
 
-Deepen the existing Code, Event, Recovery, Treasure, Shop, checkpoint, and route-policy seams rather than adding a second controller. Enrich their immutable inputs with the authoritative party combat profile, Code effect semantics, native buff strategies, family-wallet state, technology research rates, category-skill rows, exact visible Event and inventory rows, and resource commitments. Keep execution in the existing controller transaction model.
+Research requires `ResearchPrimaryFamily` to be one of `Rush`, `Impact`, `Safe`, or `Risk`. `ResearchSecondaryFamily` may be `Unknown` or another valid family. Opposing Rush/Impact and Safe/Risk primary-secondary pairs are invalid.
 
-Use lexicographic decision pipelines. Safety, hard exclusions, family compatibility, and exact binding always precede objectives. Research then prioritizes its active family and settlement invariant. Equipment then applies the approved combat-tier order and compares the actual marginal value of the complete retained portfolio. Route planning first removes unsafe branches, then compares complete visible-branch encounter vectors, and uses erosion and HP only as equal-vector tie breaks.
+Configuration is rejected before a run mutation when:
 
-**Fresh native-design deviation (2026-08-16):** Docker read-only inspection of current `Project.dll` SHA-256 `53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300` and `GameAssembly.dll` SHA-256 `573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb` disproved the earlier claim that current selectable Codes carry a 5/10/15-percent research-rate overwrite. `MNetherCodes` contains only identity/category/effect parameters/asset/power; `NetherCodeModel.CreateModel` constructs native/common ability or erosion effects; `NetherResultRequestEntity` sends no Code rate; and `CreateNetherResultModelAsync` consumes response `nether_code_points` only as four server settlement outcomes. `NetherPointData.SpherePointRatio` is separate research-tree technology. Current production therefore never manufactures a Code family/rate from those sources. The typed policy remains update-tolerant: a future authoritative selectable mechanic may supply exact family and overwrite rate, but missing evidence rejects only that candidate.
+- maximum depth is less than one;
+- soft erosion limit is outside 1–99;
+- minimum character HP is outside 1–1000 permille;
+- reroll reserve is negative;
+- a configured enum value is unknown;
+- Research has no primary family or uses an opposing pair;
+- the requested run boundary cannot resolve to an authoritative Boss;
+- the native compatibility precheck fails.
 
-**Fresh native-design boundary for tickets 07–09 (2026-08-17):** New Docker read-only Cpp2IL runs
-reconfirmed the same exact hashes and `DIFFABLE_EXIT=0`; the durable command/output anchors are
-recorded in [`evidence-backed-strategy-modes-07-09-evidence.md`](../agents/evidence-backed-strategy-modes-07-09-evidence.md).
-The current native `MNetherFloorEvents` row owns four exact Event-Part IDs, while
-`MNetherFloorEventParts` owns raw target/parameter/content fields and `MNetherFloorBattles` owns a
-raw integer battle `type`, stage ID, and Code-drop ratio. `NetherEventPopupController` retains the
-Event row, part array, and presenter `_mCharacterId`; `NetherApiDataStore.RequestNetherUpdateEventAsync`
-accepts floor level/index, selected option number, and optional Code-change ID, not Event or
-Event-Part IDs. Therefore Event/Part IDs are immutable client-side commitment correlation only,
-and the production action submits only the native request seam. Because the current native type
-has no freshly proven local Boss/MiniBoss/Normal semantic enum, an exact runtime battle option
-with no typed provider remains option-local unknown rather than being classified from raw `type`
-or `code_drop_ratio`. Likewise, settlement `nether_code_points` and technology `SpherePointRatio`
-do not prove a pre-settlement Research projection; production never invents completion from Code count, capacity, gauge, technology, or displayed power.
-A wallet already at 20,000 proves completion; otherwise the earliest configured non-full family retains conservative Research priority until authoritative settlement updates the wallet.
+## Run boundaries
 
-## User Stories
+### Equipment
 
-1. As a user, I can select `Equipment` or `Research` explicitly so the plugin never guesses my run objective.
+Equipment resolves `MaximumDepth` to the first authoritative Boss at or above the requested depth. A request beyond the current map resolves to its deepest authoritative Boss.
 
-2. As a user, a new installation defaults to `Equipment` so ordinary deep-climb behavior remains the safe default.
+Equipment starts from the highest unlocked native checkpoint not above that target. If no positive checkpoint qualifies, it starts from floor zero.
 
-3. As a user, I can configure a primary Research Code Family from Rush, Impact, Safe, or Risk.
+### Research
 
-4. As a user, I can configure an optional secondary Research Code Family without enabling automatic family detection.
+Research starts from floor zero to preserve every Code opportunity. Its normal ceiling is the authoritative floor-70 Boss.
 
-5. As a user, an opposing primary and secondary pair is rejected before a run starts so Research cannot deliberately mix Rush with Impact or Safe with Risk.
+Research exits at the next Boss settlement when either:
 
-6. As a user, a Rush or Impact Research target that must cross effective family count five is rejected when any active character has the opposite crest dependency.
+- all configured research objectives are complete; or
+- the Code Portfolio reaches Code Capacity.
 
-7. As a user, a nearly complete Rush or Impact Research wallet may proceed below effective count five when projected completion does not require crossing that threshold.
+If neither condition occurs, Research still settles normally at the floor-70 Boss. It never treats Ordinary Retreat as successful completion and never seeks defeat or proactively consumes a Lost Signal.
 
-8. As a user, Equipment resolves its stopping target to the first authoritative Boss at or above my requested positive depth.
+## Common Code Offer rules
 
-9. As a user, a requested depth beyond the current map resolves to the deepest authoritative Boss instead of a hard-coded floor number.
+Every Offer must have a complete, unambiguous portfolio and distinct candidate identities. Structural ambiguity pauses before mutation.
 
-10. As a user, an unresolvable Boss target prevents startup instead of producing a mid-segment stop.
+An acquisition must use the exact current popup owner and native callback/task. Select, reroll, replace, and decline each form one owned mutation followed by authoritative reconciliation.
 
-11. As a Research user, every run starts from the native floor-zero entry to maximize Code opportunities.
+A confirmed candidate-local unknown excludes only that candidate. If no legal candidate remains after the applicable reroll rule, AutoNether invokes native decline/cancel and continues; it does not report the decision as `BindingUnavailable`.
 
-12. As an Equipment user, the run starts from the highest currently unlocked native checkpoint that does not exceed the Boss-aligned target.
+Uniform crest grants are a hard compatibility boundary in both modes:
 
-13. As a Research user, completion is determined from the configured family's persistent wallet plus projected normal settlement reaching 20,000 points.
+1. Resolve the effect's exact Target Scope.
+2. Resolve the Crest Dependency of every living recipient in that scope.
+3. Accept only when every recipient requires the granted crest.
 
-14. As a Research user, completion is never inferred from a fixed Code count, Code capacity, or category-skill gauge; an unavailable future settlement keeps the earliest non-full configured wallet active conservatively instead of stopping the run or treating it as complete.
+A mixed party outside the Target Scope does not invalidate the candidate. A front-only grant is legal when all living front recipients match even if the back row is mixed; an all-back grant is illegal when any living back recipient requires the opposite crest.
 
-15. As a Research user, the primary family remains the active target until its projected settlement threshold is met or its authoritative wallet already contains 20,000 points.
+The same whole-party rule applies when an acquisition crosses the effective Rush or Impact category threshold that grants a crest to every living ally.
 
-16. As a Research user, all available offer rerolls are spent before accepting a valid secondary-family fallback while the primary remains incomplete.
+## Research Code Offer policy
 
-17. As a Research user, the secondary family becomes active only after the primary is projected complete.
+Research is family-driven. General combat value, displayed power, MinimumErosion conditions, Risk payoff, and Equipment replacement value do not outrank a configured family candidate.
 
-18. As a Research user, a previously completed family is re-evaluated after every acquisition or replacement and may not be sacrificed below completion.
+The only candidate-level safety exception specific to Research selection is a positively identified incompatible Uniform Crest Grant or category-threshold grant. Missing general combat-mechanic valuation does not disqualify an otherwise structurally valid configured-family candidate.
 
-19. As a Research user, once all configured targets are complete, ordinary Equipment combat value governs later offers until settlement.
+The active family is determined in configured order:
 
-20. As a Research user, completion causes the run to continue to the next terminal map Boss and use the normal reward-preserving settlement window.
+1. A wallet already at 20,000 points is complete.
+2. An authoritative wallet plus authoritative projected normal settlement reaching 20,000 is complete.
+3. When projection is unavailable, the earliest configured wallet below 20,000 remains active conservatively.
+4. Once the primary is complete, an incomplete secondary becomes active and the primary becomes fallback.
 
-21. As a Research user, the run never treats ordinary Retreat as successful completion because that forfeits rewards.
+For each non-saturated Offer:
 
-22. As a Research user, the run settles normally at the floor-70 Boss even when the research objective remains incomplete.
+1. Select the lowest-ID eligible candidate from the active family when present.
+2. Otherwise select the lowest-ID eligible candidate from the other configured family when present.
+3. Otherwise, when this Offer has not yet rerolled and at least one native reroll is available, reroll exactly once.
+4. After that reroll, or when reroll is unavailable, decline the Offer.
 
-23. As a user, automation never intentionally loses or proactively consumes a Lost Signal to settle a run.
+`CodeReloadReserve` governs Equipment reserve behavior; it does not turn Research fallback into multiple rerolls.
 
-24. As a user, Code-family counts use distinct positive-amount owned Codes and authoritative opposing-family subtraction rather than ability level or possession amount.
+At Code Capacity, Research does not replace any held Code, including a completed primary-family Code. It declines the Offer and marks the run for normal settlement at the next Boss.
 
-25. As a user, existing opposed-family contamination is repaired by retaining the configured Research side or the greater actual-combat-value Equipment side.
+## Equipment Code Offer policy
 
-26. As a user, automation never adds the opposing family merely to reduce an incompatible effective family count.
+Equipment applies these gates in order:
 
-27. As a user, a row-wide uniform crest grant is rejected whenever its target row contains mixed crest dependencies.
+1. candidate identity and native mechanic completeness;
+2. unconditional hard exclusions;
+3. erosion and route safety;
+4. family and crest compatibility;
+5. target and trigger reachability;
+6. native buff coexistence and caps;
+7. complete retained-portfolio Actual Combat Value;
+8. deterministic Code ID tie break.
 
-28. As a user, a Rush or Impact acquisition that would activate the whole-party count-five crest grant is rejected unless every active character has the matching crest dependency.
+An empty Code Portfolio may select one `Reachable-Unquantified` candidate only when all hard gates pass and the acquisition removes no Code. The stable lowest Code ID wins among equivalent bootstrap candidates.
 
-29. As a user, an already active incompatible count-five crest grant pauses before battle unless the current offer can deterministically repair it below the threshold.
+Once the portfolio contains a Code, `Reachable-Unquantified` evidence cannot prove a new acquisition or replacement. A candidate must have a complete mutation valuation and must strictly improve the retained portfolio.
 
-30. As a user, a crest payoff is valued only when an authoritative provider-and-consumer path can reach its recipients.
+At capacity, every possible candidate/removal pair is evaluated as the complete resulting portfolio. A replacement is legal only when it is structurally compatible and a strict improvement; otherwise the Offer is rerolled according to the configured reserve or declined.
 
-31. As a user, a card with an unknown trigger path is rejected without preventing other proven cards in the same offer from being considered.
+Displayed power, raw family count, and spare capacity never force an Equipment selection.
 
-32. As an Equipment user, a back-row Force Chain payoff receives high qualitative priority when it is a numerical payoff and the party has the supported Force Chain path.
+### Combat ordering
 
-33. As an Equipment user, a corresponding front-row Force Chain payoff remains a fallback rather than sharing back-row priority.
+After hard gates, Equipment uses this lexicographic order:
 
-34. As a user, any future Force Chain card that grants a uniform crest must still pass the mixed-row and count-five compatibility rules.
+1. authoritative survival repair when the current route is unsafe;
+2. useful back-row Force Chain payoff;
+3. rear-row or all-party offense;
+4. nonessential rear-row or all-party defense;
+5. front-only fallback.
 
-35. As an Equipment user, a survival-repairing rear-row or full-party effect outranks offense when the party is below an authoritative survival threshold.
+A front-row trigger retains full value when it grants a proven party-global resource. Lower tiers cannot compensate for failure in a higher tier through a weighted score.
 
-Current-version evidence boundary: fresh `Project.dll` SHA-256 `53806a5b4dec186357e2fe8ba5b8a72e4f85674be9231479e207e500e2bd1300` and `GameAssembly.dll` SHA-256 `573fa800171b8b37800cb4425b918351ec84a340bca9a46c32249d7af965c1fb` prove that Event and battle character HP are server-authoritative only in `NetherUpdateEventResponseEntity.t_nether_characters` and `NetherClearBattleResponseEntity.t_nether_characters`, while future combat damage runs through the live `UnitDamageCalculator` including `RandomModifier`. At the current Code Offer lifecycle no exact maximum-HP/defence mutation can prove repair of an existing route deficit. The implementation must preserve that known deficit and fail only the dependent candidate closed; it must not manufacture a reachable survival tier. If a future version exposes an authoritative before/after survival contract, the higher tier applies unchanged.
+Native buff coexistence, durations, trigger order, charge caps, probability ladders, stack timelines, erosion-linked values, and category-threshold deltas are evaluated over the complete retained portfolio. A displaced replacing buff is not assumed to resume without native evidence.
 
-36. As an Equipment user, once survival is adequate, back-row Force Chain payoff outranks ordinary rear-row or full-party offense.
+## Erosion and Risk
 
-37. As an Equipment user, ordinary rear-row or full-party offense outranks nonessential rear-row or full-party defense.
+Route safety always applies regardless of strategy mode. An acquisition preference does not authorize an unsafe next battle.
 
-38. As an Equipment user, usable rear-row effects outrank front-row-only effects, with front-row effects selected only as fallbacks.
+Equipment rejects a Risk effect that:
 
-39. As an Equipment user, a front-row trigger that injects a genuinely shared party resource keeps its full party-global value rather than being discounted as a front-only effect.
+- requires erosion at or above 70 without a complete safe horizon;
+- worsens future erosion gain or reduction;
+- depends on an unproven recovery path;
+- has no authoritative value at the projected battle-start erosion.
 
-40. As an Equipment user, defensive alternatives with the same recipients are compared by exact relative effective-HP change rather than description percentage.
+A dedicated Risk Research objective may select its configured family without Equipment's value gates, but route planning still prefers the 50–70 band and avoids combat above 70 unless a complete authoritative recovery route makes the transition safe.
 
-41. As an Equipment user, defensive alternatives with different recipients prioritize rear-row coverage, the weakest covered rear character, and then aggregate gain.
+Erosion is never raised merely to increase a Code's theoretical payoff. A projected value of 100 is always lethal and ineligible.
 
-42. As an Equipment user, combat utility is evaluated against Boss encounters so periodic effects are not discarded merely because ordinary fights are short.
+## Route selection
 
-43. As an Equipment user, native damage relationships are used only when every required party, enemy, and effect input is authoritative; missing inputs do not receive invented weights.
+Route Safety Gate removes lethal or structurally unknown branches before reward comparison. Safety includes:
 
-44. As an Equipment user, displayed combat power is audit information only and never decides Code selection or replacement.
+- per-character HP projection;
+- projected erosion through the next Boss;
+- battle-entry ownership and identity;
+- exact Event, Treasure, Shop, and Recovery costs;
+- committed Gold and key budgets;
+- any explicit Treasure or key-payment exception.
 
-45. As a user, native buff coexistence is evaluated from the active strategy for each buff type, including Allow limits and HigherValue replacement behavior.
+Safe branches are compared over their complete authoritative Visible-Branch Encounter Vector through the next terminal Boss. Hidden, locked, unselectable, or unresolved nodes contribute no value.
 
-46. As a user, a displaced weaker HigherValue effect is not assumed to resume after the stronger effect expires.
+Before the late-shop boundary, incomplete Research uses:
 
-47. As a user, durations and trigger ordering are compared as a portfolio timeline rather than independent average uptimes.
+```text
+Terminal Boss
+> known rank-5 Treasure objective
+> Event Boss
+> Elite / Event MiniBoss
+> Direct Code Offer
+> Normal Battle
+> ordinary Event
+> Recovery
+> Shop
+```
 
-48. As a user, critical-probability value is clipped only after the native guaranteed-critical threshold is reached.
+Equipment and completed Research swap `Normal Battle` ahead of `Direct Code Offer`.
 
-49. As a user, continuous-attack probability is valued across the complete finite probability ladder rather than using the critical-probability cap.
+Late Equipment uses:
 
-50. As a user, shared mana, initial skill charge, and recurring skill-charge efficiency use their separate native caps and timelines.
+```text
+Terminal Boss
+> known Red rank-5 Treasure
+> known Gold rank-5 Treasure / eligible late Shop
+> Event Boss
+> Elite / Event MiniBoss
+> Normal Battle
+> Direct Code Offer
+> ordinary Event
+> Recovery
+```
 
-51. As a user, an additional charge card is rejected only when its marginal contribution for all applicable recipients is zero.
+An ineligible Shop ranks below Recovery. A Gold Treasure/Shop tie favors Treasure to preserve Gold.
 
-52. As a user, stack-linked effects require a proven per-character stack timeline or a guaranteed conservative lower bound; maximum text is not treated as full uptime.
+Equal encounter vectors prefer lower peak erosion, then higher minimum active-character HP, then deterministic coordinates.
 
-53. As a user, erosion-linked effects are valued at the projected erosion of each confirmed combat through the next Boss instead of their maximum description value.
+## Events
 
-54. As a user, crossing a category-skill threshold on the current acquisition or replacement contributes its immediate proven delta, but mere proximity to a future threshold has no speculative value.
+An Event is valued and executed through the same exact option policy. Each option binds its Event, part, option number, effects, costs, reward or battle, projected state, and route-owned commitments.
 
-55. As an Equipment user, a reachable but unquantified effect receives no invented numeric magnitude and cannot by itself prove a strict replacement improvement.
+Eligibility precedes reward priority:
 
-56. As a Research user, a reachable but unquantified active-family Code may still contribute to settlement progress when it passes every safety and compatibility rule.
+1. exact master-data and popup binding;
+2. sufficient resources;
+3. Route Safety Gate;
+4. committed budget preservation;
+5. active mode objective;
+6. deterministic option-number tie break.
 
-57. As an Equipment user, a zero- or negative-marginal candidate is rerolled according to the configured reserve and otherwise declined even when capacity is available.
+Unknown content invalidates only the dependent option. Raw battle type or Code-drop ratio does not prove Boss, MiniBoss, Elite, or Normal semantics; an authoritative typed mapping is required.
 
-58. As an Equipment user, a full portfolio replaces a held Code only when the retained portfolio is a strict actual-combat improvement.
+Ordinary Event HP damage must leave every currently living character above zero. The popup presentation character is not treated as the sole target.
 
-59. As a Research user at capacity, replacement removes a hard-excluded Code first, then an opposed-family Code, then an ordinary non-target Code, then a provable surplus from a completed family.
+An Event Gold gain receives procurement-threshold value only when the same selected safe branch already proves the corresponding purchase. An Event cost may not consume Gold or keys reserved for a committed rank-5 Treasure objective.
 
-60. As a Research user, an active-target Code is never removed for a non-target candidate.
+The popup must still match the committed Event choice before payment. A mismatch stops before mutation.
 
-61. As a Research user, a same-family replacement must preserve family contribution and improve actual combat value.
+## Recovery
 
-62. As a user, a direct Code Offer remains a real route opportunity at capacity because the later offer can be rerolled, replaced, or declined.
+Recovery first chooses the deterministic rest or purification result required to make a complete visible branch safe.
 
-63. As a user, declining every candidate consumes the Code Offer normally and never attempts a route rollback.
+When both choices preserve safety:
 
-64. As a user, the current client never classifies a Code as research-rate from `SpherePointRatio`, result `nether_code_points`, description text, or displayed power.
+- choose rest when any active character is below the configured HP soft floor;
+- otherwise choose purification when erosion is above zero;
+- when both have zero marginal value, choose a deterministic harmless option.
 
-65. As an Equipment user, any future research-rate Code is rejected unless a future authoritative selectable mechanic first proves that classification; when proven, Equipment still rejects it because it adds no combat value.
+Research never uses random Code transform. Equipment may use it only when explicitly enabled, rest and purification both have zero value, and an exact hard-excluded held Code can be sacrificed.
 
-66. As a Research user, a future research-rate Code is accepted only when an authoritative selectable mechanic supplies its exact family and overwrite rate, it matches the active family, and that rate is strictly greater than the current technology rate; unknown evidence rejects only that candidate.
+## Treasure and key procurement
 
-67. As a user, current Risk Codes 40010 through 40019 are hard excluded because they require erosion at or above 70.
+An entered Treasure uses exactly one held key when available.
 
-68. As a user, current Risk Code 40024 is hard excluded because it worsens future erosion gain and reduction.
+Without a key, HP payment is legal only when the exact policy proves the Treasure is the required terminal route or a rank-5 objective, and the payment does not defeat every living character. Individual character defeat may be accepted only under this explicit exception; full-party defeat is always forbidden.
 
-69. As a user, Risk Codes 40022 and 40023 are eligible only when projected battle-start erosion stays within 50–70 and the visible route proves recovery.
+Erosion payment is not a substitute for the approved HP-payment path.
 
-70. As a user, other linear high-erosion Risk Codes are valued at actual projected erosion below 70 and never justify intentionally raising erosion.
+A known reachable rank-5 Treasure creates a branch-local key commitment. Currency sources are preferred when reachable and affordable; no key is bought for a hidden, alternative, or merely possible Treasure.
 
-71. As a dedicated Risk Research user, the planner prefers the 50–70 erosion band and generally avoids exceeding 70.
+Reserved key budget precedes an optional 300-Gold bag. When a Shop can fulfill both commitments, buy the key first and then the bag only if the post-key balance permits it.
 
-72. As a user, a transient value above 70 is allowed only when the authoritative visible route proves no unsafe battle and certain recovery.
+An HP-paid Event key requires the same proven rank-5 destination, absence of a better reachable currency source, and projected survival of at least one current character. An erosion-paid key additionally requires no combat above 70 and certain recovery before the next battle.
 
-73. As a user, reaching 70 without a confirmed recovery route pauses before the next mutation so I can decide manually.
+Rank-five identity requires the canonical predicate or an authoritative typed provider. Raw rarity and display rank do not prove it.
 
-74. As a user, route safety removes lethal HP or erosion branches before any encounter reward is compared.
+## Shop
 
-75. As a user, once branches pass safety, the planner does not minimize erosion ahead of encounter value.
+`ShopMode=Off` leaves through the proven native close flow.
 
-76. As a user, route comparison evaluates the complete authoritative visible branch through the next terminal map Boss.
+`EquipmentBags` purchases only exact, selected, affordable inventory. Every purchase is reconciled before the next purchase.
 
-77. As a user, hidden, locked, unselectable, or unresolved nodes contribute no speculative reward.
+A Shop receives late-shop priority only strictly above floor 90 when current Gold and exact selected inventory prove an affordable 300-Gold rank-5 Gold bag. Possible relation inventory is insufficient.
 
-78. As a Research user with an incomplete family before the late-shop boundary, safe branches follow `Terminal Boss > known rank-5 Treasure objective > Event Boss > Elite/Event MiniBoss > Direct Code Offer > Normal Battle > ordinary Event > Recovery > Shop`.
+## Checkpoints, continuation, and settlement
 
-79. As an Equipment user, or after Research completion, the pre-boundary order places Normal Battle before Direct Code Offer.
+Checkpoint actions use the exact native Continue, Finish, Return, and Boost callbacks. One mutation is issued per confirmed stage.
 
-80. As an Equipment user above floor 90, safe branches follow `Terminal Boss > canonical Red rank-5 Treasure > canonical Gold rank-5 Treasure or eligible late Shop > Event Boss > Elite/Event MiniBoss > Normal Battle > Direct Code Offer > ordinary Event > Recovery`. Raw Gold/Red rarity plus an untrusted display rank is not rank-five proof.
+Equipment continues while below its Boss-aligned target and a ticket is available. Research continues while below its ceiling, its configured objective is incomplete, and Code Capacity is not saturated.
 
-81. As an Equipment user, a direct tie between a known Gold rank-5 Treasure and an eligible late Shop favors the Treasure to preserve 300 Nether Gold.
+At a Research capacity boundary, AutoNether finishes normally instead of spending another ticket. At any configured or Research completion boundary, it preserves rewards through the Boss result rather than Ordinary Retreat.
 
-82. As a user, an Event contributes the exact semantic tier of the option and Event part the Event policy would select from the current snapshot, resources, and route-owned commitments; a fixed priority over unselected parts is not a valid route value.
+Returned checkpoint items follow exact owned inventory and `CheckpointPreserveItemIds`; unknown identity or an ambiguous selection pauses before confirmation.
 
-83. As a user, an Event Boss is valued as a nonterminal Boss-grade encounter only when an authoritative typed battle provider supplies the Boss tier, and is never mistaken for a normal settlement window.
+## Battle ownership and F11
 
-84. As a user, an Event MiniBoss shares the Elite tier and an Event Normal Battle shares the Normal Battle tier only after typed battle evidence proves that semantic mapping; raw native battle `type` and `code_drop_ratio` remain unknown.
+AutoNether observes the final native battle-start task. Optional F11 wrapping may keep that task pending, but AutoNether neither polls F11 state nor cancels or replays its request.
 
-85. As a user, a missing, stale, or semantically untyped Event battle row rejects only that option/part rather than the entire Event.
+Pending blocks scene progress. Success continues exactly once. Fault or cancellation produces a named pause.
 
-86. As a user, exact Event choices first satisfy binding, resources, route safety, and committed budgets; only then do they apply the active mode objective and deterministic option-number tie break.
+Battle Auto and speed changes are leased and restored on every terminal boundary.
 
-87. As a user, Items, Nether Gold, keys, Code Offers, and battles are compared by their approved semantic rules rather than a generic benefit count.
+## Audit requirements
 
-88. As an Equipment user, ordinary Event rewards prioritize exact Red rank-5 and Gold rank-5 bags, then exact committed procurement thresholds, direct Code Offer, uncommitted Gold, and lower-rank bags.
+Detailed logs expose:
 
-89. As a Research user with incomplete targets, a mandatory known-rank-5 key objective remains first and otherwise a direct Code Offer outranks ordinary Gold and item rewards.
+- mode and active objective;
+- snapshot and owner generation;
+- candidate or option identity;
+- first failing hard gate and typed unknown reason;
+- selected tier and comparison rationale;
+- native action and reconciliation result;
+- pause reason when no legal action remains.
 
-90. As a user, an Event resource gain receives threshold value only when the same selected visible safe branch already proves a reachable 200-, 300-, or 500-Gold purchase before its Boss.
+Logs record state transitions and decisions, not per-frame polling spam. Candidate-local decline must remain distinguishable from structural `BindingUnavailable`.
 
-91. As a user, ordinary Event HP damage must leave every currently living character above zero.
+## Acceptance requirements
 
-92. As a user, the Event popup presenter is not treated as the sole HP target; exact HP effects are projected against every living party character.
+The implementation is acceptable only when:
 
-93. As a user, ordinary Event erosion increases require full visible-route recoverability rather than a local post-choice check.
+- the startup native precheck passes against the current packaged game assemblies;
+- every Harmony patch and reflected mutation is represented in the shared catalog;
+- Research priority, single-reroll fallback, capacity settlement, and scoped crest compatibility tests pass;
+- Equipment empty-portfolio bootstrap and strict nonempty improvement tests pass;
+- route, Event, Recovery, Treasure, Shop, checkpoint, lifecycle, and reconciliation regressions pass;
+- the full Docker test suite and warning-free Release build pass;
+- product-isolation and Release binary audits pass;
+- any deployed DLL is byte-identical to the verified artifact.
 
-94. As a user, ordinary Event Gold costs preserve committed key and bag budgets.
+## Out of scope
 
-95. As a user, an Event option requiring unknown future content is rejected while other exact options remain eligible.
-
-96. As a user, an entered Recovery chooses the deterministic HP or erosion repair needed to make a complete visible branch safe.
-
-97. As a user, when rest and purification both preserve safety, Recovery chooses rest if any active character is below the HP soft floor, otherwise purification when erosion is above zero.
-
-98. As a user, when both deterministic Recovery choices have zero marginal value, the plugin chooses a harmless deterministic option.
-
-99. As a Research user, random Code transformation at Recovery is always rejected.
-
-100. As an Equipment user, random Code transformation is disabled by default and can be opted into only for removing a hard-excluded Code when rest and purification have zero value.
-
-101. As a user entering Treasure with a key, the plugin spends exactly one key.
-
-102. As a user entering Treasure without a key, the plugin chooses the 40- or 80-percent HP payment when the Treasure is the only terminal route or its exact reward is rank five.
-
-103. As a user, Treasure HP payment may defeat individual characters and is forbidden only when every currently living character would end at zero or below.
-
-104. As a user, Treasure never substitutes an erosion-payment option for the approved HP-payment path.
-
-105. As a user, a known reachable rank-5 Treasure without a held key creates a mandatory key-procurement objective ahead of nonterminal combat but below safety and terminal Boss.
-
-106. As a user, a key is bought for 150 Gold at the exact Event or 200 Gold at the exact Shop only when the same visible branch proves the rank-5 Treasure.
-
-107. As a user, if no permitted key source is reachable or affordable, the plugin uses the approved Treasure HP payment rather than pausing.
-
-108. As a user, a known rank-5 Treasure reserves 200 Gold for its Shop key ahead of an eligible 300-Gold late-shop bag.
-
-109. As a user with at least 500 Gold, the Shop buys the 200-Gold key first and then the 300-Gold bag when both commitments are proven.
-
-110. As a user with 300–499 Gold and a committed rank-5 Treasure key need, the Shop skips the 300-Gold bag and buys the key.
-
-111. As a user, an Event's 80-percent-HP key option is used only for a known rank-5 Treasure, when no better currency source exists and the full party survives as a group.
-
-112. As a user, an Event's 80-point-erosion key option is used only when no battle occurs above 70 and recovery to 70 or below is certain before the next battle.
-
-113. As an Equipment user, a Shop receives late-shop priority only strictly above floor 90, with at least 300 Gold and exact selected inventory containing a 300-cost rank-5 Gold bag.
-
-114. As a user, an ineligible Shop remains legal only as necessary safe transit and otherwise ranks below Recovery.
-
-115. As a user, low-rarity Treasure does not cause a voluntary early detour or key spend, except for a key proven to expire unused at the final reachable opportunity.
-
-116. As a user, equal visible-branch encounter vectors are broken by lower peak erosion, then higher minimum active-character HP, then deterministic coordinates.
-
-117. As a user, selecting an Event commits the exact Event, part, option, effects, reward or battle, and projected state used to justify that route.
-
-118. As a user, any popup mismatch with the committed Event stops before payment instead of silently choosing a different option.
-
-119. As a user, a committed Event remains owned until its exact update confirms and then hands off to its exact Code Offer, battle, or ordinary-reward child.
-
-120. As a user, every confirmed Event, Code, Shop, Treasure, Recovery, battle, continuation, or settlement mutation invalidates all unexecuted route valuation.
-
-121. As a user, route planning resumes only from a fresh authoritative snapshot after the current transaction reaches terminal confirmation or an exact downstream handoff.
-
-122. As a user, a strategy decision is bound to the current generation, current controller owner, authoritative snapshot, and corresponding entered subscene before it may mutate native state.
-
-123. As a user, a missing card-specific fact rejects only that candidate; a missing option-specific fact rejects only that option.
-
-124. As a user, automation pauses only after no proven legal choice remains after the applicable reroll or fallback policy is exhausted.
-
-125. As a user diagnosing a decision, logs expose deterministic reason codes, the authoritative input identity, excluded alternatives, active objective, and selected semantic tier without polling spam.
-
-## Implementation Decisions
-
-1. Extend the existing strategy settings with an explicit mode, primary and optional secondary Research families, and an Equipment-only opt-in for random Recovery transformation. Remove automatic lane inference from decision-making; legacy automatic-lane configuration migrates to explicit defaults and is never used to infer Research intent.
-
-2. Validate all cross-setting invariants before starting or resuming automation: known mode, valid family values, non-opposed Research targets, category crest-threshold compatibility, resolvable Boss-aligned target, and complete authoritative inputs required by the selected mode.
-
-3. Resolve Equipment's target from live map and floor MasterData. Normalize a requested positive non-Boss depth upward to the next Boss and cap an out-of-range request at the deepest authoritative Boss. Resolve Research's ceiling independently as the authoritative floor-70 Boss.
-
-4. Derive the mode start floor rather than exposing another manual setting. Research uses floor zero. Equipment uses the highest live unlocked checkpoint at or below its resolved target.
-
-5. Expand the immutable strategy snapshot instead of letting policy code read Unity objects or stale reflection state. It carries generation and owner identity, server snapshot identity, the active party combat profile, owned Codes, capacity, rerolls, family wallets, projected settlement inputs, technology research rates, category-skill rows, effect models, buff strategies, and exact visible map semantics.
-
-6. Build the party combat profile from the live party model owned by the current Code-offer flow. Capture position, element, ManaType, level, limit break, HP state, native parameter inputs, and character, equipment, and general ability-effect models. Displayed target coverage is retained only for diagnostics.
-
-7. Decode Code semantics from current MasterData and ability assets into typed mechanics. Runtime behavior remains authoritative across updates; known current Code identifiers are regression evidence, not the only classification mechanism.
-
-8. Keep one Code decision pipeline with ordered gates: structural validity, hard exclusions, erosion safety, family compatibility, trigger reachability, active Research objective or Equipment tier, portfolio marginal value, and deterministic identifier tie break. A later stage cannot compensate for failure in an earlier stage.
-
-9. Model Rush/Impact and Safe/Risk as opposing pairs. Effective count is distinct owned Codes on one side minus distinct owned Codes on its opponent, clamped at zero. Evaluate category-skill threshold deltas against the resulting complete portfolio.
-
-10. Classify uniform crest grants separately from crest payoffs. Use ManaType for crest identity and a provider-consumer graph for trigger reachability. Enforce row-level compatibility for offer grants and whole-party compatibility before crossing the count-five category grant.
-
-11. Repair an already incompatible count-five state only through a deterministic replacement that lowers the effective count. If the current offer cannot repair it, emit a safety pause before combat.
-
-12. Implement native buff coexistence as a portfolio simulation driven by the active buff strategy. Respect grouping, Allow limits, HigherValue comparison, disable duration, removal, trigger order, and overlapping windows. Never revive a displaced effect without native evidence.
-
-13. Use mechanism-specific marginal-value models. Separate shared mana, initial charge, recurring charge efficiency, critical probability, continuous attacks, stack-linked effects, erosion-linked effects, parameter chains, Force Chain messages, and category-skill threshold deltas.
-
-14. Keep Equipment comparison lexicographic. Survival repair comes first when needed; otherwise back-row Force Chain payoff, rear/full-party offense, nonessential rear/full-party defense, and front-only fallbacks follow in order. The party-global resource exception is applied only to a proven shared resource.
-
-15. Compare Equipment replacement outcomes as complete retained portfolios. Require a strict improvement and decline a non-positive candidate even below capacity. Reachable-unquantified mechanics can retain a documented qualitative tier but never receive invented numeric cadence or prove a magnitude-only replacement.
-
-16. Implement Research as a settlement objective separate from combat value. Determine the active family from wallet plus projected normal settlement, consume all rerolls while it remains incomplete, preserve every completed-family invariant, and apply the approved deterministic replacement order at capacity.
-
-17. Do not infer a Research-rate Code from current technology or settlement data because the current native client exposes no selectable Code mechanic with family/rate fields. Retain a future/update-tolerant typed seam: only an authoritative future mechanic may supply exact family and overwrite rate, after which overwrite comparison rejects unknown, equal, lower, wrong-family, and all Equipment-mode cases.
-
-18. Treat the current Risk identifier set as characterization coverage while classifying effects from their runtime gates. Always reject 70-plus gated cards and the adverse erosion-adjustment card. Project conditionally eligible and linear Risk cards across confirmed battle-start erosion on the visible horizon.
-
-19. Deepen the current production route-safety context with exact semantic branch entries rather than replacing its safety coordinator. Each safe frontier carries its complete visible-branch encounter vector, projected peak erosion, minimum active-character HP, exact Event choice, resource commitments, and selected battle projection.
-
-20. Apply safety once as a hard eligibility filter. Include ordinary all-character HP survival, the narrow Treasure and HP-paid-key full-party exceptions, the hard lethal erosion boundary, the 70-point recoverability policy, and exact battle-entry evidence. Do not reuse projected erosion delta as a reward comparator after safety passes.
-
-21. Compare branches lexicographically through the next terminal map Boss using the active mode's semantic order. Count like-tier encounters across the whole visible branch, prefer fewer Recovery nodes only after semantic equality, then apply erosion, HP, and deterministic-coordinate tie breaks.
-
-A nullable/native-unknown pre-settlement state is not completed Research. Because the mode is
-explicit, visible-vector comparison conservatively uses the incomplete-Research order and keeps the
-earliest configured wallet below 20,000 active; it does not invent projected points or advance to a
-later family. Equipment mode follows its explicit Equipment target/order regardless of Research
-state. Gold Treasure and eligible late-Shop nodes share one tier: compare their combined
-count first, then prefer Treasure only when that count ties. Rank-five Treasure classification uses
-the canonical rank-five predicate or an authoritative typed provider; raw Gold/Red rarity is not a
-fallback.
-
-22. Resolve a visible Event through the same Event option policy that will execute after entry,
-using the current snapshot, resources, active mode, and route-owned procurement commitments. Store
-the returned exact Event/part/option identity and projection as the route commitment; an unselected
-part contributes no route tier. Hidden or unresolved Event data contributes no value.
-
-An Event's four native part references are independent option-local groups. A raw battle tier that
-has no authoritative semantic provider invalidates only that part; exact ordinary/direct-code or
-reward parts remain classifiable and must not be discarded with the whole Event.
-
-23. Replace generic Event scoring with ordered eligibility and mode-objective stages. Evaluate all exact effects on an option, reject only the failing option, preserve committed budgets, and use option number only as the final tie break.
-
-24. Project Event HP effects across every living character. Treat the popup character identifier only as presentation evidence because the authoritative update operates on party statuses without a target character identifier.
-
-25. Represent rank-5 Treasure access and key procurement as explicit commitments tied to one selected visible safe branch. Reserve currency only for an exact destination before the terminal Boss; clear or recompute the commitment after every mutation.
-
-26. Execute sequential Shop purchases in commitment order: required key first, then an eligible rank-5 bag if funds remain. Validate exact inventory, cost, content, and post-purchase snapshot after each child mutation.
-
-27. Encode Treasure payment as its own exception-bearing policy. Prefer a held key; otherwise allow the exact HP option under the approved only-route or rank-5 objective rules, and require only group survival. Never choose erosion as a substitute.
-
-28. Make Recovery evaluate the next complete visible branch. Prefer the deterministic repair needed for safety, use the HP/erosion tie policy when both are safe, and isolate random transform behind its Equipment-only opt-in.
-
-29. Preserve the existing owned transaction and reconcile architecture. A committed mutation remains immutable until terminal confirmation or an exact child handoff. After confirmation, discard all remaining route valuation and rebuild from a fresh authoritative snapshot.
-
-30. Require the common lifecycle evidence gate for continuation handoff, post-battle rebound, ordinary scene re-entry, and strategy execution: current generation, new controller owner, authoritative snapshot, and matching entered subscene.
-
-31. Add typed audit reason codes for configuration rejection, candidate and option exclusion, safety failure, active Research objective, combat tier, portfolio delta, route-vector comparison, resource commitment, transaction identity, and final selection. Log state transitions and decisions, not per-frame polling.
-
-32. Preserve fail-closed locality. Unknown mechanics invalidate the smallest candidate, option, inventory row, or branch that depends on them. Pause only when the full legal choice set is exhausted or when transaction identity itself is ambiguous.
-
-## Testing Decisions
-
-1. Use the production controller with its runtime-bridge test double as the highest acceptance seam. End-to-end scenarios must drive authoritative snapshots through floor selection, popup ownership, Code selection or decline, optional battle, reconciliation, continuation, and normal Boss settlement while asserting exactly one mutation per committed stage.
-
-2. Keep the production route-safety wiring as the highest pure route seam. Tests provide one immutable snapshot plus runtime safety, party, Event, Shop, Treasure, wallet, and semantic evidence, then assert the selected node, complete audit, immutable planned action, and captured battle or interactive commitment.
-
-3. Use the Code policy seam for exhaustive candidate and replacement matrices. Cover both modes, all family pairs, mixed and homogeneous rows, count-five crossings and repair, trigger reachability, Risk exclusions, future authoritative research-rate overwrite and current missing-evidence locality, reroll rules, capacity replacement, zero marginal value, and card-local evidence failure.
-
-4. Use the Event, Recovery, Treasure, and Shop policy seams for option-local matrices. Cover all-character HP projection, partial-death exceptions, 80-point erosion semantics, deterministic Recovery behavior, exact content binding, sequential Shop budgets, late-shop eligibility, unknown-option locality, and deterministic tie breaks.
-
-5. Use route-planner tests for complete-branch lexicographic comparisons. Include the approved pre-90 Research, pre-90 Equipment, and late Equipment orders; exact Event semantic substitution; like-tier counts; rank-5 key procurement; late Shop/Treasure ties; recovery transit; and erosion/HP tie breaks.
-
-6. Extend configuration-contract tests to assert the default Equipment mode, explicit family parsing, absence of automatic mode inference, invalid opposed targets, transform opt-in default, Boss normalization, dynamic deepest Boss, and mode-derived start floor.
-
-7. Add MasterData and native-mapper characterization fixtures for the decompiled mechanics on which policy depends: wallet threshold and settlement fields, Code capacity, opposing-family thresholds, whole-party crest grants, Risk gates and erosion adjustment, the current absence of a selectable research-rate mechanic plus future exact-field tolerance, buff coexistence, probability ladders, charge caps, Force Chain activation, Event HP scope, key costs, Treasure payment parameters, shop inventory, and Boss identities.
-
-8. Test update tolerance by supplying unknown future Code effects, Event content, inventory rows, and category skills. Assert that only the dependent choice becomes ineligible, diagnostics retain the exact missing evidence, and other authoritative choices continue.
-
-9. Add regression scenarios for contaminated portfolios, previously completed Research families, a full 25/25 Code inventory, direct Offer decline, multiple reroll epochs, Recovery transform opt-in and rejection, erosion exactly 70, a transient recoverable value above 70, and no confirmed safe route.
-
-10. Add resource-commitment scenarios for 150-Gold Event keys, 200-Gold Shop keys, 300-Gold bags, and combined 500-Gold procurement. Verify commitments are branch-local, survive only their owned transaction, and are recomputed after each confirmed mutation.
-
-11. Add target and settlement scenarios for Research completion before a segment Boss, completion at the floor-70 ceiling, incomplete Research at floor 70, a non-Boss configured Equipment depth, a future map with a deeper Boss, no qualifying positive checkpoint, and a normal Boss result. Assert that ordinary Retreat and proactive Lost Signal are never invoked.
-
-12. Retain all existing race and ownership regressions. New strategy tests must prove that selection cannot occur without current generation, current owner, authoritative snapshot, and matching entered subscene; that no route is planned behind an active child popup or battle; and that a fresh mutation causes a fresh plan.
-
-13. Prefer observable decisions, planned actions, audit reason codes, runtime calls, and reconciled snapshots over assertions on private scoring helpers. Numerical tests should assert exact native projections only where all inputs are authoritative; qualitative tiers should assert ordering without inventing a numeric score.
-
-14. Verification is complete only when the full test suite and production build pass, the deployed DLL comes from the verified build output, and a detailed-log smoke run shows one decision record per state transition without battle-result polling spam.
-
-15. Add public route-vector regressions for an actual Event-policy selection that rejects a higher
-priority typed battle part while selecting a known sibling, local unknown battle invalidation,
-Equipment mode with Research completion true and null, Research true/false behavior, conservative
-Research-null behavior, and noncanonical Gold/Red Treasure rows that must not receive rank-five
-value.
-
-## Out of Scope
-
-- Automatic detection of Research versus Equipment intent.
-- Automatic selection of primary or secondary Research family.
-- Changes to F11 save/load behavior or equipment-drop reroll automation.
-- Deliberate defeat, proactive Lost Signal consumption, or treating ordinary Retreat as successful settlement.
-- Invented probabilities or values for hidden future floors, unknown Code candidates, random Event outcomes, or random Recovery transformation.
-- A generic displayed-combat-power optimizer or a single DPS/EHP weighted score.
-- A new in-game configuration UI.
-- Mid-segment settlement at an arbitrary non-Boss depth.
-- Replacing the stable controller transaction model with a parallel strategy controller.
-- Hard-coding current floor 130, capacity 25, or a fixed number of Codes as permanent game rules.
-
-## Further Notes
-
-- The domain glossary and approved Q1–Q77 decisions are recorded in the repository's root `CONTEXT.md` and remain the authority when terminology in an implementation discussion is ambiguous.
-- Current decompilation evidence is intentionally captured as characterization tests. Runtime MasterData, live party models, native ability assets, and native buff strategies remain authoritative when the game updates.
-- The repository already has the required acceptance seams: controller end-to-end tests, production route-safety wiring, focused Code and Event policies, checkpoint policy, configuration contracts, and lifecycle/reconcile regressions. Implementation should deepen these seams rather than introduce a broad new orchestration layer.
-- The specification is locally ready for an implementation issue. Tracker publication and the `ready-for-agent` label remain pending because GitHub CLI is not installed in the current environment.
+- Automatic strategy-mode or Research-family detection.
+- Displayed-power optimization or a generic DPS/EHP weighted score.
+- Invented values for unknown effects, battles, Event outcomes, or hidden floors.
+- A second controller or raw API fallback around the native transaction model.
+- Mid-segment reward-preserving settlement where the game exposes no such window.
+- Translation, F11 Auto-SL ownership, or a new in-game configuration UI.

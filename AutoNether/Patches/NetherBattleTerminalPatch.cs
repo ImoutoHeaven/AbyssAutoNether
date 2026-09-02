@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Absf;
 using AutoNether.Services;
 using HarmonyLib;
@@ -16,8 +17,10 @@ namespace AutoNether.Patches;
 [HarmonyPatch]
 internal static class NetherBattleTerminalPatch
 {
+    private static MethodBase TargetMethod() =>
+        NetherNativeBindingCatalog.ResolveRequiredMethod(NetherNativeBindingCatalog.BattleTerminal);
+
     [HarmonyPrefix]
-    [HarmonyPatch(typeof(BattleResultUtility), nameof(BattleResultUtility.CreateBattleResultModel))]
     private static void Prefix(
         BattleResultType resultType,
         ISceneTransitionParam startParam,

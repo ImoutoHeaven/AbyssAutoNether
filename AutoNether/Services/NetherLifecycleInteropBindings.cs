@@ -30,7 +30,12 @@ internal static class NetherLifecycleInteropBindings
     public static NetherInteropPatchBinding StartStatusTask { get; } = Instance(
         "Project.Nether.FloorSelection.SubViewController",
         "HandleStartEventByStatusAsync",
-        new[] { "System.Boolean" },
+        new[]
+        {
+            "System.Boolean",
+            "System.Boolean",
+            "Project.Nether.FloorSelection.NetherSkipRewardsModel",
+        },
         UniTaskTypeName
     );
 

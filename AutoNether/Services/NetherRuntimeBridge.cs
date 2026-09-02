@@ -3649,28 +3649,17 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private NetherNativeActionResult InvokeStartRunNative(NetherStartRunNativeRequest request)
     {
-        // Fresh 2026-08-15 Cpp2IL evidence for the current packaged client:
-        // Party.Top.SubViewController's generated party-owned mutation has the exact positional
-        // contract (useTicket, startFloorLevel, partyNo, ct). Invoke that native UniTask so the
+        // Fresh 2026-09-02 Cpp2IL evidence for the current packaged client:
+        // NetherUtility's party transition has the exact positional contract
+        // (partyNo, useTicket, startFloorLevel, ct). Invoke that native UniTask so the
         // policy-selected floor is consumed by the game flow without confusing semantic request
         // field order with native parameter order;
         // an absent/changed signature remains a binding failure and no raw endpoint fallback is
         // permitted.
-        Type controllerType = typeof(Project.Party.Top.SubViewController);
-        NetherNativeMethodDescriptor descriptor = new(
-            "Method_Internal_Static_UniTask_Int32_Int32_Int32_CancellationToken_PDM_0",
-            new[]
-            {
-                "System.Int32",
-                "System.Int32",
-                "System.Int32",
-                "Il2CppSystem.Threading.CancellationToken",
-            },
-            UniTaskTypeName
-        ) { IsStatic = true };
+        Type controllerType = typeof(Project.Nether.NetherUtility);
         if (!TryResolveExactMethod(
                 controllerType,
-                descriptor,
+                NetherNativeBindingCatalog.StartRun.Method,
                 StaticFlags,
                 out string error,
                 out MethodInfo? method
@@ -3689,9 +3678,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 null,
                 new object[]
                 {
+                    invocation.PartyNumber,
                     invocation.UseTicket,
                     invocation.StartFloorLevel,
-                    invocation.PartyNumber,
                     new CancellationToken(),
                 }
             );
@@ -3905,14 +3894,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         {
             case NetherTreasureConfirmStage.AwaitingSkipInvocation:
             {
-                NetherNativeMethodDescriptor descriptor = new(
-                    "SkipOpenTreasureAnimationAsync",
-                    new[] { "Il2CppSystem.Threading.CancellationToken" },
-                    UniTaskTypeName
-                );
                 if (!TryResolveExactMethod(
                         popup.GetType(),
-                        descriptor,
+                        NetherNativeBindingCatalog.TreasureSkip.Method,
                         InstanceFlags,
                         out string error,
                         out MethodInfo? method
@@ -4005,14 +3989,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         "treasure-confirm-missing-skip-and-confirm-button"
                     );
                 }
-                NetherNativeMethodDescriptor descriptor = new(
-                    "OnSubmit",
-                    new[] { "UnityEngine.EventSystems.BaseEventData" },
-                    "System.Void"
-                );
                 if (!TryResolveExactMethod(
                         button.GetType(),
-                        descriptor,
+                        NetherNativeBindingCatalog.AppButtonSubmit.Method,
                         InstanceFlags,
                         out string error,
                         out MethodInfo? method
@@ -4533,19 +4512,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         if (!TryGetReturnSelectionIndexes(scroll, items, out IReadOnlyList<int>? indexes, out string mappingError))
             return NetherNativeActionResult.BindingUnavailable(mappingError);
 
-        NetherNativeMethodDescriptor selectDescriptor = new(
-            "OnThumbnailClicked",
-            new[] { "System.Int32" },
-            "System.Void"
-        );
-        NetherNativeMethodDescriptor confirmDescriptor = new(
-            "OnConfirmAsync",
-            new[] { registration.Value.Popup.GetType().FullName ?? string.Empty },
-            UniTaskTypeName
-        );
-        if (!TryResolveExactMethod(scroll.GetType(), selectDescriptor, InstanceFlags, out string selectError, out MethodInfo? select))
+        if (!TryResolveExactMethod(scroll.GetType(), NetherNativeBindingCatalog.ReturnSelect.Method, InstanceFlags, out string selectError, out MethodInfo? select))
             return NetherNativeActionResult.BindingUnavailable(selectError);
-        if (!TryResolveExactMethod(registration.Value.Controller.GetType(), confirmDescriptor, InstanceFlags, out string confirmError, out MethodInfo? confirm))
+        if (!TryResolveExactMethod(registration.Value.Controller.GetType(), NetherNativeBindingCatalog.ReturnConfirm.Method, InstanceFlags, out string confirmError, out MethodInfo? confirm))
             return NetherNativeActionResult.BindingUnavailable(confirmError);
 
         try
@@ -6816,11 +6785,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         return TryInvokeExact(
             controller,
-            new NetherNativeMethodDescriptor(
-                "OnFloorClickedEventAsync",
-                new[] { "System.Int32", "System.Int32" },
-                UniTaskTypeName
-            ),
+            NetherNativeBindingCatalog.FloorClick.Method,
             new object[] { action.FloorLevel, action.FloorIndex },
             "select-floor",
             registerNativeActionTask: false,
@@ -6853,20 +6818,25 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             .OrderByDescending(value => value.Registration.Sequence)
             .First();
         PopupRegistration registration = selected.Registration;
-        string popupType = registration.Popup.GetType().FullName ?? string.Empty;
-        NetherNativeMethodDescriptor select = new(
-            "OnPanelSelected",
-            new[] { popupType, "System.Int32" },
-            "System.Void"
-        );
-        NetherNativeMethodDescriptor terminal = new(
-            selected.Kind == EventFlowKind.Treasure ? "OnConfirm" : "ExecuteEvent",
-            new[] { popupType },
-            "System.Void"
-        );
-        if (!TryResolveExactMethod(registration.Controller.GetType(), select, InstanceFlags, out string selectError, out MethodInfo? selectMethod))
+        (NetherInteropPatchBinding selectBinding, NetherInteropPatchBinding terminalBinding) =
+            selected.Kind switch
+            {
+                EventFlowKind.Event => (
+                    NetherNativeBindingCatalog.EventSelect,
+                    NetherNativeBindingCatalog.EventExecute
+                ),
+                EventFlowKind.Recovery => (
+                    NetherNativeBindingCatalog.RecoverySelect,
+                    NetherNativeBindingCatalog.RecoveryExecute
+                ),
+                _ => (
+                    NetherNativeBindingCatalog.TreasureSelect,
+                    NetherNativeBindingCatalog.TreasureConfirm
+                ),
+            };
+        if (!TryResolveExactMethod(registration.Controller.GetType(), selectBinding.Method, InstanceFlags, out string selectError, out MethodInfo? selectMethod))
             return NetherNativeActionResult.BindingUnavailable(selectError);
-        if (!TryResolveExactMethod(registration.Controller.GetType(), terminal, InstanceFlags, out string terminalError, out MethodInfo? terminalMethod))
+        if (!TryResolveExactMethod(registration.Controller.GetType(), terminalBinding.Method, InstanceFlags, out string terminalError, out MethodInfo? terminalMethod))
             return NetherNativeActionResult.BindingUnavailable(terminalError);
 
         bool recoveredSequence = false;
@@ -6999,11 +6969,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         NetherNativeActionResult invoked = TryInvokeExact(
             registration.Value.Controller,
-            new NetherNativeMethodDescriptor(
-                "OnPurchaseContentAsync",
-                new[] { registration.Value.Popup.GetType().FullName ?? string.Empty, "System.Int32" },
-                UniTaskTypeName
-            ),
+            NetherNativeBindingCatalog.ShopPurchase.Method,
             new object[] { registration.Value.Popup, index },
             "buy-shop-item"
         );
@@ -7605,11 +7571,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _codeReplacementTabActivationWait.Clear();
             NetherNativeActionResult activate = TryInvokeExact(
                 rawTabGroup,
-                new NetherNativeMethodDescriptor(
-                    "UpdateTabState",
-                    new[] { "System.Int32" },
-                    "System.Void"
-                ),
+                NetherNativeBindingCatalog.TabGroupUpdate.Method,
                 new object[] { tabIndex },
                 "activate-code-replacement-tab",
                 registerNativeActionTask: false
@@ -7642,7 +7604,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _codeReplacementTabActivationWait.ObserveRegistration();
         NetherNativeActionResult thumbnail = TryInvokeExact(
             registration.Controller,
-            new NetherNativeMethodDescriptor("OnClickThumbnail", new[] { "System.Int32" }, "System.Void"),
+            NetherNativeBindingCatalog.CodeListThumbnail.Method,
             new object[] { modelIndex },
             "select-code-replacement-thumbnail",
             registerNativeActionTask: false
@@ -7685,7 +7647,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
         NetherNativeActionResult replace = TryInvokeExact(
             registration.Controller,
-            new NetherNativeMethodDescriptor("OnClickReplace", Array.Empty<string>(), "System.Void"),
+            NetherNativeBindingCatalog.CodeListReplace.Method,
             Array.Empty<object>(),
             "confirm-code-replacement",
             registerNativeActionTask: false
@@ -7769,11 +7731,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         NetherNativeActionResult invoke = TryInvokeExact(
             registration.Value.Controller,
-            new NetherNativeMethodDescriptor(
-                "RerollAsync",
-                new[] { registration.Value.Popup.GetType().FullName ?? string.Empty },
-                UniTaskTypeName
-            ),
+            NetherNativeBindingCatalog.CodeReroll.Method,
             new[] { registration.Value.Popup },
             "reload-code"
         );
@@ -7947,7 +7905,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         NetherNativeActionResult tab = TryInvokeExact(
             list.Controller,
-            new NetherNativeMethodDescriptor("OnChangeTab", new[] { "System.Int32" }, "System.Void"),
+            NetherNativeBindingCatalog.CodeListChangeTab.Method,
             new object[] { tabIndex },
             "select-code-transform-tab"
         );
@@ -7955,7 +7913,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return LogCodeTransformNative("list-select", tab, owner);
         NetherNativeActionResult thumbnail = TryInvokeExact(
             list.Controller,
-            new NetherNativeMethodDescriptor("OnClickThumbnail", new[] { "System.Int32" }, "System.Void"),
+            NetherNativeBindingCatalog.CodeListThumbnail.Method,
             new object[] { modelIndex },
             "select-code-transform-thumbnail"
         );
@@ -7963,7 +7921,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return LogCodeTransformNative("list-select", thumbnail, owner);
         NetherNativeActionResult change = TryInvokeExact(
             list.Controller,
-            new NetherNativeMethodDescriptor("OnClickChange", Array.Empty<string>(), "System.Void"),
+            NetherNativeBindingCatalog.CodeListChange.Method,
             Array.Empty<object>(),
             "start-code-transform"
         );
@@ -8324,12 +8282,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         NetherNativeActionResult start = TryInvokeExact(
             floorController,
-            new NetherNativeMethodDescriptor(
-                "HandleStartEventByStatusAsync",
-                new[] { "System.Boolean" },
-                UniTaskTypeName
-            ),
-            new object[] { false },
+            NetherLifecycleInteropBindings.StartStatusTask.Method,
+            new object[] { false, false, null! },
             "checkpoint-native-flow",
             registerNativeActionTask: false,
             observeTask: RegisterCheckpointParentTask
@@ -8409,10 +8363,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     NetherNativeActionResult.BindingUnavailable("missing-continue-can-boost-field")
                 );
             }
-            // RO ISIL: the generated <SetupPopupEvent>b__8_2 Unit callback is the exact
+            // RO ISIL: the generated <SetupPopupEvent>b__10_2 Unit callback is the exact
             // Continue entry for both _canBoost values.  When true it opens the owned Boost
             // confirmation popup; when false it proceeds to the native one-ticket parent.
-            // b__8_1 is Finish/cancel and must never stand in for Continue.
+            // b__10_1 is Return/finish and must never stand in for Continue.
             callback = TryInvokeVersionedGeneratedCallback(
                 registration.Controller,
                 NetherCheckpointContinueNativeBinding.ContinueCallbackInterop,
@@ -8920,8 +8874,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
     private static NetherNativeActionResult TryInvokeNoArgumentDelegate(object callback, string action)
     {
-        NetherNativeMethodDescriptor descriptor = new("Invoke", Array.Empty<string>(), "System.Void");
-        if (!TryResolveExactMethod(callback.GetType(), descriptor, InstanceFlags, out string error, out MethodInfo? invoke))
+        if (!TryResolveExactMethod(callback.GetType(), NetherNativeBindingCatalog.NoArgumentDelegateInvoke, InstanceFlags, out string error, out MethodInfo? invoke))
             return NetherNativeActionResult.BindingUnavailable(error);
         try
         {
@@ -8944,14 +8897,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         string action
     )
     {
-        NetherNativeMethodDescriptor descriptor = new(
-            "Invoke",
-            new[] { "System.Boolean" },
-            "System.Void"
-        );
         if (!TryResolveExactMethod(
                 callback.GetType(),
-                descriptor,
+                NetherNativeBindingCatalog.BooleanDelegateInvoke,
                 InstanceFlags,
                 out string error,
                 out MethodInfo? invoke

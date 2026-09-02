@@ -58,17 +58,25 @@ public sealed class AutoNetherConfigContractTests
     }
 
     [Fact]
-    public void Readme_documents_explicit_modes_research_validation_and_native_start_boundaries()
+    public void Documents_define_explicit_modes_research_validation_and_native_boundaries()
     {
         string root = FindRepositoryRoot();
         string readme = File.ReadAllText(Path.Combine(root, "README.md"));
+        string strategySpec = File.ReadAllText(Path.Combine(
+            root,
+            "docs",
+            "specs",
+            "evidence-backed-strategy-modes.md"
+        ));
 
-        Assert.Contains("StrategyMode = Equipment", readme);
-        Assert.Contains("ResearchPrimaryFamily = Unknown", readme);
-        Assert.Contains("ResearchSecondaryFamily = Unknown", readme);
-        Assert.Contains("Research` 从 0 层开始", readme);
-        Assert.Contains("最高已解锁十层 checkpoint", readme);
-        Assert.Contains("任何原生开塔动作前拒绝配置", readme);
+        Assert.Contains("`StrategyMode` | `Equipment`", readme);
+        Assert.Contains("`ResearchPrimaryFamily` | `Unknown`", readme);
+        Assert.Contains("`ResearchSecondaryFamily` | `Unknown`", readme);
+        Assert.Contains("Research starts from floor zero", strategySpec);
+        Assert.Contains("Equipment starts from the highest unlocked native checkpoint", strategySpec);
+        Assert.Contains("Configuration is rejected before a run mutation", strategySpec);
+        Assert.Contains("reroll exactly once", strategySpec);
+        Assert.Contains("At Code Capacity, Research does not replace", strategySpec);
     }
 
     private static string FindRepositoryRoot()

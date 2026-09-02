@@ -14,6 +14,8 @@ namespace AutoNether;
 [BepInDependency("AbyssMod", BepInDependency.DependencyFlags.SoftDependency)]
 public sealed class Plugin : BasePlugin
 {
+    private bool _initialized;
+
     public const string PluginGuid = "Abyss.AutoNether";
     public const string PluginName = "Abyss AutoNether";
     public const string PluginVersion = "0.1.0";
@@ -25,9 +27,27 @@ public sealed class Plugin : BasePlugin
     public override void Load()
     {
         Log = base.Log;
-        ConfigFile = base.Config;
         Logger.Bind(Log);
 
+        NetherNativeCompatibilityReport compatibility =
+            NetherNativeCompatibilityPreflight.Validate(AppDomain.CurrentDomain.GetAssemblies());
+        if (!compatibility.IsCompatible)
+        {
+            foreach (string failure in compatibility.Failures)
+                Log.LogError("[AutoNether precheck] " + failure);
+            Logger.Unbind(Log);
+            throw new InvalidOperationException(
+                $"AutoNether native compatibility precheck failed: "
+                + string.Join(" | ", compatibility.Failures)
+            );
+        }
+        Log.LogInfo(
+            $"AutoNether native compatibility precheck passed: "
+            + $"methods={compatibility.CheckedMethodCount}, "
+            + $"generated={compatibility.CheckedGeneratedMethodCount}."
+        );
+
+        ConfigFile = base.Config;
         AutoNether.Config.Initialize();
         Instance = AddComponent<Hotkey>();
         PatchManager.Initialize();
@@ -35,6 +55,7 @@ public sealed class Plugin : BasePlugin
         // This standalone build has no native-backed semantic provider, so null is explicit and
         // raw item/battle fields remain Unknown/fail-closed until an adapter is registered.
         NetherAutoClimbController.Initialize(typedSemanticProviderFactory: null);
+        _initialized = true;
 
         Log.LogInfo($"{PluginName} {PluginVersion} loaded; F12 controls Nether auto-climb.");
         bool abyssModDetected = AppDomain.CurrentDomain
@@ -56,7 +77,8 @@ public sealed class Plugin : BasePlugin
 
     public override bool Unload()
     {
-        NetherAutoClimbController.OnPluginUnload();
+        if (_initialized)
+            NetherAutoClimbController.OnPluginUnload();
         Logger.Unbind(Log);
         return base.Unload();
     }

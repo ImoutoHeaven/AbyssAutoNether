@@ -115,6 +115,28 @@ public class NetherCodePopupInteropResolverTests
     }
 
     [Fact]
+    public void Precheck_resolver_rejects_static_wrapper_identity_drift_even_when_signature_is_unique()
+    {
+        var expected = new NetherCodePopupInteropMethodBinding(
+            "OldGeneratedTaskName",
+            "<LogicalGeneratedTask>",
+            new[] { typeof(SanitizedController).FullName!, typeof(FakeCancellationToken).FullName! },
+            typeof(FakeUniTask).FullName!
+        ) { IsStatic = true };
+
+        bool resolved = NetherCodePopupInteropResolver.TryResolveStaticMethodExactIdentity(
+            typeof(RenamedTaskUtility),
+            expected,
+            out string error,
+            out MethodInfo? method
+        );
+
+        Assert.False(resolved);
+        Assert.Null(method);
+        Assert.Contains("no-exact-versioned-signature", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Resolver_rejects_ambiguous_full_signature_fallback()
     {
         var expected = new NetherCodePopupInteropMethodBinding(
@@ -235,7 +257,7 @@ public class NetherCodePopupInteropResolverTests
             cancelTaskError
         );
         Assert.Equal(
-            "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_CancellationToken_PDM_0",
+            "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_Boolean_CancellationToken_PDM_0",
             confirmTask!.Name
         );
         Assert.Equal(

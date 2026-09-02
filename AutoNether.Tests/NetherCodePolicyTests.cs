@@ -498,7 +498,7 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
-    public void Missing_and_reachable_unquantified_values_reject_only_their_candidates()
+    public void Missing_value_rejects_only_its_candidate_while_reachable_remains_hard_safe()
     {
         NetherCodeCandidate missing = Candidate(991101, NetherCodeFamily.Safe);
         NetherCodeCandidate reachable = Candidate(991102, NetherCodeFamily.Safe);
@@ -528,10 +528,12 @@ public class NetherCodePolicyTests
             "trigger-evidence-unavailable",
             Assert.Single(decision.CandidateAudits, audit => audit.CodeId == missing.CodeId).Detail
         );
-        Assert.Equal(
-            "trigger-reachable;cadence-unavailable",
-            Assert.Single(decision.CandidateAudits, audit => audit.CodeId == reachable.CodeId).Detail
+        NetherCodeCandidateAudit reachableAudit = Assert.Single(
+            decision.CandidateAudits,
+            audit => audit.CodeId == reachable.CodeId
         );
+        Assert.True(reachableAudit.IsEligible);
+        Assert.Equal("eligible", reachableAudit.Detail);
     }
 
     [Fact]
@@ -693,11 +695,49 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
-    public void Equipment_zero_negative_and_reachable_unquantified_value_cannot_prove_selection()
+    public void Equipment_empty_portfolio_bootstraps_hard_safe_reachable_unquantified_candidate()
+    {
+        NetherCodeCandidate candidate = Candidate(991209, NetherCodeFamily.Safe, power: 99_999);
+        NetherMechanismValue reachable = NetherMechanismValue.ReachableUnquantified(
+            "trigger-reachable;cadence-unavailable"
+        );
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 2, 3)),
+            candidate
+        ) with
+        {
+            MechanismValuesByCodeId = new Dictionary<long, NetherMechanismValue>
+            {
+                [candidate.CodeId] = reachable,
+            },
+            EquipmentMutationValuesByKey = new Dictionary<NetherCodeMutationKey, NetherCodeEquipmentMutationEvidence>
+            {
+                [new NetherCodeMutationKey(candidate.CodeId, 0)] = Mutation(
+                    candidate.CodeId,
+                    0,
+                    before: [],
+                    after: [CombatWindow(candidate.CodeId, 9_999) with { TriggerKnown = false }],
+                    mechanism: reachable
+                ),
+            },
+        };
+
+        NetherCodeDecision decision = Decide(Portfolio(reloadCount: 3), evidence, candidate);
+
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
+        Assert.Equal(0, decision.RemoveCodeId);
+        Assert.False(decision.StrictImprovementProven);
+        Assert.False(decision.DisplayPowerUsedForDecision);
+    }
+
+    [Fact]
+    public void Equipment_nonempty_portfolio_rejects_zero_negative_and_reachable_unquantified_value()
     {
         NetherCodeCandidate zero = Candidate(991210, NetherCodeFamily.Safe, power: 99_999);
         NetherCodeCandidate negative = Candidate(991211, NetherCodeFamily.Safe, power: 99_999);
         NetherCodeCandidate unquantified = Candidate(991212, NetherCodeFamily.Safe, power: 99_999);
+        NetherCodeState retained = Code(900001, NetherCodeFamily.Safe);
         NetherNativeBuffWindow held = CombatWindow(900001, value: 200);
         NetherCodePolicyEvidence evidence = KnownEvidence(
             Party(Member(1, 0, 2, 3)),
@@ -719,8 +759,8 @@ public class NetherCodePolicyTests
                 [new NetherCodeMutationKey(zero.CodeId, 0)] = Mutation(
                     zero.CodeId,
                     0,
-                    before: [],
-                    after: []
+                    before: [held],
+                    after: [held]
                 ),
                 [new NetherCodeMutationKey(negative.CodeId, 0)] = Mutation(
                     negative.CodeId,
@@ -731,8 +771,12 @@ public class NetherCodePolicyTests
                 [new NetherCodeMutationKey(unquantified.CodeId, 0)] = Mutation(
                     unquantified.CodeId,
                     0,
-                    before: [],
-                    after: [CombatWindow(unquantified.CodeId, 9_999) with { TriggerKnown = false }],
+                    before: [held],
+                    after:
+                    [
+                        held,
+                        CombatWindow(unquantified.CodeId, 9_999) with { TriggerKnown = false },
+                    ],
                     mechanism: NetherMechanismValue.ReachableUnquantified(
                         "trigger-reachable;cadence-unavailable"
                     )
@@ -740,12 +784,13 @@ public class NetherCodePolicyTests
             },
         };
 
-        Assert.Equal(NetherCodeDecisionKind.Keep, Decide(Portfolio(), evidence, zero).Kind);
-        Assert.Equal(NetherCodeDecisionKind.Keep, Decide(Portfolio(), evidence, negative).Kind);
-        Assert.Equal(NetherCodeDecisionKind.Keep, Decide(Portfolio(), evidence, unquantified).Kind);
+        NetherCodePortfolio portfolio = Portfolio(current: [retained]);
+        Assert.Equal(NetherCodeDecisionKind.Keep, Decide(portfolio, evidence, zero).Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, Decide(portfolio, evidence, negative).Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, Decide(portfolio, evidence, unquantified).Kind);
         Assert.Equal(
             NetherCodeDecisionKind.Reload,
-            Decide(Portfolio(reloadCount: 2), evidence, zero).Kind
+            Decide(Portfolio(reloadCount: 2, current: [retained]), evidence, zero).Kind
         );
     }
 

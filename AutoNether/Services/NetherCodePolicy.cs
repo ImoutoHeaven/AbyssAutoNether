@@ -412,22 +412,6 @@ internal sealed class NetherCodePolicy
             decision = DecideEquipment(portfolio, eligible, settings, evidence, lane);
         }
         decision = AttachCandidateAudits(decision, candidateAudits);
-        if (ShouldPauseForCardSpecificEvidenceFailure(
-                decision,
-                portfolio,
-                uniqueCandidates,
-                candidateAudits,
-                evidence
-            ))
-        {
-            decision = AttachCandidateAudits(
-                Pause(
-                    NetherPauseReason.UnknownEffect,
-                    "no-proven-code-candidate-after-reroll-budget:" + decision.Detail
-                ),
-                candidateAudits
-            );
-        }
         if (decision.Kind != NetherCodeDecisionKind.Select)
             return decision;
 
@@ -517,48 +501,6 @@ internal sealed class NetherCodePolicy
                 ? tier
                 : decision.DecisionTier,
         };
-    }
-
-    private static bool ShouldPauseForCardSpecificEvidenceFailure(
-        NetherCodeDecision decision,
-        NetherCodePortfolio portfolio,
-        IReadOnlyList<NetherCodeCandidate> candidates,
-        IReadOnlyList<NetherCodeCandidateAudit> candidateAudits,
-        NetherCodePolicyEvidence evidence
-    )
-    {
-        if (decision.Kind != NetherCodeDecisionKind.Keep)
-            return false;
-
-        var owned = new HashSet<long>(portfolio.CurrentCodes.Select(code => code.CodeId));
-        HashSet<long> unresolvedOfferIds = candidates
-            .Where(candidate => !owned.Contains(candidate.CodeId))
-            .Select(candidate => candidate.CodeId)
-            .ToHashSet();
-        return candidateAudits.Any(audit =>
-        {
-            if (!unresolvedOfferIds.Contains(audit.CodeId)
-                || audit.IsEligible
-                || audit.UnknownReasonCode == NetherStrategyUnknownReasonCode.None)
-            {
-                return false;
-            }
-
-            bool mechanicUnavailable = evidence.MechanicsByCodeId == null
-                || !evidence.MechanicsByCodeId.TryGetValue(
-                    audit.CodeId,
-                    out NetherCodeHardEligibilityEvidence? mechanic
-                )
-                || mechanic == null
-                || !mechanic.IsKnown;
-            bool mechanismValueMissing = evidence.MechanismValuesByCodeId == null
-                || !evidence.MechanismValuesByCodeId.TryGetValue(
-                    audit.CodeId,
-                    out NetherMechanismValue mechanismValue
-                )
-                || mechanismValue.Kind == NetherCombatValueEvidenceKind.Missing;
-            return mechanicUnavailable || mechanismValueMissing;
-        });
     }
 
     private static NetherCodeDecision FinalizeSelectedDecision(
@@ -794,7 +736,8 @@ internal sealed class NetherCodePolicy
         }
         if (mechanismValue.Kind == NetherCombatValueEvidenceKind.Missing
             || settings.StrategyMode == NetherStrategyMode.Equipment
-                && mechanismValue.Kind == NetherCombatValueEvidenceKind.ReachableUnquantified)
+                && mechanismValue.Kind == NetherCombatValueEvidenceKind.ReachableUnquantified
+                && portfolio.CurrentCodes.Count > 0)
         {
             return new(
                 candidate.CodeId,
@@ -1009,10 +952,27 @@ internal sealed class NetherCodePolicy
             .Select(code => code.CodeId)
             .OrderBy(codeId => codeId)
             .ToArray();
-        return best is EquipmentValueChoice selected
-            ? Select(selected.Candidate, selected.RemoveCodeId, lane, removable) with
+        if (best is EquipmentValueChoice selected)
+        {
+            return Select(selected.Candidate, selected.RemoveCodeId, lane, removable) with
             {
                 Detail = "native-retained-portfolio;mechanism-specific-value",
+            };
+        }
+
+        NetherCodeCandidate? bootstrap = portfolio.CurrentCodes.Count == 0
+            ? candidates
+                .Where(candidate => evidence.MechanismValuesByCodeId.TryGetValue(
+                    candidate.CodeId,
+                    out NetherMechanismValue value
+                ) && value.Kind == NetherCombatValueEvidenceKind.ReachableUnquantified)
+                .OrderBy(candidate => candidate.CodeId)
+                .FirstOrDefault()
+            : null;
+        return bootstrap != null
+            ? Select(bootstrap, 0, lane, removable) with
+            {
+                Detail = "empty-equipment-portfolio;hard-safe-reachable-bootstrap",
             }
             : ReloadOrKeep(
                 portfolio,

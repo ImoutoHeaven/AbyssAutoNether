@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using AutoNether.Services;
 using Cysharp.Threading.Tasks;
 using HarmonyLib;
@@ -16,12 +17,11 @@ namespace AutoNether.Patches;
 [HarmonyPatch]
 internal static class NetherBattleStartTaskCapturePatch
 {
+    private static MethodBase TargetMethod() =>
+        NetherNativeBindingCatalog.ResolveRequiredMethod(NetherNativeBindingCatalog.BattleStartTask);
+
     [HarmonyPostfix]
     [HarmonyPriority(Priority.Last)]
-    [HarmonyPatch(
-        typeof(ExplorationQuestPreserveAPIService),
-        "Project_Ingame_Exploration_IExplorationQuestAPIService_StartQuestAsync"
-    )]
     private static void Postfix(
         ExplorationQuestPreserveAPIService __instance,
         ref UniTask<BattleSessionStatusResponseEntity> __result

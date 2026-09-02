@@ -135,7 +135,14 @@ internal static class NetherCodePopupInteropResolver
         if (!TryResolveSingletonMember(holder, out error, out singletonMember))
             return false;
 
-        return TryResolveMethod(holder, binding, DeclaredInstanceFlags, out error, out method);
+        return TryResolveMethod(
+            holder,
+            binding,
+            DeclaredInstanceFlags,
+            allowSignatureFallback: false,
+            out error,
+            out method
+        );
     }
 
     public static bool TryResolveStaticMethod(
@@ -143,7 +150,28 @@ internal static class NetherCodePopupInteropResolver
         NetherCodePopupInteropMethodBinding binding,
         out string error,
         out MethodInfo? method
-    ) => TryResolveMethod(type, binding, DeclaredStaticFlags, out error, out method);
+    ) => TryResolveMethod(
+        type,
+        binding,
+        DeclaredStaticFlags,
+        allowSignatureFallback: true,
+        out error,
+        out method
+    );
+
+    internal static bool TryResolveStaticMethodExactIdentity(
+        Type type,
+        NetherCodePopupInteropMethodBinding binding,
+        out string error,
+        out MethodInfo? method
+    ) => TryResolveMethod(
+        type,
+        binding,
+        DeclaredStaticFlags,
+        allowSignatureFallback: false,
+        out error,
+        out method
+    );
 
     private static bool TryResolveSingletonMember(Type holder, out string error, out MemberInfo? singletonMember)
     {
@@ -183,6 +211,7 @@ internal static class NetherCodePopupInteropResolver
         Type type,
         NetherCodePopupInteropMethodBinding binding,
         BindingFlags flags,
+        bool allowSignatureFallback,
         out string error,
         out MethodInfo? method
     )
@@ -219,7 +248,9 @@ internal static class NetherCodePopupInteropResolver
             return false;
         }
 
-        if (binding.IsStatic && !string.IsNullOrEmpty(binding.ObfuscatedName))
+        if (allowSignatureFallback
+            && binding.IsStatic
+            && !string.IsNullOrEmpty(binding.ObfuscatedName))
         {
             MethodInfo[] signatureCandidates = allMethods
                 .Where(candidate => MatchesSignature(candidate, binding))

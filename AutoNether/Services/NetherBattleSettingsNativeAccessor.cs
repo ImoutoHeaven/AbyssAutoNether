@@ -15,7 +15,6 @@ namespace AutoNether.Services;
 internal sealed class NetherBattleSettingsNativeAccessor : INetherBattleSettingsNative
 {
     private const string SettingsInterfaceTypeName = "Project.Ingame.IIngameUserSettings";
-    private const string SpeedTypeName = "Project.GameSpeedType";
     private readonly object _settings;
     private readonly MethodInfo _getAuto;
     private readonly MethodInfo _setAuto;
@@ -70,14 +69,46 @@ internal sealed class NetherBattleSettingsNativeAccessor : INetherBattleSettings
             return false;
         }
 
-        if (!TryResolveExact(concrete, "get_IsAuto", Type.EmptyTypes, typeof(bool), out MethodInfo? getAuto, out error)
-            || !TryResolveExact(concrete, "set_IsAuto", new[] { typeof(bool) }, typeof(void), out MethodInfo? setAuto, out error)
-            || !TryResolveSpeedMethods(concrete, out MethodInfo? getSpeed, out MethodInfo? setSpeed, out Type? speedType, out error))
+        if (!NetherLifecycleInteropBindings.TryResolveExactMethod(
+                concrete,
+                NetherNativeBindingCatalog.BattleSettingsGetAuto.Method,
+                Flags,
+                out error,
+                out MethodInfo? getAuto
+            )
+            || !NetherLifecycleInteropBindings.TryResolveExactMethod(
+                concrete,
+                NetherNativeBindingCatalog.BattleSettingsSetAuto.Method,
+                Flags,
+                out error,
+                out MethodInfo? setAuto
+            )
+            || !NetherLifecycleInteropBindings.TryResolveExactMethod(
+                concrete,
+                NetherNativeBindingCatalog.BattleSettingsGetSpeed.Method,
+                Flags,
+                out error,
+                out MethodInfo? getSpeed
+            )
+            || !NetherLifecycleInteropBindings.TryResolveExactMethod(
+                concrete,
+                NetherNativeBindingCatalog.BattleSettingsSetSpeed.Method,
+                Flags,
+                out error,
+                out MethodInfo? setSpeed
+            ))
         {
             return false;
         }
 
-        accessor = new NetherBattleSettingsNativeAccessor(settings, getAuto!, setAuto!, getSpeed!, setSpeed!, speedType!);
+        accessor = new NetherBattleSettingsNativeAccessor(
+            settings,
+            getAuto!,
+            setAuto!,
+            getSpeed!,
+            setSpeed!,
+            getSpeed!.ReturnType
+        );
         return true;
     }
 
@@ -133,61 +164,6 @@ internal sealed class NetherBattleSettingsNativeAccessor : INetherBattleSettings
             error = ex.GetType().Name + ":" + ex.Message;
             return false;
         }
-    }
-
-    private static bool TryResolveSpeedMethods(
-        Type concrete,
-        out MethodInfo? getSpeed,
-        out MethodInfo? setSpeed,
-        out Type? speedType,
-        out string error
-    )
-    {
-        getSpeed = null;
-        setSpeed = null;
-        speedType = null;
-        error = string.Empty;
-        MethodInfo[] getters = concrete.GetMethods(Flags)
-            .Where(method => method.Name == "get_Speed" && method.GetParameters().Length == 0
-                && string.Equals(method.ReturnType.FullName, SpeedTypeName, StringComparison.Ordinal))
-            .ToArray();
-        if (getters.Length != 1)
-        {
-            error = "native-settings-get-speed-not-exact:" + getters.Length;
-            return false;
-        }
-        Type resolvedSpeedType = getters[0].ReturnType;
-        MethodInfo[] setters = concrete.GetMethods(Flags)
-            .Where(method => method.Name == "set_Speed" && method.ReturnType == typeof(void)
-                && method.GetParameters().Length == 1 && method.GetParameters()[0].ParameterType == resolvedSpeedType)
-            .ToArray();
-        if (setters.Length != 1)
-        {
-            error = "native-settings-set-speed-not-exact:" + setters.Length;
-            return false;
-        }
-        speedType = resolvedSpeedType;
-        getSpeed = getters[0];
-        setSpeed = setters[0];
-        return true;
-    }
-
-    private static bool TryResolveExact(
-        Type concrete,
-        string name,
-        Type[] parameters,
-        Type returnType,
-        out MethodInfo? result,
-        out string error
-    )
-    {
-        MethodInfo[] matches = concrete.GetMethods(Flags)
-            .Where(method => method.Name == name && method.ReturnType == returnType
-                && method.GetParameters().Select(parameter => parameter.ParameterType).SequenceEqual(parameters))
-            .ToArray();
-        result = matches.Length == 1 ? matches[0] : null;
-        error = result == null ? "native-settings-" + name + "-not-exact:" + matches.Length : string.Empty;
-        return result != null;
     }
 
     private const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;

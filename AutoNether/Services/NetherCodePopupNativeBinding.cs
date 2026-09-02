@@ -26,13 +26,13 @@ internal static class NetherCodePopupNativeBinding
     public const string DetailCallbackObfuscatedName = "<SetupPopupEvent>b__12_3";
     public const string ConfirmCallbackObfuscatedName = "<SetupPopupEvent>b__12_2";
     public const string ConfirmSequenceObfuscatedName =
-        "<OpenAbyssCodeSelectPopupIfNeededAsync>g__HandleConfirmSequenceAsync|19_2";
+        "<OpenAbyssCodeSelectPopupIfNeededAsync>g__HandleConfirmSequenceAsync|35_0";
     public const string CancelSequenceObfuscatedName =
-        "<OpenAbyssCodeSelectPopupIfNeededAsync>g__HandleCancelSequenceAsync|19_3";
+        "<OpenAbyssCodeSelectPopupIfNeededAsync>g__HandleCancelSequenceAsync|35_1";
     public const string ConfirmTask =
-        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_CancellationToken_0";
+        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_Boolean_CancellationToken_PDM_0";
     public const string CancelTask =
-        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_0";
+        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_PDM_0";
 
     public static NetherNativeMethodDescriptor ConfirmDescriptor(string controllerTypeName) => new(
         ConfirmCallback,
@@ -70,7 +70,14 @@ internal static class NetherCodePopupNativeBinding
     public static NetherCodePopupInteropMethodBinding ConfirmTaskBinding(string controllerTypeName) => new(
         ConfirmTask,
         ConfirmSequenceObfuscatedName,
-        new[] { controllerTypeName, "System.Int64", PartyModelTypeName, Il2CppCancellationTokenTypeName },
+        new[]
+        {
+            controllerTypeName,
+            "System.Int64",
+            PartyModelTypeName,
+            "System.Boolean",
+            Il2CppCancellationTokenTypeName,
+        },
         UniTaskTypeName
     ) { IsStatic = true };
 

@@ -6,7 +6,6 @@ using System.Reflection;
 using AutoNether.Services;
 using Cysharp.Threading.Tasks;
 using HarmonyLib;
-using Il2CppInterop.Runtime.InteropTypes.Arrays;
 
 namespace AutoNether.Patches;
 
@@ -41,60 +40,8 @@ internal static class NetherAutoClimbPatch
 [HarmonyPatch]
 internal static class NetherAutoClimbResultPatch
 {
-    private static MethodBase? TargetMethod()
-    {
-        Assembly[] loadedAssemblies = AppDomain.CurrentDomain.GetAssemblies();
-        Type? type = NetherLifecycleInteropBindings.ResolveType(
-            loadedAssemblies,
-            "Project.NetherTop.Result.SubViewController"
-        );
-        Type? partyCharacterType = NetherLifecycleInteropBindings.ResolveType(
-            loadedAssemblies,
-            "Project.NetherTop.Result.NetherResultPartyCharacterModel"
-        );
-        if (type == null || partyCharacterType == null)
-        {
-            NetherAutoClimbController.LogDiagnostic(
-                "binding",
-                new("family", "result-task"),
-                new("outcome", "missing-type"),
-                new("controllerType", type?.FullName ?? "Project.NetherTop.Result.SubViewController"),
-                new("partyType", partyCharacterType?.FullName ?? "Project.NetherTop.Result.NetherResultPartyCharacterModel")
-            );
-            return null;
-        }
-        Type partyCharacterArrayType = typeof(Il2CppReferenceArray<>).MakeGenericType(partyCharacterType);
-
-        foreach (MethodInfo method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-        {
-            if (!string.Equals(method.Name, "CreateNetherResultModelAsync", StringComparison.Ordinal))
-                continue;
-            ParameterInfo[] parameters = method.GetParameters();
-            if (parameters.Length != 2
-                || parameters[0].ParameterType != typeof(bool)
-                || parameters[1].ParameterType != partyCharacterArrayType
-                || method.ReturnType != typeof(UniTask))
-            {
-                continue;
-            }
-            NetherAutoClimbController.LogDiagnostic(
-                "binding",
-                new("family", "result-task"),
-                new("outcome", "resolved"),
-                new("type", type.FullName ?? type.Name),
-                new("method", method.Name)
-            );
-            return method;
-        }
-        NetherAutoClimbController.LogDiagnostic(
-            "binding",
-            new("family", "result-task"),
-            new("outcome", "missing-method"),
-            new("type", type.FullName ?? type.Name),
-            new("method", "CreateNetherResultModelAsync")
-        );
-        return null;
-    }
+    private static MethodBase TargetMethod() =>
+        NetherNativeBindingCatalog.ResolveRequiredMethod(NetherNativeBindingCatalog.ResultTask);
 
     [HarmonyPostfix]
     private static void Postfix(ref UniTask __result)
@@ -221,44 +168,10 @@ internal static class NetherAutoClimbStartStatusTaskPatch
 [HarmonyPatch]
 internal static class NetherAutoClimbBattleResultLifecyclePatch
 {
-    private const BindingFlags InstanceFlags =
-        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-    private static MethodBase? TargetMethod()
-    {
-        Type? type = NetherLifecycleInteropBindings.ResolveType(
-            AppDomain.CurrentDomain.GetAssemblies(),
-            NetherBattleResultNextNativeBinding.ControllerTypeName
+    private static MethodBase TargetMethod() =>
+        NetherNativeBindingCatalog.ResolveRequiredMethod(
+            NetherNativeBindingCatalog.BattleResultViewInitialization
         );
-        if (type == null)
-        {
-            NetherAutoClimbController.LogDiagnostic(
-                "binding",
-                new("family", "battle-result-next"),
-                new("outcome", "missing-type"),
-                new("type", NetherBattleResultNextNativeBinding.ControllerTypeName),
-                new("method", NetherBattleResultNextNativeBinding.InitializeViewDescriptor.Name)
-            );
-            return null;
-        }
-
-        bool resolved = NetherLifecycleInteropBindings.TryResolveExactMethod(
-            type,
-            NetherBattleResultNextNativeBinding.InitializeViewDescriptor,
-            InstanceFlags,
-            out string error,
-            out MethodInfo? method
-        );
-        NetherAutoClimbController.LogDiagnostic(
-            "binding",
-            new("family", "battle-result-next"),
-            new("outcome", resolved ? "resolved" : "missing-method"),
-            new("type", type.FullName ?? type.Name),
-            new("method", NetherBattleResultNextNativeBinding.InitializeViewDescriptor.Name),
-            new("detail", resolved ? "exact-signature" : error)
-        );
-        return method;
-    }
 
     [HarmonyPostfix]
     private static void Postfix(object __instance, ref UniTask __result)
@@ -282,44 +195,8 @@ internal static class NetherAutoClimbBattleResultLifecyclePatch
 [HarmonyPatch]
 internal static class NetherAutoClimbFloorEventSequenceLifecyclePatch
 {
-    private const BindingFlags InstanceFlags =
-        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-    private static MethodBase? TargetMethod()
-    {
-        Type? type = NetherLifecycleInteropBindings.ResolveType(
-            AppDomain.CurrentDomain.GetAssemblies(),
-            NetherFloorEventSequenceNativeBinding.ControllerTypeName
-        );
-        if (type == null)
-        {
-            NetherAutoClimbController.LogDiagnostic(
-                "binding",
-                new("family", "floor-event-sequence"),
-                new("outcome", "missing-type"),
-                new("type", NetherFloorEventSequenceNativeBinding.ControllerTypeName),
-                new("method", NetherFloorEventSequenceNativeBinding.SequenceDescriptor.Name)
-            );
-            return null;
-        }
-
-        bool resolved = NetherLifecycleInteropBindings.TryResolveExactMethod(
-            type,
-            NetherFloorEventSequenceNativeBinding.SequenceDescriptor,
-            InstanceFlags,
-            out string error,
-            out MethodInfo? method
-        );
-        NetherAutoClimbController.LogDiagnostic(
-            "binding",
-            new("family", "floor-event-sequence"),
-            new("outcome", resolved ? "resolved" : "missing-method"),
-            new("type", type.FullName ?? type.Name),
-            new("method", NetherFloorEventSequenceNativeBinding.SequenceDescriptor.Name),
-            new("detail", resolved ? "exact-signature" : error)
-        );
-        return method;
-    }
+    private static MethodBase TargetMethod() =>
+        NetherNativeBindingCatalog.ResolveRequiredMethod(NetherNativeBindingCatalog.FloorEventSequence);
 
     [HarmonyPostfix]
     private static void Postfix(object __instance, ref UniTask __result)

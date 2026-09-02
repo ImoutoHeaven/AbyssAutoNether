@@ -17,11 +17,11 @@ public class NetherCodeLifecyclePatchRegistrationTests
     {
         string source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "AutoNether", "Patches", "PatchManager.cs"));
 
-        const string selection = "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeSelectionLifecyclePatch));";
+        const string selection = "typeof(NetherAutoClimbCodeSelectionLifecyclePatch)";
         const string listInitialization =
-            "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeListInitializationLifecyclePatch));";
-        const string keepCancel = "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeKeepCancelLifecyclePatch));";
-        const string transform = "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbCodeTransformLifecyclePatch));";
+            "typeof(NetherAutoClimbCodeListInitializationLifecyclePatch)";
+        const string keepCancel = "typeof(NetherAutoClimbCodeKeepCancelLifecyclePatch)";
+        const string transform = "typeof(NetherAutoClimbCodeTransformLifecyclePatch)";
         Assert.Empty(Regex.Matches(source, Regex.Escape(selection)).Cast<Match>());
         Assert.Single(Regex.Matches(source, Regex.Escape(listInitialization)).Cast<Match>());
         Assert.Empty(Regex.Matches(source, Regex.Escape(keepCancel)).Cast<Match>());
@@ -37,7 +37,7 @@ public class NetherCodeLifecyclePatchRegistrationTests
         string patch = File.ReadAllText(Path.Combine(root, "AutoNether", "Patches", "NetherAutoClimbPatch.cs"));
 
         const string registration =
-            "Harmony.CreateAndPatchAll(typeof(NetherAutoClimbStartStatusLifecyclePatch));";
+            "typeof(NetherAutoClimbStartStatusLifecyclePatch)";
         Assert.Single(Regex.Matches(manager, Regex.Escape(registration)).Cast<Match>());
         Assert.Contains("GetStartStatusStateMachinePatchTarget()", patch);
         Assert.Contains("ObserveStartStatusStateMachineEnter(__instance)", patch);
@@ -221,7 +221,7 @@ public class NetherCodeLifecyclePatchRegistrationTests
             StringComparison.Ordinal
         );
         int replaceClickIndex = selectMethod.IndexOf(
-            "new NetherNativeMethodDescriptor(\"OnClickReplace\"",
+            "NetherNativeBindingCatalog.CodeListReplace.Method",
             StringComparison.Ordinal
         );
         Assert.True(confirmPreparationIndex >= 0, "missing replacement confirmation preparation");

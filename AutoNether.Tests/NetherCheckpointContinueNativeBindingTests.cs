@@ -19,9 +19,9 @@ public class NetherCheckpointContinueNativeBindingTests
         var flow = new NetherCheckpointNativeFlow();
         Assert.True(flow.Begin(new NetherPlannedAction(NetherActionKind.Continue)));
 
-        Assert.Equal("<SetupPopupEvent>b__9_2", callback.Name);
-        Assert.Equal("_SetupPopupEvent_b__9_2", NetherCheckpointContinueNativeBinding.ContinueCallbackInterop.ManagedName);
-        Assert.Equal("<SetupPopupEvent>b__9_2", NetherCheckpointContinueNativeBinding.ContinueCallbackInterop.ObfuscatedName);
+        Assert.Equal("<SetupPopupEvent>b__10_2", callback.Name);
+        Assert.Equal("_SetupPopupEvent_b__10_2", NetherCheckpointContinueNativeBinding.ContinueCallbackInterop.ManagedName);
+        Assert.Equal("<SetupPopupEvent>b__10_2", NetherCheckpointContinueNativeBinding.ContinueCallbackInterop.ObfuscatedName);
         Assert.True(NetherCheckpointContinueNativeBinding.SubmitContinue(flow, canBoost));
         Assert.Equal((NetherCheckpointNativeStage)expectedStage, flow.Stage);
     }

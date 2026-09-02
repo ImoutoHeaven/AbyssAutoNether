@@ -387,12 +387,11 @@ public sealed class NetherBattleResultCodeCoordinatorTests
     }
 
     [Fact]
-    public void Exhausted_reroll_with_only_evidence_failed_candidates_pauses_without_native_cancel()
+    public void Exhausted_reroll_with_only_evidence_failed_candidates_invokes_native_cancel()
     {
-        // Live log 729+ (2026-08-24): the first offer consumed the one available reroll, then
-        // 20001/20002 failed on target/party evidence and 40026 failed on native effect evidence.
-        // Card-Specific Evidence Failure must hand the still-open popup to the player; KeepCode is
-        // the native cancel path and would irreversibly discard the complete offer.
+        // Live log (2026-09-02): candidate-local evidence failures after the native reroll budget
+        // were mislabeled BindingUnavailable and terminally paused an otherwise healthy runtime.
+        // KeepCode is the native cancel path; structural drift belongs to the startup precheck.
         NetherCodeCandidate first = Candidate(20001, NetherCodeCategory.Rush);
         NetherCodeCandidate second = Candidate(20002, NetherCodeCategory.Rush);
         NetherCodeCandidate third = Candidate(40026, NetherCodeCategory.Risk);
@@ -437,9 +436,8 @@ public sealed class NetherBattleResultCodeCoordinatorTests
 
         NetherBattleResultCodeStep step = flow.Pump(driver, Settings(), null, allowInvoke: true);
 
-        Assert.Equal(NetherBattleResultCodeStepKind.BindingUnavailable, step.Kind);
-        Assert.Contains("no-proven-code-candidate", step.Detail, StringComparison.Ordinal);
-        Assert.Empty(driver.InvokedActions);
+        Assert.Equal(NetherBattleResultCodeStepKind.AwaitingNative, step.Kind);
+        Assert.Equal(NetherActionKind.KeepCode, Assert.Single(driver.InvokedActions).Kind);
     }
 
     [Fact]

@@ -205,9 +205,15 @@ public sealed class NetherLifecycleInteropBindingsTests
         );
         Assert.NotNull(method);
         Assert.Equal("HandleStartEventByStatusAsync", method!.Name);
-        Assert.Equal(new[] { "System.Boolean" }, method.GetParameters()
-            .Select(parameter => parameter.ParameterType.FullName)
-            .ToArray());
+        Assert.Equal(
+            new[]
+            {
+                "System.Boolean",
+                "System.Boolean",
+                "Project.Nether.FloorSelection.NetherSkipRewardsModel",
+            },
+            method.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()
+        );
         Assert.Equal("Cysharp.Threading.Tasks.UniTask", method.ReturnType.FullName);
     }
 
@@ -222,12 +228,12 @@ public sealed class NetherLifecycleInteropBindingsTests
         ));
 
         Assert.Contains(
-            "CreateAndPatchAll(typeof(NetherAutoClimbStartStatusLifecyclePatch))",
+            "typeof(NetherAutoClimbStartStatusLifecyclePatch)",
             source,
             StringComparison.Ordinal
         );
         Assert.Contains(
-            "CreateAndPatchAll(typeof(NetherAutoClimbStartStatusTaskPatch))",
+            "typeof(NetherAutoClimbStartStatusTaskPatch)",
             source,
             StringComparison.Ordinal
         );
@@ -675,8 +681,8 @@ public sealed class NetherLifecycleInteropBindingsTests
         );
         var cases = new[]
         {
-            (continueController, NetherCheckpointContinueNativeBinding.ContinueCallbackInterop, "_SetupPopupEvent_b__9_2"),
-            (continueController, NetherCheckpointContinueNativeBinding.FinishCallbackInterop, "_SetupPopupEvent_b__9_1"),
+            (continueController, NetherCheckpointContinueNativeBinding.ContinueCallbackInterop, "_SetupPopupEvent_b__10_2"),
+            (continueController, NetherCheckpointContinueNativeBinding.FinishCallbackInterop, "_SetupPopupEvent_b__10_1"),
             (boostController, NetherCheckpointContinueNativeBinding.BoostSetCountInterop, "_SetupPopupEvent_b__7_2"),
             (boostController, NetherCheckpointContinueNativeBinding.BoostConfirmInterop, "_SetupPopupEvent_b__7_1"),
         };

@@ -19,7 +19,7 @@ internal static class NetherCodeTransformNativeBinding
     private const string BoolReactivePropertyTypeName = "UniRx.BoolReactiveProperty";
 
     public const string TransformTask =
-        "Method_Internal_Static_UniTask_AbyssCodeListPopupController_NetherModel_NetherEventResultModel_Int64_BoolReactiveProperty_CancellationToken_0";
+        "Method_Internal_Static_UniTask_AbyssCodeListPopupController_NetherModel_NetherEventResultModel_Int64_BoolReactiveProperty_CancellationToken_PDM_0";
     public const string TransformTaskObfuscatedName =
         "<OpenChangeAbyssCodeListPopupByFloorEventAsync>g__HandleChangeAsync|11_1";
 

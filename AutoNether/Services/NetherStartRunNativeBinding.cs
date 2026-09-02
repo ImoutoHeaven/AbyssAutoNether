@@ -20,9 +20,9 @@ internal readonly record struct NetherStartRunNativeRequest(
 /// to match the generated IL2CPP wrapper's positional contract.
 /// </summary>
 internal readonly record struct NetherStartRunNativeInvocation(
+    int PartyNumber,
     int UseTicket,
-    int StartFloorLevel,
-    int PartyNumber
+    int StartFloorLevel
 );
 
 internal static class NetherStartRunNativeBinding
@@ -30,9 +30,9 @@ internal static class NetherStartRunNativeBinding
     public static NetherStartRunNativeInvocation ToNativeInvocation(
         NetherStartRunNativeRequest request
     ) => new(
+        PartyNumber: request.PartyNumber,
         UseTicket: request.TicketCount,
-        StartFloorLevel: request.StartFloorLevel,
-        PartyNumber: request.PartyNumber
+        StartFloorLevel: request.StartFloorLevel
     );
 
     public static NetherNativeActionResult Invoke(
