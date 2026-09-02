@@ -933,7 +933,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
     }
 
     [Fact]
-    public void Production_omits_downstream_recovery_proofs_until_the_prior_battle_replans()
+    public void Production_carries_high_erosion_battle_payload_but_defers_downstream_recovery_proofs()
     {
         // A fresh native Battle result supplies party HP only after the first selected Battle.
         // This Recovery is downstream of that pending result, so it must not publish a stale-HP
@@ -946,7 +946,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             Floor(4, 34, NetherFloorNodeType.MiniBoss, previous: new[] { 3L }),
             Floor(5, 35, NetherFloorNodeType.Boss, previous: new[] { 4L }),
         ];
-        NetherSnapshot snapshot = SnapshotWithHp(55, 1000, floors) with
+        NetherSnapshot snapshot = SnapshotWithHp(85, 1000, floors) with
         {
             CurrentNodeId = 1,
         };
@@ -1001,6 +1001,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
 
         Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
         Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
+        Assert.Equal(90, plan.BattleProjectionByFloorId[2].ProjectedMaximumErosion);
         Assert.False(plan.Context.IsHardSafe(3));
         Assert.Equal("combat-preentry-hp-unavailable:4", plan.Context.HorizonRejection(3));
         Assert.DoesNotContain(102, plan.RecoveryBranchSafetyByPartId.Keys);

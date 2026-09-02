@@ -571,6 +571,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
         var floorInputs = new List<NetherRouteSafetyFloorInput>(serverFloors.Count);
         var safeExitKnown = new Dictionary<long, bool>();
         var payloads = new Dictionary<long, NetherBattleProjectionPayload>();
+        var combatProjections = new Dictionary<long, NetherBattleRouteProjection>();
 
         foreach (NetherFloorNode floor in serverFloors)
         {
@@ -647,15 +648,8 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             });
             safeExitKnown[floor.NodeId] = projection.EvaluatorInput != null;
 
-            if (projection.IsSafe && hasExactPreEntryHp)
-            {
-                payloads[floor.NodeId] = CreatePayload(
-                    snapshot,
-                    floor,
-                    projection,
-                    runtime.ActiveCodeErosion.CodeHash
-                );
-            }
+            if (hasExactPreEntryHp)
+                combatProjections[floor.NodeId] = projection;
         }
 
         NetherRouteSafetyContext context = _contextBuilder.Build(new NetherRouteSafetyContextBuilderInput(
@@ -757,6 +751,19 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 interactivePreEntry,
                 runtime.RecoveryTransformEligibility
             );
+        if (route.SelectedNode is { } selectedNode
+            && IsCombat(selectedNode.NodeType)
+            && context.IsHardSafe(selectedNode.NodeId)
+            && combatProjections.TryGetValue(selectedNode.NodeId, out NetherBattleRouteProjection? selectedProjection)
+            && selectedProjection != null)
+        {
+            payloads[selectedNode.NodeId] = CreatePayload(
+                snapshot,
+                selectedNode,
+                selectedProjection,
+                runtime.ActiveCodeErosion.CodeHash
+            );
+        }
         return new NetherProductionRouteSafetyPlan
         {
             Route = route,
