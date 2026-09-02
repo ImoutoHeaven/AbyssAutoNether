@@ -1091,13 +1091,17 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 RecoveryBranchSimulation simulation = authoritative
                     ? SimulateRecoveryBranch(capture.Input, horizon, projection)
                     : new RecoveryBranchSimulation(false, false, context.HorizonRejection(nodeId));
-                bool optionEvidenceKnown = projection.IsKnown && projection.HasRouteSafetyEvidence
-                    || carriedProofMatches
-                        && projection.ExpectedEffects != null
-                        && projection.ExpectedEffects.Count > 0
-                        && projection.ExpectedEffects.All(effect => effect != null
-                            && effect.Known
-                            && effect.ContentKnown);
+                bool optionEffectEvidenceKnown = projection.ExpectedEffects != null
+                    && projection.ExpectedEffects.Count > 0
+                    && projection.ExpectedEffects.All(effect => effect != null
+                        && effect.Known
+                        && effect.ContentKnown);
+                bool deterministicRecovery = branchKind is
+                    NetherRecoveryBranchKind.Rest or NetherRecoveryBranchKind.Purification;
+                bool optionEvidenceKnown = optionEffectEvidenceKnown
+                    && (carriedProofMatches
+                        || projection.IsKnown
+                            && (projection.HasRouteSafetyEvidence || deterministicRecovery));
                 bool routeSafetyAllowed = projection.RouteSafetyAllowed
                     || carriedProofMatches && carriedProof!.IsNextVisibleBranchSafe;
                 bool isKnown = authoritative && optionEvidenceKnown && simulation.IsKnown;

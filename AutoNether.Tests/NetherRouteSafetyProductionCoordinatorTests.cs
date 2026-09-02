@@ -830,7 +830,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
             Floor(2, 2, NetherFloorNodeType.Recovery, previous: new[] { 1L }),
             Floor(3, 3, NetherFloorNodeType.Boss, previous: new[] { 2L }),
         ];
-        NetherSnapshot snapshot = SnapshotWithHp(68, 500, floors) with
+        NetherSnapshot snapshot = SnapshotWithHp(90, 500, floors) with
         {
             CurrentNodeId = 1,
             TreasureKeyCount = 1,
@@ -853,15 +853,20 @@ public class NetherRouteSafetyProductionCoordinatorTests
             nodeId: 2,
             erosionDelta: 0,
             effects: [new NetherEffect(NetherEffectKind.Heal, 200)]
-        );
+        ) with
+        {
+            HasRouteSafetyEvidence = false,
+            RouteSafetyAllowed = false,
+            Detail = "soft-erosion-limit",
+        };
         NetherInteractiveOptionProjection purification = Projection(
             eventId: 200,
             partId: 2002,
             optionNumber: 2,
             floorId: 2,
             nodeId: 2,
-            erosionDelta: -20,
-            effects: [new NetherEffect(NetherEffectKind.ErosionHeal, 20)]
+            erosionDelta: -30,
+            effects: [new NetherEffect(NetherEffectKind.ErosionHeal, 30)]
         );
         NetherInteractiveOptionProjection transform = Projection(
             eventId: 200,
@@ -895,7 +900,7 @@ public class NetherRouteSafetyProductionCoordinatorTests
                         NetherInteractiveFloorPreEntrySafetyResult.Safe(
                             new Dictionary<long, int> { [200] = 2 },
                             new Dictionary<long, NetherInteractiveOptionProjection> { [200] = purification },
-                            new NetherInteractiveWorstCaseProjection(-20, 0),
+                            new NetherInteractiveWorstCaseProjection(-30, 0),
                             new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
                             {
                                 [new NetherInteractiveEventOptionKey(200, 2001, 1)] = rest,
