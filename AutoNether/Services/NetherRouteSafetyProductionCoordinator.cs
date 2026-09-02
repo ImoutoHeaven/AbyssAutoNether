@@ -505,9 +505,8 @@ internal sealed record NetherProductionRouteSafetyPlan
     public NetherRankFiveKeyProcurementDecision RankFiveKeyProcurement { get; init; } =
         NetherRankFiveKeyProcurementDecision.Unknown("rank-five-procurement-not-evaluated");
     /// <summary>
-    /// Exact Recovery option proofs executable before the next unsettled Battle on the selected
-    /// route. The bridge binds this map only to native rows owning these parts; later Recovery
-    /// rows are re-evaluated from that Battle's authoritative snapshot.
+    /// Exact Recovery option proofs for the immediately selected route entry. The bridge scopes
+    /// them by runtime node; every later Recovery is re-evaluated after the selected mutation.
     /// </summary>
     public IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> RecoveryBranchSafetyByPartId { get; init; } =
         new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
@@ -745,7 +744,6 @@ internal sealed class NetherRouteSafetyProductionCoordinator
         );
         IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryBranchSafety =
             BuildRecoveryBranchSafetyEvidence(
-                snapshot,
                 context,
                 route,
                 interactivePreEntry,
@@ -1031,7 +1029,6 @@ internal sealed class NetherRouteSafetyProductionCoordinator
 
     private IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>
         BuildRecoveryBranchSafetyEvidence(
-            NetherSnapshot snapshot,
             NetherRouteSafetyContext context,
             NetherRoutePlan route,
             NetherRuntimeInteractivePreEntryInputsResult? interactivePreEntry,
@@ -1039,8 +1036,10 @@ internal sealed class NetherRouteSafetyProductionCoordinator
         )
     {
         var proofs = new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+        long selectedNodeId = route?.SelectedNode?.NodeId ?? 0;
         if (context == null
             || route == null
+            || selectedNodeId <= 0
             || route.SelectedPathNodeIds == null
             || route.SelectedPathNodeIds.Count < 2
             || interactivePreEntry == null
@@ -1057,10 +1056,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
             // that identity. A mismatch means this capture cannot authorize another branch.
             if (nodeId <= 0
                 || capture.Input.FloorNodeId != nodeId
-                || !route.SelectedPathNodeIds.Contains(nodeId)
-                // The native Battle clear response owns the next party HP. A Recovery beyond that
-                // Battle must be planned from the fresh response, not bound to this stale snapshot.
-                || NetherRecoveryBranchProofScope.IsDeferredUntilBattleReplan(snapshot, route, nodeId))
+                || nodeId != selectedNodeId)
                 continue;
             NetherRouteHorizonSafetyEvaluation? horizon = context.HorizonEvaluation(nodeId);
             bool complete = IsSelectedCompleteHorizon(route.SelectedPathNodeIds, nodeId, horizon);
@@ -1087,6 +1083,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                     out NetherRecoveryBranchSafetyEvidence? carriedProof
                 )
                     && carriedProof.IsAuthoritative
+                    && carriedProof.NodeId == nodeId
                     && carriedProof.BranchKind == branchKind;
                 RecoveryBranchSimulation simulation = authoritative
                     ? SimulateRecoveryBranch(capture.Input, horizon, projection)
@@ -1107,6 +1104,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 bool isKnown = authoritative && optionEvidenceKnown && simulation.IsKnown;
                 var evidence = new NetherRecoveryBranchSafetyEvidence
                 {
+                    NodeId = nodeId,
                     BranchKind = branchKind,
                     IsKnown = isKnown,
                     IsCompleteVisibleBranch = complete,
@@ -1137,6 +1135,7 @@ internal sealed class NetherRouteSafetyProductionCoordinator
                 {
                     proofs[key.EventPartId] = new NetherRecoveryBranchSafetyEvidence
                     {
+                        NodeId = nodeId,
                         UnknownReason = "ambiguous-recovery-branch-proof-identity",
                     };
                 }

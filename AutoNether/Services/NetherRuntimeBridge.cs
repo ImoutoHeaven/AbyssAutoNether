@@ -444,9 +444,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _pendingRecoveryBranchSafetyByPartId = proofs == null
                 ? new Dictionary<long, NetherRecoveryBranchSafetyEvidence>()
                 : new Dictionary<long, NetherRecoveryBranchSafetyEvidence>(proofs);
-            // A second capture evaluates the complete policy only for a native Recovery row that
-            // owns one of these exact part proofs. Rows beyond an unsettled Battle remain local
-            // until that Battle's authoritative replan supplies their own proof.
+            // A second capture evaluates the complete policy only for the selected runtime node.
+            // Every other Recovery remains local until its own authoritative replan.
             _requireCompleteRecoveryBranchSafety = true;
         }
     }
@@ -1503,6 +1502,11 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
                 if (!TryReadRuntimeFloorNodeIdentity(floor, out long runtimeNodeId, out string identityError))
                     return NetherRuntimeInteractivePreEntryInputsResult.Failure(identityError);
+                IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> recoveryProofsForNode =
+                    NetherRecoveryBranchProofScope.ForNode(
+                        recoveryBranchSafetyByPartId,
+                        runtimeNodeId
+                    );
 
                 var request = new NetherRuntimeInteractivePreEntryCaptureRequest(
                     FloorModel: floor,
@@ -1523,10 +1527,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     ItemRows = itemRows,
                     BattleRows = battleRows,
                     CommittedProcurementByOption = committedProcurement,
-                    RecoveryBranchSafetyByPartId = recoveryBranchSafetyByPartId,
-                    // Scope the complete policy to this native Recovery row. A proof for an
-                    // earlier route-owned Recovery must not make a later post-Battle Recovery use
-                    // stale current HP during this capture.
+                    RecoveryBranchSafetyByPartId = recoveryProofsForNode,
+                    // Scope the complete policy to this runtime Recovery node. A proof for the
+                    // selected node must not certify a later node that reuses the same native row.
                     RequireCompleteRecoveryBranchSafety = false,
                     RankFiveKeyProcurement = rankFiveKeyProcurement,
                     TypedSemanticProvider = typedSemanticProvider,
@@ -1538,7 +1541,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     && result.Input != null
                     && NetherRecoveryBranchProofScope.RequiresCompleteProofForCapturedFloor(
                         result.Input,
-                        recoveryBranchSafetyByPartId
+                        recoveryProofsForNode
                     ))
                 {
                     result = InteractivePreEntryInputCapture.Capture(request with
@@ -2392,6 +2395,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                         "route-active-code-erosion-projection-unavailable"
                     )
                 : null;
+            long routeOwnedNodeId = context.NodeId > 0
+                ? context.NodeId
+                : routeBranchIdentity?.SelectedNodeId ?? 0;
+            recoveryBranchSafetyByPartId = NetherRecoveryBranchProofScope.ForNode(
+                recoveryBranchSafetyByPartId,
+                routeOwnedNodeId
+            );
             context = NetherEventProductionEvidenceBinding.Bind(
                 context with
                 {
@@ -2400,9 +2410,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     RecoveryBranchSafetyByPartId = recoveryBranchSafetyByPartId,
                     // The native controllers keep no node identity, so the route's own committed
                     // entry node is what correlates this popup with its pre-entry capture.
-                    RouteOwnedNodeId = context.NodeId > 0
-                        ? context.NodeId
-                        : routeBranchIdentity?.SelectedNodeId ?? 0,
+                    RouteOwnedNodeId = routeOwnedNodeId,
                     ShopProcurementCommitment = shopProcurementCommitment,
                 },
                 strategyPackage,

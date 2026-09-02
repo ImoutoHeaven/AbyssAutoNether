@@ -60,6 +60,7 @@ public sealed class NetherRecoveryBranchProofScopeTests
         {
             [102] = new NetherRecoveryBranchSafetyEvidence
             {
+                NodeId = 3,
                 BranchKind = NetherRecoveryBranchKind.Rest,
                 IsKnown = true,
                 IsCompleteVisibleBranch = true,
@@ -73,6 +74,10 @@ public sealed class NetherRecoveryBranchProofScopeTests
         ));
         Assert.False(NetherRecoveryBranchProofScope.RequiresCompleteProofForCapturedFloor(
             Input(eventId: 355, part1: 202, part2: 502, part3: 800),
+            proofs
+        ));
+        Assert.False(NetherRecoveryBranchProofScope.RequiresCompleteProofForCapturedFloor(
+            Input(eventId: 354, part1: 102, part2: 402, part3: 700) with { FloorNodeId = 4 },
             proofs
         ));
     }

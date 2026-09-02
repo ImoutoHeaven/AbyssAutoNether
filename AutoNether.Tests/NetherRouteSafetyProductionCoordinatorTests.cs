@@ -938,6 +938,81 @@ public class NetherRouteSafetyProductionCoordinatorTests
     }
 
     [Fact]
+    public void Production_recovery_proofs_do_not_merge_reused_native_parts_across_route_nodes()
+    {
+        NetherFloorNode[] floors =
+        [
+            Floor(1, 1, NetherFloorNodeType.Battle, previous: Array.Empty<long>()),
+            Floor(2, 2, NetherFloorNodeType.Recovery, previous: new[] { 1L }),
+            Floor(3, 3, NetherFloorNodeType.Recovery, previous: new[] { 2L }),
+            Floor(4, 4, NetherFloorNodeType.Boss, previous: new[] { 3L }),
+        ];
+        NetherSnapshot snapshot = SnapshotWithHp(80, 200, floors) with
+        {
+            CurrentNodeId = 1,
+        };
+        NetherAutoClimbSettings settings = Settings();
+
+        NetherInteractiveFloorPreEntrySafetyResult RecoverySafety(long nodeId, bool selectRest)
+        {
+            NetherInteractiveOptionProjection rest = Projection(
+                354, 102, 2, nodeId, nodeId, 0,
+                [new NetherEffect(NetherEffectKind.Heal, 300)]
+            );
+            NetherInteractiveOptionProjection purification = Projection(
+                354, 402, 1, nodeId, nodeId, -30,
+                [new NetherEffect(NetherEffectKind.ErosionHeal, 30)]
+            );
+            NetherInteractiveOptionProjection transform = Projection(
+                354, 700, 3, nodeId, nodeId, 0,
+                [new NetherEffect(NetherEffectKind.AbyssCodeTransform, 0)]
+            );
+            NetherInteractiveOptionProjection selected = selectRest ? rest : purification;
+            return NetherInteractiveFloorPreEntrySafetyResult.Safe(
+                new Dictionary<long, int> { [354] = selected.OptionNumber },
+                new Dictionary<long, NetherInteractiveOptionProjection> { [354] = selected },
+                new NetherInteractiveWorstCaseProjection(selected.ErosionDelta, selected.HpDelta),
+                new Dictionary<NetherInteractiveEventOptionKey, NetherInteractiveOptionProjection>
+                {
+                    [new NetherInteractiveEventOptionKey(354, 102, 2)] = rest,
+                    [new NetherInteractiveEventOptionKey(354, 402, 1)] = purification,
+                    [new NetherInteractiveEventOptionKey(354, 700, 3)] = transform,
+                }
+            );
+        }
+
+        NetherRuntimeInteractivePreEntryInputsResult capture = InteractiveCapture(
+            snapshot,
+            settings,
+            new Dictionary<long, NetherInteractiveFloorPreEntryCaptureSpec>
+            {
+                [2] = new(NetherFloorNodeType.Recovery, RecoverySafety(2, selectRest: true)),
+                [3] = new(NetherFloorNodeType.Recovery, RecoverySafety(3, selectRest: false)),
+            }
+        );
+
+        NetherProductionRouteSafetyPlan plan = new NetherRouteSafetyProductionCoordinator().Plan(
+            snapshot,
+            130,
+            settings,
+            Runtime(
+                snapshot,
+                hpPermille: 200,
+                bounds: new Dictionary<long, NetherFloorMasterBounds> { [4] = Bounds(4, 0, 0) }
+            ),
+            capture
+        );
+
+        Assert.True(plan.Route.HasSelection, plan.Route.PauseReason + ":" + plan.Route.PauseDetail);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.Route.SelectedNode).NodeId);
+        Assert.DoesNotContain(
+            plan.RecoveryBranchSafetyByPartId.Values,
+            proof => proof.UnknownReason == "ambiguous-recovery-branch-proof-identity"
+        );
+        Assert.All(plan.RecoveryBranchSafetyByPartId.Values, proof => Assert.Equal(2, proof.NodeId));
+    }
+
+    [Fact]
     public void Production_carries_high_erosion_battle_payload_but_defers_downstream_recovery_proofs()
     {
         // A fresh native Battle result supplies party HP only after the first selected Battle.

@@ -291,6 +291,7 @@ internal enum NetherRecoveryBranchKind
 /// </summary>
 internal sealed record NetherRecoveryBranchSafetyEvidence
 {
+    public long NodeId { get; init; }
     public NetherRecoveryBranchKind BranchKind { get; init; }
     public bool IsKnown { get; init; }
     public bool IsCompleteVisibleBranch { get; init; }

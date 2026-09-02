@@ -5,12 +5,29 @@ using System.Collections.Generic;
 namespace AutoNether.Services;
 
 /// <summary>
-/// Keeps Recovery proof binding scoped to the portion of the selected route that can run before
-/// the next native Battle settlement. A downstream Recovery is re-evaluated from the authoritative
-/// post-Battle snapshot; stale HP must neither certify it nor poison the current frontier.
+/// Keeps Recovery proof binding scoped to the immediately selected runtime node. Every confirmed
+/// floor mutation creates a fresh planning boundary; stale state must neither certify a later
+/// Recovery nor poison the current frontier.
 /// </summary>
 internal static class NetherRecoveryBranchProofScope
 {
+    public static IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> ForNode(
+        IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence>? proofs,
+        long nodeId
+    )
+    {
+        var scoped = new Dictionary<long, NetherRecoveryBranchSafetyEvidence>();
+        if (proofs == null || nodeId <= 0)
+            return scoped;
+
+        foreach ((long partId, NetherRecoveryBranchSafetyEvidence proof) in proofs)
+        {
+            if (proof.NodeId == nodeId)
+                scoped[partId] = proof;
+        }
+        return scoped;
+    }
+
     public static bool IsDeferredUntilBattleReplan(
         NetherSnapshot? snapshot,
         NetherRoutePlan? route,
@@ -95,16 +112,20 @@ internal static class NetherRecoveryBranchProofScope
         if (resolved is not NetherFloorEventMasterRow eventRow)
             return false;
 
-        return HasBoundProof(eventRow.PartId1, proofs)
-            || HasBoundProof(eventRow.PartId2, proofs)
-            || HasBoundProof(eventRow.PartId3, proofs)
-            || HasBoundProof(eventRow.PartId4, proofs);
+        return HasBoundProof(eventRow.PartId1, input.FloorNodeId, proofs)
+            || HasBoundProof(eventRow.PartId2, input.FloorNodeId, proofs)
+            || HasBoundProof(eventRow.PartId3, input.FloorNodeId, proofs)
+            || HasBoundProof(eventRow.PartId4, input.FloorNodeId, proofs);
     }
 
     private static bool HasBoundProof(
         long eventPartId,
+        long nodeId,
         IReadOnlyDictionary<long, NetherRecoveryBranchSafetyEvidence> proofs
-    ) => eventPartId > 0 && proofs.ContainsKey(eventPartId);
+    ) => eventPartId > 0
+        && nodeId > 0
+        && proofs.TryGetValue(eventPartId, out NetherRecoveryBranchSafetyEvidence? proof)
+        && proof.NodeId == nodeId;
 
     private static bool IsCombat(NetherFloorNodeType nodeType) => nodeType is
         NetherFloorNodeType.Battle or NetherFloorNodeType.MiniBoss or NetherFloorNodeType.Boss;

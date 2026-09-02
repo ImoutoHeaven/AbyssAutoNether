@@ -464,6 +464,7 @@ public sealed class NetherRecoveryPopupProductionEvidenceTests
         bool nextVisibleBranchSafe
     ) => new()
     {
+        NodeId = SelectedNodeId,
         BranchKind = kind,
         IsKnown = true,
         IsCompleteVisibleBranch = true,

@@ -2903,19 +2903,10 @@ internal static class NetherAutoClimbController
             .Where(group => group.Count() == 1)
             .ToDictionary(group => group.Key, group => group.Single());
         long currentNodeId = snapshot.CurrentNodeId > 0 ? snapshot.CurrentNodeId : snapshot.CurrentFloorId;
-        foreach (long nodeId in expected.Route.SelectedPathNodeIds.Skip(1))
+        long nodeId = expected.Route.SelectedNode?.NodeId ?? 0;
+        if (floors.TryGetValue(nodeId, out NetherFloorNode? floor)
+            && floor.NodeType == NetherFloorNodeType.Recovery)
         {
-            if (!floors.TryGetValue(nodeId, out NetherFloorNode? floor)
-                || floor.NodeType != NetherFloorNodeType.Recovery)
-                continue;
-            if (NetherRecoveryBranchProofScope.IsDeferredUntilBattleReplan(
-                    snapshot,
-                    expected.Route,
-                    nodeId
-                ))
-            {
-                continue;
-            }
             if (!actual.ByFloorNodeId.TryGetValue(nodeId, out NetherRuntimeInteractivePreEntryCaptureResult? capture)
                 || capture.Input == null
                 || capture.Input.FloorNodeId != nodeId
