@@ -287,8 +287,7 @@ internal sealed class NetherRouteSafetyContextBuilder
                 HasExactPreEntryHpEvidence = floor.HasExactPreEntryHpEvidence
                     && evaluation.CurrentHpPermille != null
                     && evaluation.CurrentHpPermille.Count > 0,
-                IsConfirmedRecovery = floor.ServerNode.NodeType == NetherFloorNodeType.Recovery
-                    && baseDelta < 0,
+                IsConfirmedRecovery = baseDelta < 0,
                 IsNecessaryCombat = IsCombat(floor.ServerNode.NodeType),
                 IsTerminalBoss = floor.ServerNode.NodeType == NetherFloorNodeType.Boss
                     && path[^1] == nodeId,

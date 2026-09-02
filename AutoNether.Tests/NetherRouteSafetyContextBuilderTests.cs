@@ -173,6 +173,40 @@ public class NetherRouteSafetyContextBuilderTests
     }
 
     [Fact]
+    public void Certain_event_erosion_reduction_proves_the_accessible_route_to_the_terminal_boss()
+    {
+        NetherRouteSafetyFloorInput[] floors =
+        [
+            Floor(1, 58, NetherFloorNodeType.MiniBoss, currentErosion: 70),
+            Floor(
+                2,
+                59,
+                NetherFloorNodeType.Event,
+                currentErosion: 70,
+                minimum: -15,
+                maximum: -15,
+                previous: new long[] { 1 }
+            ),
+            Floor(
+                3,
+                60,
+                NetherFloorNodeType.Boss,
+                currentErosion: 70,
+                minimum: 10,
+                maximum: 10,
+                previous: new long[] { 2 }
+            ),
+        ];
+
+        NetherRouteSafetyContext context = Build(floors, terminals: new HashSet<long> { 3 });
+        NetherRoutePlan plan = new NetherRoutePlanner().Plan(Snapshot(1, 70, floors), context);
+
+        Assert.True(context.IsHardSafe(2), context.HorizonRejection(2));
+        Assert.Equal(65, context.HorizonEvaluation(2)!.FinalErosion);
+        Assert.Equal(2, Assert.IsType<NetherFloorNode>(plan.SelectedNode).FloorId);
+    }
+
+    [Fact]
     public void MissingSafeExitKey_ProducesAllExplicitUnsafeDictionaryEntriesForThatCandidate()
     {
         NetherRouteSafetyFloorInput[] floors =
