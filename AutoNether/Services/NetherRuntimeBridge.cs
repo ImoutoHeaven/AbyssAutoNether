@@ -220,6 +220,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private const string ReturnPopupControllerTypeName = "Project.Nether.NetherReturnItemSelectionPopup.NetherReturnItemSelectionPopupController";
     private const string ReturnScrollControllerTypeName = "Project.Nether.NetherReturnItemSelectionPopup.NetherReturnableItemScrollViewController";
     private const string ContinuePopupControllerTypeName = "Project.Nether.NetherContinueConfirmPopup.NetherContinueConfirmPopupController";
+    private const string SkipPopupControllerTypeName = NetherCheckpointContinueNativeBinding.SkipControllerTypeName;
     private const string BoostPopupControllerTypeName = "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopupController";
     private const string ContentAcquiredPopupControllerTypeName =
         "Project.Nether.NetherContentAcquiredPopup.NetherContentAcquiredPopupController";
@@ -324,6 +325,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private PopupRegistration? _codeTransformCompletePopup;
     private PopupRegistration? _returnPopup;
     private PopupRegistration? _continuePopup;
+    private PopupRegistration? _skipPopup;
     private PopupRegistration? _boostPopup;
     private PopupRegistration? _erosionPointNotificationPopup;
     private PopupRegistration? _floorEventHintPopup;
@@ -343,6 +345,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private NetherPlannedAction? _pendingCheckpointAction;
     private readonly NetherCheckpointNativeFlow _checkpointFlow = new();
     private readonly NetherNativeWaitGate _checkpointParentTaskWait = new(maximumMissingPolls: 600);
+    private readonly NetherNativeWaitGate _checkpointSkipDecisionWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _checkpointTerminalTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherCheckpointPopupWaitCoordinator _checkpointPopupWait;
     private object? _checkpointParentTask;
@@ -3739,7 +3742,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 return NetherNativeActionResult.BindingUnavailable("missing-continue-native-parent");
 
             // PollCheckpointFlow drives only the already-started exact controller sequence
-            // (Continue/Boost/Return and its parent UniTask); it never starts a second action.
+            // (Continue/Skip/Boost/Return and its parent UniTask); it never starts a second action.
             return PollCheckpointFlow();
         }
     }
@@ -4808,6 +4811,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _codeTransformCompletePopup = null;
             _returnPopup = null;
             _continuePopup = null;
+            _skipPopup = null;
             _boostPopup = null;
             _erosionPointNotificationPopup = null;
             _floorEventHintPopup = null;
@@ -4986,6 +4990,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _codeTransformCompletePopup = null;
         _returnPopup = null;
         _continuePopup = null;
+        _skipPopup = null;
         _boostPopup = null;
         _erosionPointNotificationPopup = null;
         _floorEventHintPopup = null;
@@ -5062,6 +5067,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 {
                     _returnPopup = null;
                     _continuePopup = null;
+                    _skipPopup = null;
                     _boostPopup = null;
                     _returnScrollController = null;
                     _nativeActionTask = null;
@@ -5295,7 +5301,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
             else if (_pendingCheckpointAction is NetherPlannedAction checkpointAction
                 && _checkpointOwnerGeneration > 0
-                && typeName is ContinuePopupControllerTypeName or BoostPopupControllerTypeName or ReturnPopupControllerTypeName)
+                && typeName is ContinuePopupControllerTypeName
+                    or SkipPopupControllerTypeName
+                    or BoostPopupControllerTypeName
+                    or ReturnPopupControllerTypeName)
             {
                 ownerAction = checkpointAction.Kind;
                 ownerGeneration = _checkpointOwnerGeneration;
@@ -5440,6 +5449,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                             );
                     }
                     break;
+                case SkipPopupControllerTypeName:
+                    _skipPopup = registration;
+                    break;
                 case BoostPopupControllerTypeName:
                     _boostPopup = registration;
                     break;
@@ -5582,6 +5594,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             InvalidatePopup(ref _codeTransformCompletePopup, popup);
             InvalidatePopup(ref _returnPopup, popup);
             InvalidatePopup(ref _continuePopup, popup);
+            InvalidatePopup(ref _skipPopup, popup);
             InvalidatePopup(ref _boostPopup, popup);
             InvalidatePopup(ref _erosionPointNotificationPopup, popup);
             InvalidatePopup(ref _floorEventHintPopup, popup);
@@ -5614,6 +5627,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _codeListPopup,
                 _returnPopup,
                 _continuePopup,
+                _skipPopup,
                 _boostPopup,
             })
         {
@@ -8222,12 +8236,14 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             floorController = _floorSelectionController;
             if (!adoptedRecoveredParent)
                 _continuePopup = null;
+            _skipPopup = null;
             _boostPopup = null;
             _returnPopup = null;
             _returnScrollController = null;
             _checkpointParentTask = null;
             _checkpointChildTask = null;
             _checkpointParentTaskWait.Clear();
+            _checkpointSkipDecisionWait.Clear();
             _checkpointTerminalTaskWait.Clear();
             _pendingCheckpointAction = action;
             if (adoptedRecoveredParent)
@@ -8309,6 +8325,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherNativeActionResult result = stage switch
         {
             NetherCheckpointNativeStage.AwaitingContinuePopup => PollCheckpointContinuePopup(action),
+            NetherCheckpointNativeStage.AwaitingSkipDecision => PollCheckpointSkipDecision(),
             NetherCheckpointNativeStage.AwaitingBoostConfirmation => PollCheckpointBoostPopup(),
             NetherCheckpointNativeStage.AwaitingPristineReturnPopup => PollCheckpointReturnPopup(action),
             NetherCheckpointNativeStage.AwaitingTerminalTask => PollCheckpointTerminalTask(),
@@ -8364,9 +8381,9 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 );
             }
             // RO ISIL: the generated <SetupPopupEvent>b__10_2 Unit callback is the exact
-            // Continue entry for both _canBoost values.  When true it opens the owned Boost
-            // confirmation popup; when false it proceeds to the native one-ticket parent.
-            // b__10_1 is Return/finish and must never stand in for Continue.
+            // Continue entry for both _canBoost values.  The current client may first open its
+            // optional Skip popup; only its exact do-not-execute callback may resume the original
+            // one-ticket path.  b__10_1 is Return/finish and must never stand in for Continue.
             callback = TryInvokeVersionedGeneratedCallback(
                 registration.Controller,
                 NetherCheckpointContinueNativeBinding.ContinueCallbackInterop,
@@ -8400,6 +8417,69 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             return TerminalCheckpointFailure(callback);
 
         return NetherNativeActionResult.Started("native-checkpoint-callback-submitted");
+    }
+
+    private NetherNativeActionResult PollCheckpointSkipDecision()
+    {
+        if (_skipPopup is PopupRegistration registration)
+        {
+            NetherCheckpointPopupWaitResult wait = WaitForCheckpointPopup(
+                NetherCheckpointPopupKind.Skip,
+                registration
+            );
+            if (wait.Kind != NetherCheckpointPopupWaitResultKind.Ready)
+                return ToCheckpointWaitResult(wait);
+            if (!IsCurrentCheckpointPopup(registration, NetherCheckpointPopupKind.Skip)
+                || registration.Close == null)
+            {
+                return TerminalCheckpointFailure(
+                    NetherNativeActionResult.BindingUnavailable("stale-native-checkpoint-skip-popup")
+                );
+            }
+
+            NetherNativeActionResult decline = TryInvokeVersionedGeneratedCallback(
+                registration.Controller,
+                NetherCheckpointContinueNativeBinding.SkipDeclineCallbackInterop,
+                new object?[] { null, registration.Close },
+                "checkpoint-skip-decline"
+            );
+            if (decline.Kind != NetherNativeActionResultKind.Started)
+                return TerminalCheckpointFailure(decline);
+            return ResolveCheckpointSkipDecision("native-checkpoint-skip-declined");
+        }
+
+        if ((_boostPopup is PopupRegistration boost
+                && IsCurrentCheckpointPopup(boost, NetherCheckpointPopupKind.Boost))
+            || (_returnPopup is PopupRegistration returnPopup
+                && IsCurrentCheckpointPopup(returnPopup, NetherCheckpointPopupKind.Return)))
+        {
+            return ResolveCheckpointSkipDecision("native-checkpoint-skip-not-offered:continuation-popup");
+        }
+
+        NetherNativeActionResult parent = PollCheckpointParent();
+        if (parent.Kind == NetherNativeActionResultKind.Completed)
+            return ResolveCheckpointSkipDecision("native-checkpoint-skip-not-offered:parent-completed");
+        if (parent.Kind != NetherNativeActionResultKind.Started)
+            return TerminalCheckpointFailure(parent);
+
+        NetherNativeActionResult waitForBranch = _checkpointSkipDecisionWait.AwaitRegistration(
+            "checkpoint-skip-or-continuation"
+        );
+        return waitForBranch.Kind == NetherNativeActionResultKind.Started
+            ? waitForBranch
+            : TerminalCheckpointFailure(waitForBranch);
+    }
+
+    private NetherNativeActionResult ResolveCheckpointSkipDecision(string detail)
+    {
+        _checkpointSkipDecisionWait.Clear();
+        if (!_checkpointFlow.ResolveSkipDecision())
+        {
+            return TerminalCheckpointFailure(
+                NetherNativeActionResult.BindingUnavailable("invalid-native-checkpoint-skip-sequence")
+            );
+        }
+        return NetherNativeActionResult.Started(detail);
     }
 
     private NetherNativeActionResult PollCheckpointBoostPopup()
@@ -8627,7 +8707,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         && registration.OwnerAction == _pendingCheckpointAction?.Kind
         && registration.OwnerGeneration == _checkpointOwnerGeneration
         && registration.Sequence > _checkpointMinimumSequence
-        && kind is NetherCheckpointPopupKind.Continue or NetherCheckpointPopupKind.Boost or NetherCheckpointPopupKind.Return;
+        && kind is NetherCheckpointPopupKind.Continue
+            or NetherCheckpointPopupKind.Skip
+            or NetherCheckpointPopupKind.Boost
+            or NetherCheckpointPopupKind.Return;
 
     private NetherNativeActionResult TerminalCheckpointFailure(NetherNativeActionResult result)
     {
@@ -8658,6 +8741,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _checkpointParentTask = null;
         _checkpointChildTask = null;
         _checkpointParentTaskWait.Clear();
+        _checkpointSkipDecisionWait.Clear();
         _checkpointTerminalTaskWait.Clear();
         _checkpointOwnerGeneration = 0;
         _checkpointMinimumSequence = 0;
@@ -8674,10 +8758,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _checkpointParentTask = null;
         _checkpointChildTask = null;
         _checkpointParentTaskWait.Clear();
+        _checkpointSkipDecisionWait.Clear();
         _checkpointTerminalTaskWait.Clear();
         _checkpointOwnerGeneration = 0;
         _checkpointMinimumSequence = 0;
         _continuePopup = null;
+        _skipPopup = null;
         _boostPopup = null;
         _returnPopup = null;
         _returnScrollController = null;

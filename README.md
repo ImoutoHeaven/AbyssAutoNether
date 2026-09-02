@@ -18,7 +18,7 @@ AutoNether 在读取自己的配置、创建组件、初始化 controller 或安
 兼容时日志包含：
 
 ```text
-AutoNether native compatibility precheck passed: methods=61, generated=17.
+AutoNether native compatibility precheck passed: methods=62, generated=18.
 ```
 
 不兼容时日志包含一项或多项 `[AutoNether precheck]` 错误，随后由 BepInEx 报告插件加载失败。此时不要继续自动爬塔或手动绕过；需要针对当前游戏程序集更新原生绑定。

@@ -377,6 +377,10 @@ internal static class NetherNativeBindingCatalog
                 NetherCheckpointContinueNativeBinding.FinishCallbackInterop
             ),
             Generated(
+                NetherCheckpointContinueNativeBinding.SkipControllerTypeName,
+                NetherCheckpointContinueNativeBinding.SkipDeclineCallbackInterop
+            ),
+            Generated(
                 "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopupController",
                 NetherCheckpointContinueNativeBinding.BoostSetCountInterop
             ),

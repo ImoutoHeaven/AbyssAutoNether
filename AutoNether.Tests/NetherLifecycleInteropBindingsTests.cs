@@ -355,10 +355,10 @@ public sealed class NetherLifecycleInteropBindingsTests
             resolvedNames.Add(method!.Name);
         }
 
-        Assert.Equal(29, bindings.Length);
+        Assert.Equal(30, bindings.Length);
         Assert.Empty(failures);
         Assert.Contains("Project_ISubService_Terminate", resolvedNames);
-        Assert.Equal(18, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
+        Assert.Equal(19, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
         Assert.Equal(
             new[] { "OnEntered", "OnInitializeAsync", "OnRefreshAsync" },
             bindings
@@ -642,6 +642,29 @@ public sealed class NetherLifecycleInteropBindingsTests
     }
 
     [Fact]
+    public void Packaged_checkpoint_skip_popup_is_cataloged_with_its_exact_lifecycle_signature()
+    {
+        using var packaged = PackagedProjectAssembly.Load();
+        Type controller = packaged.RequireType(
+            NetherCheckpointContinueNativeBinding.SkipControllerTypeName
+        );
+        NetherInteropPatchBinding setup = Assert.Single(
+            NetherLifecycleInteropBindings.All,
+            binding => binding.TypeName == controller.FullName
+                && binding.Method.Name == "SetupPopupEvent"
+        );
+
+        Assert.Equal(
+            new[]
+            {
+                "Project.NetherSkipPopup.NetherSkipPopup",
+                "Il2CppSystem.Action",
+            },
+            setup.Method.ParameterTypeNames
+        );
+    }
+
+    [Fact]
     public void Packaged_read_only_nether_sync_resolves_by_exact_interop_signature()
     {
         using var packaged = PackagedProjectAssembly.Load();
@@ -679,10 +702,14 @@ public sealed class NetherLifecycleInteropBindingsTests
         Type boostController = packaged.RequireType(
             "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopupController"
         );
+        Type skipController = packaged.RequireType(
+            NetherCheckpointContinueNativeBinding.SkipControllerTypeName
+        );
         var cases = new[]
         {
             (continueController, NetherCheckpointContinueNativeBinding.ContinueCallbackInterop, "_SetupPopupEvent_b__10_2"),
             (continueController, NetherCheckpointContinueNativeBinding.FinishCallbackInterop, "_SetupPopupEvent_b__10_1"),
+            (skipController, NetherCheckpointContinueNativeBinding.SkipDeclineCallbackInterop, "_SetupPopupEvent_b__7_0"),
             (boostController, NetherCheckpointContinueNativeBinding.BoostSetCountInterop, "_SetupPopupEvent_b__7_2"),
             (boostController, NetherCheckpointContinueNativeBinding.BoostConfirmInterop, "_SetupPopupEvent_b__7_1"),
         };

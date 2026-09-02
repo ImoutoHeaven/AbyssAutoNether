@@ -9,6 +9,7 @@ namespace AutoNether.Services;
 internal enum NetherCheckpointPopupKind
 {
     Continue,
+    Skip,
     Boost,
     Return,
     ReturnScroll,
@@ -62,7 +63,7 @@ internal readonly record struct NetherCheckpointPopupWaitResult(
 }
 
 /// <summary>
-/// Bounded, owner-aware waits for the four native checkpoint registrations.  Every wait pumps
+/// Bounded, owner-aware waits for the five native checkpoint registrations.  Every wait pumps
 /// the original parent in parallel: a parent fault/cancel wins immediately, while a parent
 /// completion may briefly precede UI registration.  That late-registration window uses the same
 /// finite budget as a pending parent, then becomes named early-complete evidence instead of an
@@ -86,6 +87,7 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
         _gates = new Dictionary<NetherCheckpointPopupKind, NetherNativeWaitGate>
         {
             [NetherCheckpointPopupKind.Continue] = new(maximumMissingPolls),
+            [NetherCheckpointPopupKind.Skip] = new(maximumMissingPolls),
             [NetherCheckpointPopupKind.Boost] = new(maximumMissingPolls),
             [NetherCheckpointPopupKind.Return] = new(maximumMissingPolls),
             [NetherCheckpointPopupKind.ReturnScroll] = new(maximumMissingPolls),
@@ -126,7 +128,10 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
             );
         }
         if (_ownerAction == NetherActionKind.FinishAtCheckpoint
-            && kind is NetherCheckpointPopupKind.Boost or NetherCheckpointPopupKind.Return or NetherCheckpointPopupKind.ReturnScroll)
+            && kind is NetherCheckpointPopupKind.Skip
+                or NetherCheckpointPopupKind.Boost
+                or NetherCheckpointPopupKind.Return
+                or NetherCheckpointPopupKind.ReturnScroll)
         {
             return NetherCheckpointPopupWaitResult.Terminal(
                 NetherCheckpointPopupWaitResultKind.BindingUnavailable,
@@ -226,6 +231,7 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
     private static string FlowName(NetherCheckpointPopupKind kind) => kind switch
     {
         NetherCheckpointPopupKind.Continue => "checkpoint-continue-popup",
+        NetherCheckpointPopupKind.Skip => "checkpoint-skip-popup",
         NetherCheckpointPopupKind.Boost => "checkpoint-boost-popup",
         NetherCheckpointPopupKind.Return => "checkpoint-return-popup",
         NetherCheckpointPopupKind.ReturnScroll => "checkpoint-return-scroll",

@@ -8,6 +8,7 @@ public class NetherCheckpointPopupWaitCoordinatorTests
     public static IEnumerable<object[]> PopupKinds() => new[]
     {
         new object[] { (int)NetherCheckpointPopupKind.Continue },
+        new object[] { (int)NetherCheckpointPopupKind.Skip },
         new object[] { (int)NetherCheckpointPopupKind.Boost },
         new object[] { (int)NetherCheckpointPopupKind.Return },
         new object[] { (int)NetherCheckpointPopupKind.ReturnScroll },
@@ -194,6 +195,10 @@ public class NetherCheckpointPopupWaitCoordinatorTests
                     true
                 )
             ).Kind
+        );
+        Assert.Equal(
+            NetherCheckpointPopupWaitResultKind.BindingUnavailable,
+            waits.WaitFor(NetherCheckpointPopupKind.Skip, null).Kind
         );
         Assert.Equal(
             NetherCheckpointPopupWaitResultKind.BindingUnavailable,

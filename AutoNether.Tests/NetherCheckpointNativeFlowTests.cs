@@ -6,13 +6,17 @@ namespace AutoNether.Tests;
 public class NetherCheckpointNativeFlowTests
 {
     [Fact]
-    public void Continue_requires_real_continue_then_boost_then_pristine_return_before_task_completion()
+    public void Continue_resolves_optional_skip_before_boost_and_pristine_return()
     {
         var flow = new NetherCheckpointNativeFlow();
         Assert.True(flow.Begin(new NetherPlannedAction(NetherActionKind.Continue) { ReturnLockReward = 1 }));
         Assert.Equal(NetherCheckpointNativeStage.AwaitingContinuePopup, flow.Stage);
 
         Assert.True(flow.SubmitContinue(canBoost: true));
+        Assert.Equal(NetherCheckpointNativeStage.AwaitingSkipDecision, flow.Stage);
+        Assert.False(flow.SubmitBoostConfirmation());
+
+        Assert.True(flow.ResolveSkipDecision());
         Assert.Equal(NetherCheckpointNativeStage.AwaitingBoostConfirmation, flow.Stage);
         Assert.False(flow.CanSubmitReturnSelection);
 
@@ -46,6 +50,7 @@ public class NetherCheckpointNativeFlowTests
         }));
 
         Assert.True(flow.SubmitContinue(canBoost: false));
+        Assert.True(flow.ResolveSkipDecision());
 
         Assert.Equal(NetherCheckpointNativeStage.AwaitingTerminalTask, flow.Stage);
         Assert.False(flow.CanSubmitReturnSelection);
@@ -61,6 +66,7 @@ public class NetherCheckpointNativeFlowTests
         }));
 
         Assert.True(flow.SubmitContinue(canBoost: false));
+        Assert.True(flow.ResolveSkipDecision());
 
         Assert.Equal(NetherCheckpointNativeStage.AwaitingPristineReturnPopup, flow.Stage);
         Assert.True(flow.CanSubmitReturnSelection);

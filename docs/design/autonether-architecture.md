@@ -41,8 +41,8 @@ BepInEx and the CLR must load the managed assembly before `Plugin.Load()` can ex
 
 The current catalog validates:
 
-- 61 unique game methods;
-- 17 IL2CPP generated callbacks or async-task methods;
+- 62 unique game methods;
+- 18 IL2CPP generated callbacks or async-task methods;
 - every Harmony patch class registered by `PatchManager`.
 
 Each game contract includes the declaring type, exact method identity, static or instance ownership, ordered parameter types, and return type. Generated static methods require their exact packaged identity; a renamed method with the same signature does not satisfy startup validation.
@@ -51,7 +51,7 @@ The catalog covers:
 
 - battle start, terminal, result, and battle-result continuation;
 - floor selection, start-status state machine, and floor-event sequencing;
-- Event, Recovery, Treasure, Shop, Return, Code Offer, Code List, Continue, Finish, Boost, hint, and erosion popups;
+- Event, Recovery, Treasure, Shop, Return, Code Offer, Code List, Continue, Skip, Finish, Boost, hint, and erosion popups;
 - Code select, cancel, reroll, replace, and transform tasks;
 - battle Auto and speed settings accessors;
 - every reflected game mutation issued by the runtime bridge.

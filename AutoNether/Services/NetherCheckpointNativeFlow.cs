@@ -7,12 +7,13 @@ namespace AutoNether.Services;
 /// <summary>
 /// Models the native Sleep continuation UI sequence.  It is intentionally independent of the
 /// bridge's reflection work so its ordering invariants are executable: no return list is read
-/// until the native Continue (and optional one-ticket Boost) has generated it.
+/// until the native Continue, optional Skip decision, and optional one-ticket Boost have generated it.
 /// </summary>
 internal enum NetherCheckpointNativeStage
 {
     Idle,
     AwaitingContinuePopup,
+    AwaitingSkipDecision,
     AwaitingBoostConfirmation,
     AwaitingPristineReturnPopup,
     AwaitingTerminalTask,
@@ -22,6 +23,7 @@ internal enum NetherCheckpointNativeStage
 internal sealed class NetherCheckpointNativeFlow
 {
     private NetherPlannedAction? _action;
+    private bool _canBoost;
 
     public NetherCheckpointNativeStage Stage { get; private set; } = NetherCheckpointNativeStage.Idle;
 
@@ -37,6 +39,7 @@ internal sealed class NetherCheckpointNativeFlow
         }
 
         _action = action;
+        _canBoost = false;
         Stage = NetherCheckpointNativeStage.AwaitingContinuePopup;
         return true;
     }
@@ -45,7 +48,16 @@ internal sealed class NetherCheckpointNativeFlow
     {
         if (_action?.Kind != NetherActionKind.Continue || Stage != NetherCheckpointNativeStage.AwaitingContinuePopup)
             return false;
-        Stage = canBoost
+        _canBoost = canBoost;
+        Stage = NetherCheckpointNativeStage.AwaitingSkipDecision;
+        return true;
+    }
+
+    public bool ResolveSkipDecision()
+    {
+        if (_action?.Kind != NetherActionKind.Continue || Stage != NetherCheckpointNativeStage.AwaitingSkipDecision)
+            return false;
+        Stage = _canBoost
             ? NetherCheckpointNativeStage.AwaitingBoostConfirmation
             : _action.Value.ReturnLockReward > 0
                 ? NetherCheckpointNativeStage.AwaitingPristineReturnPopup
@@ -84,12 +96,14 @@ internal sealed class NetherCheckpointNativeFlow
         if (_action == null)
             return;
         _action = null;
+        _canBoost = false;
         Stage = NetherCheckpointNativeStage.Completed;
     }
 
     public void Clear()
     {
         _action = null;
+        _canBoost = false;
         Stage = NetherCheckpointNativeStage.Idle;
     }
 }
