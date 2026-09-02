@@ -23,7 +23,8 @@ public sealed class NetherBattleResultCodeEvidenceProductionGateTests
             RuntimeGeneration: 6,
             OwnerGeneration: 4,
             Sequence: 1,
-            IsCurrentResultOwner: true
+            IsCurrentResultOwner: true,
+            PartyModelIdentity: 0x1234
         );
 
         NetherBattleResultCodeEvidenceCaptureDecision accepted =
@@ -44,14 +45,42 @@ public sealed class NetherBattleResultCodeEvidenceProductionGateTests
             RuntimeGeneration: 6,
             OwnerGeneration: 4,
             Sequence: 1,
-            IsCurrentResultOwner: true
+            IsCurrentResultOwner: true,
+            PartyModelIdentity: 0x1234
         );
-        var after = before with { PartyModel = new object() };
+        var after = before with
+        {
+            PartyModel = new object(),
+            PartyModelIdentity = 0x5678,
+        };
 
         NetherBattleResultCodeEvidenceCaptureDecision rejected =
             NetherBattleResultCodeEvidenceProductionGate.Evaluate(before, after);
 
         Assert.False(rejected.IsAccepted);
         Assert.Equal("battle-result-code-evidence-owner-replaced-during-capture", rejected.Detail);
+    }
+
+    [Fact]
+    public void Equivalent_native_party_wrappers_are_accepted_for_the_same_result_owner()
+    {
+        object controller = new();
+        object popup = new();
+        var before = new NetherBattleResultCodeEvidenceCaptureBoundary(
+            controller,
+            popup,
+            new object(),
+            RuntimeGeneration: 120,
+            OwnerGeneration: 78,
+            Sequence: 141,
+            IsCurrentResultOwner: true,
+            PartyModelIdentity: 0x1234
+        );
+        var after = before with { PartyModel = new object() };
+
+        NetherBattleResultCodeEvidenceCaptureDecision accepted =
+            NetherBattleResultCodeEvidenceProductionGate.Evaluate(before, after);
+
+        Assert.True(accepted.IsAccepted, accepted.Detail);
     }
 }

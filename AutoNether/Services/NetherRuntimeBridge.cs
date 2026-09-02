@@ -2782,6 +2782,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             {
                 TryReadMember(current.Controller, "_partyModel", out partyModel);
             }
+            long partyModelIdentity = partyModel is Il2CppObjectBase nativeParty
+                && nativeParty.Pointer != IntPtr.Zero
+                    ? nativeParty.Pointer.ToInt64()
+                    : 0;
             return new NetherBattleResultCodeEvidenceCaptureBoundary(
                 registration?.Controller,
                 registration?.Popup,
@@ -2789,7 +2793,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _runtimeGeneration,
                 _battleResultCodeGeneration,
                 registration?.Sequence ?? 0,
-                currentOwner
+                currentOwner,
+                partyModelIdentity
             );
         }
     }

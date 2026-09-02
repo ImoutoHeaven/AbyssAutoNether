@@ -89,12 +89,14 @@ internal readonly record struct NetherBattleResultCodeEvidenceCaptureBoundary(
     long RuntimeGeneration,
     long OwnerGeneration,
     long Sequence,
-    bool IsCurrentResultOwner
+    bool IsCurrentResultOwner,
+    long PartyModelIdentity
 )
 {
     public bool IsUsable => PopupController != null
         && Popup != null
         && PartyModel != null
+        && PartyModelIdentity != 0
         && RuntimeGeneration > 0
         && OwnerGeneration > 0
         && Sequence > 0
@@ -118,8 +120,8 @@ internal readonly record struct NetherBattleResultCodeEvidenceCaptureDecision(
 }
 
 /// <summary>
-/// Proves a result-owned popup and the exact party object remained current across the read-only
-/// evidence capture. It intentionally does not substitute a stale FloorSelection owner.
+/// Proves a result-owned popup and the exact native party identity remained current across the
+/// read-only evidence capture. It intentionally does not substitute a stale FloorSelection owner.
 /// </summary>
 internal static class NetherBattleResultCodeEvidenceProductionGate
 {
@@ -142,7 +144,7 @@ internal static class NetherBattleResultCodeEvidenceProductionGate
         }
         if (!ReferenceEquals(before.PopupController, after.PopupController)
             || !ReferenceEquals(before.Popup, after.Popup)
-            || !ReferenceEquals(before.PartyModel, after.PartyModel)
+            || before.PartyModelIdentity != after.PartyModelIdentity
             || before.RuntimeGeneration != after.RuntimeGeneration
             || before.OwnerGeneration != after.OwnerGeneration
             || before.Sequence != after.Sequence)
