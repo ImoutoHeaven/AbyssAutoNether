@@ -268,6 +268,28 @@ internal static class NetherAutoClimbController
             return;
         }
 
+        // HandleStartEventByStatusAsync can already own a Code Offer when F12 is enabled,
+        // including at the final Clear boundary.  Adopt that exact foreground transaction
+        // before generic Clear handling waits for the Result scene that the popup is blocking.
+        if (_bridge.HasRecoveredCodeOffer && State.EnableFromRecoveredCodeOffer())
+        {
+            _deferredEnableRemainingUpdates = 0;
+            _lockedCombatLane = null;
+            _pendingBattleProjection = null;
+            NetherAutoClimbSettings recoveredSettings = BuildSettings();
+            LogTransition("ON source=recovered-code-offer maxDepth=" + recoveredSettings.MaxDepth);
+            LogDiagnostic(
+                "toggle-result",
+                new("outcome", "enabled"),
+                new("source", "recovered-code-offer"),
+                new("phase", State.Phase.ToString()),
+                new("maxDepth", recoveredSettings.MaxDepth.ToString()),
+                new("softErosion", recoveredSettings.SoftErosionLimit.ToString()),
+                new("detailedLogging", recoveredSettings.DetailedLogging.ToString())
+            );
+            return;
+        }
+
         if (!_bridge.HasRegisteredFloorSelection)
         {
             // FloorSelection registration happens after the Nether scene begins loading and
@@ -1991,9 +2013,16 @@ internal static class NetherAutoClimbController
             return;
 
         AuditSnapshot(snapshot, "stable");
-        State.ObserveStable(snapshot.Fingerprint);
-        if (State.Phase != NetherAutoClimbPhase.Stable)
-            return;
+        // A recovered start-status Code Offer is the foreground native owner.  At final Clear it
+        // must finish before the same parent can advance into Result, so preserve this already
+        // proven Stable adoption boundary instead of treating Clear as a completed handoff.
+        bool recoveredForeground = _bridge.HasRecoveredCodeOffer;
+        if (!recoveredForeground || snapshot.Status != NetherSessionStatus.Clear)
+        {
+            State.ObserveStable(snapshot.Fingerprint);
+            if (State.Phase != NetherAutoClimbPhase.Stable)
+                return;
+        }
 
         if (!SettingsGate.TryCapture(
                 BuildSettings(),
@@ -2018,7 +2047,7 @@ internal static class NetherAutoClimbController
             return;
         }
 
-        if (_bridge.HasRecoveredCodeOffer)
+        if (recoveredForeground)
         {
             ActivePopupReadiness.Clear();
             ObserveRecoveredCodeOffer(settings);

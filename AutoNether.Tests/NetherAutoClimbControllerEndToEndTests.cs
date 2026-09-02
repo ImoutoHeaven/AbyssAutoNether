@@ -167,6 +167,47 @@ public class NetherAutoClimbControllerEndToEndTests
     }
 
     [Fact]
+    public void F12_at_final_clear_adopts_recovered_code_offer_before_result_handoff()
+    {
+        var bridge = new ScriptedRuntimeBridge();
+        bridge.CurrentSnapshot = bridge.ClearResult;
+        bridge.HasRecoveredCodeOffer = true;
+        bridge.RecoveredCodePopup = new NetherRuntimePopupContext
+        {
+            Kind = NetherRuntimePopupKind.CodeOffer,
+            OwnerAction = NetherActionKind.RecoveredCodeOffer,
+            OwnerGeneration = 17,
+            Sequence = 23,
+        };
+        bridge.CodeCandidates = SafeCodeCandidates(30024);
+        var lifecycle = new NetherBattleSettingsLeaseControllerLifecycle(
+            new RecordingLeaseDriver(),
+            retryIntervalUpdates: 1
+        );
+        using IDisposable scope = NetherAutoClimbController.PushRuntimeBridgeForTests(
+            bridge,
+            lifecycle
+        );
+
+        try
+        {
+            NetherAutoClimbController.Initialize();
+            NetherAutoClimbController.Toggle();
+            NetherAutoClimbController.Update();
+
+            Assert.True(NetherAutoClimbController.IsEnabled);
+            Assert.Equal(
+                NetherActionKind.SelectCode,
+                Assert.Single(bridge.RecoveredCodeActions).Kind
+            );
+        }
+        finally
+        {
+            NetherAutoClimbController.OnPluginUnload();
+        }
+    }
+
+    [Fact]
     public void Production_controller_finishes_recovered_code_parent_before_any_floor_route()
     {
         var bridge = new ScriptedRuntimeBridge

@@ -416,13 +416,23 @@ internal sealed class NetherAutoClimbStateMachine
     /// Allows an explicit F12 press on a proven Nether battle-result controller to recover
     /// automation even when it was not enabled on the preceding map.
     /// </summary>
-    public bool EnableFromBattleResult()
+    public bool EnableFromBattleResult() =>
+        EnableFromForeground(NetherAutoClimbPhase.AwaitingBattleResultContinuation);
+
+    /// <summary>
+    /// Allows F12 to adopt an exact FloorSelection start-status Code Offer before the native
+    /// parent advances a Clear session into Result.
+    /// </summary>
+    public bool EnableFromRecoveredCodeOffer() =>
+        EnableFromForeground(NetherAutoClimbPhase.Stable);
+
+    private bool EnableFromForeground(NetherAutoClimbPhase phase)
     {
         if (IsEnabled || _pendingAction != null || IsDrainPhase(Phase))
             return false;
 
         IsEnabled = true;
-        Phase = NetherAutoClimbPhase.AwaitingBattleResultContinuation;
+        Phase = phase;
         PauseReason = NetherPauseReason.None;
         PauseDetail = string.Empty;
         return true;
