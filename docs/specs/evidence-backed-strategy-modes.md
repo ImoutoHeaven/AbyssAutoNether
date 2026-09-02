@@ -8,7 +8,7 @@ Strategy decisions use only the current authoritative server snapshot, native Ma
 
 The following are never decision authorities:
 
-- displayed combat power;
+- displayed combat power outside the bounded game-native Code gain fallback defined for unquantifiable Equipment candidates;
 - translated description text;
 - hidden or future floors;
 - guessed battle tiers, probabilities, cadence, or settlement points;
@@ -108,13 +108,11 @@ Equipment applies these gates in order:
 7. complete retained-portfolio Actual Combat Value;
 8. deterministic Code ID tie break.
 
-An empty Code Portfolio may select one `Reachable-Unquantified` candidate only when all hard gates pass and the acquisition removes no Code. The stable lowest Code ID wins among equivalent bootstrap candidates.
+While the Code Portfolio is below Code Capacity, every new candidate that passes the hard gates is eligible without a strict-improvement requirement. Complete mechanism valuation ranks comparable candidates first. When richer valuation is unavailable, the game-native Code gain value (`MNetherCodes.power` multiplied by the native recipient count) ranks the remaining candidates; stable Code ID is the final fallback.
 
-Once the portfolio contains a Code, `Reachable-Unquantified` evidence cannot prove a new acquisition or replacement. A candidate must have a complete mutation valuation and must strictly improve the retained portfolio.
+At Code Capacity, every possible candidate/removal pair is evaluated as the complete resulting portfolio. A replacement is legal only when it is structurally compatible and strictly improves the retained portfolio. Rich mechanism valuation is authoritative when available. Only an unquantifiable pair may fall back to a strict increase in game-native Code gain value; that fallback cannot override a proven zero, negative, or otherwise non-improving mutation. If no legal improvement exists, the Offer is rerolled according to the configured reserve or declined.
 
-At capacity, every possible candidate/removal pair is evaluated as the complete resulting portfolio. A replacement is legal only when it is structurally compatible and a strict improvement; otherwise the Offer is rerolled according to the configured reserve or declined.
-
-Displayed power, raw family count, and spare capacity never force an Equipment selection.
+Neither spare-capacity acquisition nor native Code gain value bypasses identity, native-mechanic, hard-exclusion, erosion, route, family, or scoped crest gates.
 
 ### Combat ordering
 
@@ -288,7 +286,7 @@ The implementation is acceptable only when:
 - the startup native precheck passes against the current packaged game assemblies;
 - every Harmony patch and reflected mutation is represented in the shared catalog;
 - Research priority, single-reroll fallback, capacity settlement, and scoped crest compatibility tests pass;
-- Equipment empty-portfolio bootstrap and strict nonempty improvement tests pass;
+- Equipment spare-capacity acquisition, native-power fallback, and strict at-capacity replacement tests pass;
 - route, Event, Recovery, Treasure, Shop, checkpoint, lifecycle, and reconciliation regressions pass;
 - the full Docker test suite and warning-free Release build pass;
 - product-isolation and Release binary audits pass;
@@ -297,7 +295,7 @@ The implementation is acceptable only when:
 ## Out of scope
 
 - Automatic strategy-mode or Research-family detection.
-- Displayed-power optimization or a generic DPS/EHP weighted score.
+- A generic DPS/EHP weighted score, or using native Code gain value to bypass hard gates or override richer proven valuation.
 - Invented values for unknown effects, battles, Event outcomes, or hidden floors.
 - A second controller or raw API fallback around the native transaction model.
 - Mid-segment reward-preserving settlement where the game exposes no such window.

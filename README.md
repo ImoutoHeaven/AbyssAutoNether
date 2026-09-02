@@ -27,7 +27,7 @@ AutoNether native compatibility precheck passed: methods=62, generated=18.
 
 ### Equipment
 
-默认模式。它在所有安全门槛通过后比较完整保留 Code portfolio 的实际战斗价值。空 portfolio 可以接受一个已证明可达但暂时无法量化、且不会移除或压制现有 Code 的安全候选；持有任何 Code 后，新增或替换都必须证明严格改善。
+默认模式。安全门槛通过且 Code 容量未满时，Equipment 会直接领取不会造成负面机制或混色纹章冲突的新 Code，不要求严格提升；多个候选优先按完整机制战斗价值排序，无法量化时使用游戏原生 `power × 实际目标人数`，仍不可比较时按 Code ID 稳定选择。只有容量已满、必须替换旧 Code 时才要求完整 portfolio 严格提升；完整机制无法量化时，原生战力数字可作为兜底，但不会推翻已证明为零或负收益的结果，也不会绕过安全门槛。
 
 ### Research
 

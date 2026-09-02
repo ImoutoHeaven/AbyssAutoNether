@@ -78,14 +78,18 @@ _Avoid_: Fixed 22- or 25-Code limit
 
 **Actual Combat Value**:
 The contribution of a Code to the configured party's real recipients, triggers, timelines, caps, coexistence rules, and encounter horizon.
-_Avoid_: Displayed combat power, generic weighted score
+_Avoid_: Generic weighted score, candidate-only comparison when complete evidence exists
+
+**Native Code Power**:
+The game's own Code gain value, calculated as the master-data power multiplied by the native recipient count. Equipment uses it only when richer Actual Combat Value is unavailable.
+_Avoid_: Invented score, bypassing a hard gate, overriding a proven non-improvement
 
 **Strict Portfolio Improvement**:
-An Equipment mutation whose complete retained portfolio has greater Actual Combat Value than the current portfolio after every hard safety rule is applied.
-_Avoid_: Candidate-only power increase, mandatory capacity fill
+An at-capacity Equipment replacement whose complete retained portfolio has greater Actual Combat Value than the current portfolio after every hard safety rule is applied. Native Code Power may prove the replacement only when richer valuation is unavailable.
+_Avoid_: Requiring strict improvement while capacity remains, overriding known non-positive value
 
 **Reachable-Unquantified Effect**:
-An effect with a proven recipient and trigger path but no authoritative numeric cadence or magnitude projection. It may bootstrap an empty Equipment portfolio but cannot prove a later strict improvement.
+An effect with a proven recipient and trigger path but no authoritative numeric cadence or magnitude projection. It remains eligible to fill spare Equipment capacity after hard gates; an at-capacity replacement requires a strict Native Code Power improvement or richer proof.
 _Avoid_: Unknown trigger, invented value
 
 **Hard-Excluded Code**:

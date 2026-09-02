@@ -349,7 +349,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
-    public void Production_assembler_fails_closed_when_selected_route_survival_baseline_is_not_exact()
+    public void Production_assembler_accepts_safe_spare_capacity_addition_when_route_survival_baseline_is_not_exact()
     {
         // T03's authoritative horizon owns the post-cost active-party HP minimum. Code policy may
         // reuse that exact aggregate, but cannot replace a missing value with a fabricated
@@ -409,7 +409,8 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
 
         Assert.True(route.IsKnown, route.UnknownReason);
         Assert.False(route.SurvivalBaselineKnown);
-        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
     }
 
     [Fact]
@@ -559,10 +560,10 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
-    public void Production_result_owned_ordinary_addition_cancels_when_party_evidence_is_unknown()
+    public void Production_result_owned_ordinary_addition_selects_when_party_evidence_is_unknown_and_capacity_is_spare()
     {
-        // An ordinary BuffController mutation resolves concrete recipients. Unlike a typed
-        // ForceChain payoff, it cannot be assigned a complete marginal when Party is unavailable.
+        // Party absence prevents a rich recipient marginal, but a safe ordinary Code remains
+        // eligible while the portfolio has spare capacity.
         NetherSnapshot snapshot = Snapshot();
         NetherCodeCandidate candidate = Candidate(88304, NetherCodeFamily.Safe, power: 1);
         NetherStrategyEvidencePackage package = Package(snapshot, 0, 0) with
@@ -588,12 +589,12 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         );
 
         Assert.True(captured.IsSuccess, captured.Detail);
-        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
-        Assert.Contains("no-hard-eligible-new-code-candidate", decision.Detail, StringComparison.Ordinal);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
     }
 
     [Fact]
-    public void Production_result_owned_offer_keeps_timed_higher_value_addition_unknown_without_future_route_rebind()
+    public void Production_result_owned_offer_selects_timed_addition_with_spare_capacity_without_future_route_rebind()
     {
         // Fresh current-game BuffController still has HigherValue coexistence. A short stronger
         // StartBattle buff can displace a retained permanent buff which does not resume when the
@@ -637,7 +638,8 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
         );
 
         Assert.True(captured.IsSuccess, captured.Detail);
-        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+        Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
     }
 
     [Fact]
@@ -745,7 +747,7 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
     }
 
     [Fact]
-    public void Production_assembler_preserves_proven_survival_deficit_when_offer_cannot_prove_repair()
+    public void Production_assembler_preserves_survival_deficit_evidence_while_spare_capacity_accepts_safe_offer()
     {
         // Fresh Project.dll 53806a5b...1300 / GameAssembly 573fa800...c1fb:
         // NetherUpdateEventResponseEntity.t_nether_characters and
@@ -802,7 +804,8 @@ public sealed class NetherCodePolicyEvidenceAssemblerTests
                 settings,
                 captured.Evidence
             );
-            Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
+            Assert.Equal(NetherCodeDecisionKind.Select, decision.Kind);
+            Assert.Equal(candidate.CodeId, decision.SelectedCodeId);
         }
     }
 

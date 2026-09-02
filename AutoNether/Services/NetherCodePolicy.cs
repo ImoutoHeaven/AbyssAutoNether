@@ -244,14 +244,14 @@ internal sealed record NetherCodeDecision
     public NetherStrategyUnknownReasonCode UnknownReasonCode { get; init; }
     public NetherEquipmentMutationValueKind MutationValueKind { get; init; }
     public bool StrictImprovementProven { get; init; }
-    /// <summary>Static MNetherCodes.power is intentionally never consumed by decision policy.</summary>
+    /// <summary>True when the native Code power calculator decided candidate order or replacement.</summary>
     public bool DisplayPowerUsedForDecision { get; init; }
 }
 
 /// <summary>
-/// Code hard-eligibility and strategy decision seam. Equipment orders only complete native
-/// retained-portfolio and mechanism evidence after hard gates; static master power and UI coverage
-/// never contribute to an authoritative decision.
+/// Code hard-eligibility and strategy decision seam. Equipment fills spare capacity after hard
+/// gates, then requires a strict retained-portfolio improvement for every replacement. When a
+/// mechanic cannot be quantified, the native Code power calculator is the comparison fallback.
 /// </summary>
 internal sealed class NetherCodePolicy
 {
@@ -512,6 +512,10 @@ internal sealed class NetherCodePolicy
     {
         NetherEquipmentMutationValueKind valueKind = NetherEquipmentMutationValueKind.Missing;
         bool strictImprovement = false;
+        bool displayPowerUsed = decision.Detail.Contains(
+            "native-display-power",
+            StringComparison.Ordinal
+        );
         if (settings.StrategyMode == NetherStrategyMode.Equipment
             && decision.SelectedCodeId > 0)
         {
@@ -525,8 +529,9 @@ internal sealed class NetherCodePolicy
             {
                 NetherEquipmentMutationValue value = new NetherEquipmentCodeValuePolicy().Evaluate(mutation);
                 valueKind = value.Kind;
-                strictImprovement = value.CanSelect;
+                strictImprovement = decision.RemoveCodeId > 0 && value.CanSelect;
             }
+            strictImprovement |= decision.RemoveCodeId > 0 && displayPowerUsed;
         }
         return decision with
         {
@@ -539,7 +544,7 @@ internal sealed class NetherCodePolicy
             DecisionTier = ResolveDecisionTier(decision.Detail),
             MutationValueKind = valueKind,
             StrictImprovementProven = strictImprovement,
-            DisplayPowerUsedForDecision = false,
+            DisplayPowerUsedForDecision = displayPowerUsed,
         };
     }
 
@@ -719,32 +724,19 @@ internal sealed class NetherCodePolicy
             };
         }
 
-        if (evidence.MechanismValuesByCodeId == null
-            || !evidence.MechanismValuesByCodeId.TryGetValue(
-                candidate.CodeId,
-                out NetherMechanismValue mechanismValue
-            ))
+        if (!HasEquipmentSelectionEvidence(portfolio, candidate, evidence))
         {
-            return new(
+            NetherMechanismValue mechanismValue = default;
+            evidence.MechanismValuesByCodeId?.TryGetValue(
                 candidate.CodeId,
-                NetherCodeCandidateHardGate.MechanismValue,
-                "candidate-mechanism-value-unavailable"
-            )
-            {
-                UnknownReasonCode = NetherStrategyUnknownReasonCode.MechanismValueUnavailable,
-            };
-        }
-        if (mechanismValue.Kind == NetherCombatValueEvidenceKind.Missing
-            || settings.StrategyMode == NetherStrategyMode.Equipment
-                && mechanismValue.Kind == NetherCombatValueEvidenceKind.ReachableUnquantified
-                && portfolio.CurrentCodes.Count > 0)
-        {
+                out mechanismValue
+            );
             return new(
                 candidate.CodeId,
                 NetherCodeCandidateHardGate.MechanismValue,
                 string.IsNullOrWhiteSpace(mechanismValue.Detail)
-                    ? "candidate-mechanism-value-unavailable"
-                    : mechanismValue.Detail
+                    ? "candidate-mechanism-and-native-display-power-unavailable"
+                    : mechanismValue.Detail + ";native-display-power-unavailable"
             )
             {
                 UnknownReasonCode = NetherStrategyUnknownReasonCode.MechanismValueUnavailable,
@@ -885,8 +877,92 @@ internal sealed class NetherCodePolicy
         if (candidates.Length == 0)
             return ReloadOrKeep(portfolio, settings, lane, "no-hard-eligible-new-code-candidate");
 
+        long[] removable = portfolio.CurrentCodes
+            .Select(code => code.CodeId)
+            .OrderBy(codeId => codeId)
+            .ToArray();
         var valuePolicy = new NetherEquipmentCodeValuePolicy();
         EquipmentValueChoice? best = null;
+        if (portfolio.CurrentCodes.Count < portfolio.Capacity)
+        {
+            NetherCodeCandidate[] legalAdditions = candidates
+                .Where(candidate => IsEquipmentMutationLegal(
+                    portfolio.CurrentCodes,
+                    ApplyDecision(portfolio.CurrentCodes, candidate, 0),
+                    candidate.Family,
+                    0,
+                    settings,
+                    evidence
+                ))
+                .ToArray();
+            foreach (NetherCodeCandidate candidate in legalAdditions)
+            {
+                if (!evidence.MechanismValuesByCodeId.TryGetValue(
+                        candidate.CodeId,
+                        out NetherMechanismValue candidateMechanism
+                    )
+                    || candidateMechanism.Kind is NetherCombatValueEvidenceKind.Missing
+                        or NetherCombatValueEvidenceKind.ReachableUnquantified
+                    || evidence.EquipmentMutationValuesByKey == null
+                    || !evidence.EquipmentMutationValuesByKey.TryGetValue(
+                        new NetherCodeMutationKey(candidate.CodeId, 0),
+                        out NetherCodeEquipmentMutationEvidence? mutation
+                    )
+                    || mutation == null)
+                {
+                    continue;
+                }
+
+                NetherEquipmentMutationValue value = valuePolicy.Evaluate(mutation);
+                if (!value.CanSelect)
+                    continue;
+                var choice = new EquipmentValueChoice(candidate, 0, value, 0);
+                if (best == null || CompareEquipmentChoice(choice, best.Value, valuePolicy) > 0)
+                    best = choice;
+            }
+
+            if (best is EquipmentValueChoice ranked)
+            {
+                return Select(ranked.Candidate, 0, lane, removable) with
+                {
+                    Detail = "spare-equipment-capacity;mechanism-specific-ranking",
+                };
+            }
+
+            if (legalAdditions.Length == 0)
+            {
+                return ReloadOrKeep(
+                    portfolio,
+                    settings,
+                    lane,
+                    "no-compatible-spare-capacity-candidate",
+                    removable
+                );
+            }
+
+            NetherCodeCandidate? displayRanked = legalAdditions.Length > 1
+                ? legalAdditions
+                    .Select(candidate => (
+                        Candidate: candidate,
+                        Known: TryGetNativeDisplayPower(candidate, out long power),
+                        Power: power
+                    ))
+                    .Where(row => row.Known)
+                    .OrderByDescending(row => row.Power)
+                    .ThenBy(row => row.Candidate.CodeId)
+                    .Select(row => row.Candidate)
+                    .FirstOrDefault()
+                : null;
+            NetherCodeCandidate spareSelection = displayRanked
+                ?? legalAdditions.OrderBy(candidate => candidate.CodeId).First();
+            return Select(spareSelection, 0, lane, removable) with
+            {
+                Detail = displayRanked == null
+                    ? "spare-equipment-capacity;hard-safe-code-id-fallback"
+                    : "spare-equipment-capacity;native-display-power-ranking",
+            };
+        }
+
         foreach (NetherCodeCandidate candidate in candidates)
         {
             if (!evidence.MechanismValuesByCodeId.TryGetValue(
@@ -899,11 +975,9 @@ internal sealed class NetherCodePolicy
                 continue;
             }
 
-            IEnumerable<long> removals = portfolio.CurrentCodes.Count < portfolio.Capacity
-                ? new long[] { 0 }
-                : portfolio.CurrentCodes
-                    .Where(code => code.CodeId != candidate.CodeId)
-                    .Select(code => code.CodeId);
+            IEnumerable<long> removals = portfolio.CurrentCodes
+                .Where(code => code.CodeId != candidate.CodeId)
+                .Select(code => code.CodeId);
             foreach (long removal in removals)
             {
                 IReadOnlyList<NetherCodeState> after = ApplyDecision(
@@ -948,10 +1022,6 @@ internal sealed class NetherCodePolicy
             }
         }
 
-        long[] removable = portfolio.CurrentCodes
-            .Select(code => code.CodeId)
-            .OrderBy(codeId => codeId)
-            .ToArray();
         if (best is EquipmentValueChoice selected)
         {
             return Select(selected.Candidate, selected.RemoveCodeId, lane, removable) with
@@ -960,19 +1030,73 @@ internal sealed class NetherCodePolicy
             };
         }
 
-        NetherCodeCandidate? bootstrap = portfolio.CurrentCodes.Count == 0
-            ? candidates
-                .Where(candidate => evidence.MechanismValuesByCodeId.TryGetValue(
-                    candidate.CodeId,
-                    out NetherMechanismValue value
-                ) && value.Kind == NetherCombatValueEvidenceKind.ReachableUnquantified)
-                .OrderBy(candidate => candidate.CodeId)
-                .FirstOrDefault()
-            : null;
-        return bootstrap != null
-            ? Select(bootstrap, 0, lane, removable) with
+        (NetherCodeCandidate Candidate, long Removal, long Gain, int RemovalPriority)? displayBest = null;
+        foreach (NetherCodeCandidate candidate in candidates)
+        {
+            if (!TryGetNativeDisplayPower(candidate, out long candidatePower))
+                continue;
+            foreach (NetherCodeState removal in portfolio.CurrentCodes)
             {
-                Detail = "empty-equipment-portfolio;hard-safe-reachable-bootstrap",
+                var mutationKey = new NetherCodeMutationKey(candidate.CodeId, removal.CodeId);
+                if (evidence.EquipmentMutationValuesByKey?.TryGetValue(
+                        mutationKey,
+                        out NetherCodeEquipmentMutationEvidence? measuredMutation
+                    ) == true
+                    && measuredMutation != null
+                    && measuredMutation.CandidateCodeId == candidate.CodeId
+                    && measuredMutation.RemoveCodeId == removal.CodeId
+                    && valuePolicy.Evaluate(measuredMutation).Kind is not (
+                        NetherEquipmentMutationValueKind.Missing
+                        or NetherEquipmentMutationValueKind.ReachableUnquantified
+                    ))
+                {
+                    continue;
+                }
+                if (!TryGetNativeDisplayPower(removal, out long removalPower)
+                    || candidatePower <= removalPower)
+                    continue;
+                IReadOnlyList<NetherCodeState> after = ApplyDecision(
+                    portfolio.CurrentCodes,
+                    candidate,
+                    removal.CodeId
+                );
+                if (!IsEquipmentMutationLegal(
+                        portfolio.CurrentCodes,
+                        after,
+                        candidate.Family,
+                        removal.CodeId,
+                        settings,
+                        evidence
+                    ))
+                    continue;
+
+                long gain = candidatePower - removalPower;
+                int priority = GetEquipmentRemovalPriority(
+                    portfolio,
+                    candidate,
+                    removal.CodeId,
+                    evidence
+                );
+                if (displayBest == null
+                    || gain > displayBest.Value.Gain
+                    || gain == displayBest.Value.Gain
+                        && priority > displayBest.Value.RemovalPriority
+                    || gain == displayBest.Value.Gain
+                        && priority == displayBest.Value.RemovalPriority
+                        && candidate.CodeId < displayBest.Value.Candidate.CodeId
+                    || gain == displayBest.Value.Gain
+                        && priority == displayBest.Value.RemovalPriority
+                        && candidate.CodeId == displayBest.Value.Candidate.CodeId
+                        && removal.CodeId < displayBest.Value.Removal)
+                {
+                    displayBest = (candidate, removal.CodeId, gain, priority);
+                }
+            }
+        }
+        return displayBest is { } nativeDisplay
+            ? Select(nativeDisplay.Candidate, nativeDisplay.Removal, lane, removable) with
+            {
+                Detail = "native-retained-portfolio;native-display-power",
             }
             : ReloadOrKeep(
                 portfolio,
@@ -1186,15 +1310,8 @@ internal sealed class NetherCodePolicy
         {
             return false;
         }
-        if (evidence.MechanismValuesByCodeId == null
-            || !evidence.MechanismValuesByCodeId.TryGetValue(
-                candidate.CodeId,
-                out NetherMechanismValue mechanismValue
-            )
-            || mechanismValue.Kind == NetherCombatValueEvidenceKind.Missing)
-        {
+        if (!HasEquipmentSelectionEvidence(portfolio, candidate, evidence))
             return false;
-        }
 
         if (mechanic.RiskRule is NetherCodeRiskRule.MinimumErosionSeventy
             or NetherCodeRiskRule.AdverseErosionAdjustment)
@@ -1281,6 +1398,63 @@ internal sealed class NetherCodePolicy
         NetherCodeFamily.Risk => NetherCodeFamily.Safe,
         _ => NetherCodeFamily.Unknown,
     };
+
+    private static bool HasEquipmentSelectionEvidence(
+        NetherCodePortfolio portfolio,
+        NetherCodeCandidate candidate,
+        NetherCodePolicyEvidence evidence
+    )
+    {
+        if (portfolio.CurrentCodes.Count < portfolio.Capacity)
+            return true;
+        if (evidence.MechanismValuesByCodeId != null
+            && evidence.MechanismValuesByCodeId.TryGetValue(
+                candidate.CodeId,
+                out NetherMechanismValue mechanism
+            )
+            && mechanism.Kind is not (
+                NetherCombatValueEvidenceKind.Missing
+                or NetherCombatValueEvidenceKind.ReachableUnquantified
+            ))
+        {
+            return true;
+        }
+        return TryGetNativeDisplayPower(candidate, out _);
+    }
+
+    private static bool TryGetNativeDisplayPower(
+        NetherCodeCandidate code,
+        out long power
+    ) => TryGetNativeDisplayPower(
+        code.Power,
+        code.PartyCoverageKnown,
+        code.PartyCoverage,
+        out power
+    );
+
+    private static bool TryGetNativeDisplayPower(
+        NetherCodeState code,
+        out long power
+    ) => TryGetNativeDisplayPower(
+        code.Power,
+        code.PartyCoverageKnown,
+        code.PartyCoverage,
+        out power
+    );
+
+    private static bool TryGetNativeDisplayPower(
+        int codePower,
+        bool coverageKnown,
+        int coverage,
+        out long power
+    )
+    {
+        power = 0;
+        if (!coverageKnown || codePower < 0 || coverage < 0)
+            return false;
+        power = (long)codePower * coverage;
+        return true;
+    }
 
     private static NetherCodeFamily ResolveRetainedFamily(
         NetherCodePortfolio portfolio,
