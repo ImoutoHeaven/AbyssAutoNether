@@ -12,6 +12,8 @@ namespace AutoNether.Services;
 internal sealed record NetherNativeCompatibilityReport(
     int CheckedMethodCount,
     int CheckedGeneratedMethodCount,
+    int CheckedMemberCount,
+    int CheckedCompiledReferenceCount,
     IReadOnlyList<string> Failures
 )
 {
@@ -24,12 +26,17 @@ internal sealed record NetherGeneratedInteropContract(
 );
 
 /// <summary>
-/// The single inventory of game methods invoked or patched by AutoNether.  Runtime callers use
-/// these same descriptors, so startup validation and later invocation cannot silently diverge.
+/// Versioned method and member contracts required by AutoNether's native adapters.
 /// </summary>
 internal static class NetherNativeBindingCatalog
 {
     private const string UniTask = "Cysharp.Threading.Tasks.UniTask";
+    private const string NetherModel = "Project.Nether.FloorSelection.NetherModel";
+    private const string FloorModel = "Project.Nether.FloorSelection.NetherFloorModel";
+    private const string PartyModel = "Project.Nether.NetherPartyModel";
+    private const string PartyCharacter = "Project.Nether.NetherPartyCharacterModel";
+    private const string ReferenceArray = "Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray";
+    private const string StructArray = "Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray";
     private const BindingFlags InstanceFlags =
         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private const BindingFlags StaticFlags =
@@ -390,6 +397,106 @@ internal static class NetherNativeBindingCatalog
             ),
         };
 
+    public static IReadOnlyList<(string TypeName, string Path, string ValueType)> RequiredMembers { get; } =
+        new[]
+        {
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__4__this", FloorControllerType),
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__t__builder", "Cysharp.Threading.Tasks.CompilerServices.AsyncUniTaskMethodBuilder"),
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__t__builder.Task", UniTask),
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__1__state", "System.Int32"),
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__t__builder.runnerPromise", "Cysharp.Threading.Tasks.CompilerServices.IStateMachineRunnerPromise"),
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__t__builder.ex", "Il2CppSystem.Exception"),
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__t__builder.Task.Status", "Cysharp.Threading.Tasks.UniTaskStatus"),
+            (NetherLifecycleInteropBindings.StartStatusStateMachineMoveNext.TypeName, "__t__builder.Task.source", "Cysharp.Threading.Tasks.IUniTaskSource"),
+            ("Project.Nether.FloorSelection.SubScene", "_subViewController", FloorControllerType),
+            (FloorControllerType, "_netherModel", NetherModel),
+            (NetherModel, "MNetherId", "System.Int64"),
+            (NetherModel, "MNetherMapId", "System.Int64"),
+            (NetherModel, "StatusType", "Project.User.NetherStatusType"),
+            (NetherModel, "ErosionPoint", "System.Int32"),
+            (NetherModel, "NetherGold", "System.Int32"),
+            (NetherModel, "TreasureKey", "System.Int32"),
+            (NetherModel, "CurrentFloorModel", FloorModel),
+            (NetherModel, "MapModel", "Project.Nether.FloorSelection.NetherMapModel"),
+            (NetherModel, "MapModel.FloorModelListPerFloorLevel", "Il2CppSystem.Collections.Generic.Dictionary<System.Int32,Il2CppSystem.Collections.Generic.List<" + FloorModel + ">>"),
+            (NetherModel, "PartyModel", PartyModel),
+            (PartyModel, "CharacterModels", ReferenceArray + "<" + PartyCharacter + ">"),
+            (FloorModel, "MNetherMapFloorId", "System.Int64"),
+            (FloorModel, "ExtendId", "System.Int64"),
+            (FloorModel, "FloorLevel", "System.Int32"),
+            (FloorModel, "FloorIndex", "System.Int32"),
+            (FloorModel, "ApiFloorIndex", "System.Int32"),
+            (FloorModel, "FloorType", "Project.Master.NetherFloorType"),
+            (FloorModel, "IsSecretFloor", "System.Boolean"),
+            (FloorModel, "IsUnlocked", "System.Boolean"),
+            (FloorModel, "MNetherMapFloorPrevIds", StructArray + "<System.Int64>"),
+            (PartyCharacter, "MCharacterId", "System.Int64"),
+            (PartyCharacter, "PartyIndex", "System.Int32"),
+            (PartyCharacter, "PartyPosition", "Project.Common.CharacterPartyPosition"),
+            (PartyCharacter, "ElementType", "Project.ElementType"),
+            (PartyCharacter, "ManaType", "Project.Master.ManaType"),
+            (PartyCharacter, "HpRatio", "System.Single"),
+            (PartyCharacter, "IsAlive", "System.Boolean"),
+            (PartyCharacter, "Level", "System.Int32"),
+            (PartyCharacter, "LimitBreakCount", "System.Int32"),
+            (PartyCharacter, "BasicParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "BondParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "BuildingMultiplicationParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "CharacterAbilityAdditionParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "CharacterAbilityMultiplicationParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "EquipmentAbilityAdditionParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "EquipmentAbilityMultiplicationParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "WeaponBasicParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "ArmorBasicParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "AccessoryBasicParameters", "Project.Common.CharacterParameters"),
+            (PartyCharacter, "CharacterAbilityEffectModels", ReferenceArray + "<Project.Outgame.AbilityEffectModel>"),
+            (PartyCharacter, "EquipmentAbilityEffectModels", ReferenceArray + "<Project.Outgame.AbilityEffectModel>"),
+            (PartyCharacter, "GeneralAbilityEffectModels", ReferenceArray + "<Project.Outgame.AbilityEffectModel>"),
+            ("Project.Common.CharacterParameters", "Table", "Il2CppSystem.Collections.Generic.Dictionary<Project.Master.ParameterType,System.Int32>"),
+            ("Project.Outgame.AbilityEffectModel", "Effect", "Project.IAbilityEffectData"),
+            ("Project.Outgame.AbilityEffectModel", "Effect.ID", "System.Int64"),
+            ("Project.Outgame.AbilityEffectModel", "Level", "System.Int32"),
+            ("Project.Outgame.AbilityEffectModel", "AwakeningLevel", "System.Int32"),
+            ("Project.Outgame.AbilityEffectModel", "Type", "Project.AbilityType"),
+            ("Project.Outgame.AbilityEffectModel", "Value", "System.Int32"),
+            (CodeSelectControllerType, "_mIds", StructArray + "<System.Int64>"),
+            (CodeSelectControllerType, "_model", "Project.Nether.AbyssCodeSelectPopup.AbyssCodeSelectPopupModel"),
+            (CodeSelectControllerType, "_partyModel", PartyModel),
+            (CodeSelectControllerType, "_cancellationToken", "Il2CppSystem.Threading.CancellationToken"),
+            (CodeListControllerType, "_popupType", "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupType"),
+            (CodeListControllerType, "_replaceMId", "System.Int64"),
+            (CodeListControllerType, "_modelDictionary", "Il2CppSystem.Collections.Generic.Dictionary<System.Int32,Il2CppSystem.Collections.Generic.List<Project.Nether.AbyssCodeThumbnailModel>>"),
+            (CodeListControllerType, "TabIndexes", "Il2CppSystem.Collections.Generic.Dictionary<System.Int32,System.Int32>"),
+            ("Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopup", "_tabGroupView", "Project.Outgame.UIParts.TabGroupView"),
+            ("Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopup", "_tabGroupView.CurrentIndex", "System.Int32"),
+            ("Project.Nether.AbyssCodeThumbnailModel", "MNetherCodeId", "System.Int64"),
+            ("Project.Nether.AbyssCodeThumbnailModel", "NetherCodeCategoryType", "Project.NetherCodeCategoryType"),
+            ("Project.Nether.AbyssCodeThumbnailModel", "IsSelected", "System.Boolean"),
+            ("Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopupController", "_beforeMNetherCodeId", "System.Int64"),
+            ("Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopupController", "_afterMNetherCodeId", "System.Int64"),
+            ("Project.Nether.AbyssCodeReplacePopup.AbyssCodeReplacePopupController", "_onCompleted", "Il2CppSystem.Action<System.Boolean>"),
+            ("Project.Nether.AbyssCodeReplaceCompletePopup.AbyssCodeReplaceCompletePopupController", "_beforeMNetherCodeId", "System.Int64"),
+            ("Project.Nether.AbyssCodeReplaceCompletePopup.AbyssCodeReplaceCompletePopupController", "_afterMNetherCodeId", "System.Int64"),
+            ("Project.Nether.AbyssCodeChangePopup.AbyssCodeChangePopupController", "_mNetherCodeId", "System.Int64"),
+            ("Project.Nether.AbyssCodeChangePopup.AbyssCodeChangePopupController", "_onCompleted", "Il2CppSystem.Action<System.Boolean>"),
+            ("Project.Nether.AbyssCodeChangeCompletePopup.AbyssCodeChangeCompletePopupController", "_beforeMNetherCodeId", "System.Int64"),
+            ("Project.Nether.AbyssCodeChangeCompletePopup.AbyssCodeChangeCompletePopupController", "_afterMNetherCodeId", "System.Int64"),
+            (EventControllerType, "_mCharacterId", "System.Int64"),
+            (EventControllerType, "_mNetherEvents", "Project.Master.NoaMessagePack.MNetherFloorEvents"),
+            (EventControllerType, "_mNetherEventPartsArray", ReferenceArray + "<Project.Master.NoaMessagePack.MNetherFloorEventParts>"),
+            (RecoveryControllerType, "_mNetherEvents", "Project.Master.NoaMessagePack.MNetherFloorEvents"),
+            (RecoveryControllerType, "_mNetherEventPartsArray", ReferenceArray + "<Project.Master.NoaMessagePack.MNetherFloorEventParts>"),
+            (TreasureControllerType, "_mNetherEvents", "Project.Master.NoaMessagePack.MNetherFloorEvents"),
+            (TreasureControllerType, "_mNetherEventPartsArray", ReferenceArray + "<Project.Master.NoaMessagePack.MNetherFloorEventParts>"),
+            (TreasurePopupType, "SkipAndConfirmButton", "Project.AppButton"),
+            (ShopControllerType, "_mNetherFloorShopContentsArray", ReferenceArray + "<Project.Master.NoaMessagePack.MNetherFloorShopContents>"),
+            (ReturnPopupType, "ReturnableItemScrollViewController", ReturnScrollControllerType),
+            (ReturnScrollControllerType, "_contentModelList", "Il2CppSystem.Collections.Generic.List<Project.Outgame.UI.ContentModel>"),
+            (ReturnScrollControllerType, "_maxSelectedCount", "System.Int32"),
+            (ReturnControllerType, "_maxSelectedCount", "System.Int32"),
+            ("Project.Nether.NetherContinueConfirmPopup.NetherContinueConfirmPopupController", "_canBoost", "System.Boolean"),
+        };
+
     public static MethodInfo ResolveRequiredMethod(NetherInteropPatchBinding binding)
     {
         if (NetherLifecycleInteropBindings.TryResolve(
@@ -457,7 +564,18 @@ internal static class NetherNativeBindingCatalog
 /// <summary>Fail-closed compatibility gate executed before any AutoNether initialization.</summary>
 internal static class NetherNativeCompatibilityPreflight
 {
-    public static NetherNativeCompatibilityReport Validate(IEnumerable<Assembly> assemblies)
+    public static NetherNativeCompatibilityReport Validate(IEnumerable<Assembly> assemblies) =>
+        ValidateCore(assemblies, typeof(Plugin).Assembly, inspectGeneratedInstances: true);
+
+    // Offline assembly characterization cannot initialize the game's native singleton objects.
+    public static NetherNativeCompatibilityReport ValidateMetadata(IEnumerable<Assembly> assemblies, Assembly? plugin = null) =>
+        ValidateCore(assemblies, plugin ?? typeof(Plugin).Assembly, inspectGeneratedInstances: false);
+
+    private static NetherNativeCompatibilityReport ValidateCore(
+        IEnumerable<Assembly> assemblies,
+        Assembly plugin,
+        bool inspectGeneratedInstances
+    )
     {
         Assembly[] loaded = assemblies?.Where(assembly => assembly != null).Distinct().ToArray()
             ?? Array.Empty<Assembly>();
@@ -471,11 +589,13 @@ internal static class NetherNativeCompatibilityPreflight
                         loaded,
                         binding,
                         out string error,
-                        out _
+                        out MethodInfo? method
                     ))
                 {
                     failures.Add(binding.TypeName + "." + binding.Method.Name + " => " + error);
                 }
+                else
+                    ValidateTaskStatus(method!, failures);
             }
             catch (Exception ex)
             {
@@ -506,13 +626,24 @@ internal static class NetherNativeCompatibilityPreflight
 
                 bool resolved;
                 string error;
+                MethodInfo? method;
                 if (contract.Method.IsStatic)
                 {
                     resolved = NetherCodePopupInteropResolver.TryResolveStaticMethodExactIdentity(
                         type,
                         contract.Method,
                         out error,
-                        out _
+                        out method
+                    );
+                }
+                else if (inspectGeneratedInstances)
+                {
+                    resolved = NetherCodePopupInteropResolver.TryResolveGeneratedCallback(
+                        type,
+                        contract.Method,
+                        out error,
+                        out _,
+                        out method
                     );
                 }
                 else
@@ -522,11 +653,13 @@ internal static class NetherNativeCompatibilityPreflight
                         contract.Method,
                         out error,
                         out _,
-                        out _
+                        out method
                     );
                 }
                 if (!resolved)
                     failures.Add(contract.TypeName + "." + contract.Method.ManagedName + " => " + error);
+                else
+                    ValidateTaskStatus(method!, failures);
             }
             catch (Exception ex)
             {
@@ -542,12 +675,96 @@ internal static class NetherNativeCompatibilityPreflight
             }
         }
 
+        ValidateMembers(loaded, failures);
+        ValidateCodeConfirmationMembers(loaded, failures);
         ValidatePatchCatalog(failures);
+        int compiledReferences = NetherCompiledInteropPreflight.Validate(plugin, failures);
         return new NetherNativeCompatibilityReport(
             NetherNativeBindingCatalog.RequiredMethods.Count,
             NetherNativeBindingCatalog.RequiredGeneratedMethods.Count,
+            NetherNativeBindingCatalog.RequiredMembers.Count,
+            compiledReferences,
             failures
         );
+    }
+
+    private static void ValidateTaskStatus(MethodInfo method, List<string> failures)
+    {
+        string returnType = NetherLifecycleInteropBindings.TypeName(method.ReturnType);
+        if (returnType != "Cysharp.Threading.Tasks.UniTask"
+            && !returnType.StartsWith("Cysharp.Threading.Tasks.UniTask<", StringComparison.Ordinal))
+            return;
+
+        var status = new NetherNativeMethodDescriptor(
+            "get_Status", Array.Empty<string>(), "Cysharp.Threading.Tasks.UniTaskStatus"
+        ) { IsStatic = false };
+        if (!NetherLifecycleInteropBindings.TryResolveExactMethod(
+                method.ReturnType,
+                status,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                out string error,
+                out _
+            ))
+        {
+            failures.Add(method.DeclaringType?.FullName + "." + method.Name + ".return.Status => " + error);
+        }
+    }
+
+    private static void ValidateMembers(Assembly[] loaded, List<string> failures)
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        foreach (var binding in NetherNativeBindingCatalog.RequiredMembers)
+        {
+            try
+            {
+                Type? type = NetherLifecycleInteropBindings.ResolveType(loaded, binding.TypeName);
+                foreach (string name in binding.Path.Split('.'))
+                {
+                    if (type == null)
+                        break;
+                    PropertyInfo? property = type.GetProperty(name, flags);
+                    if (property != null && property.GetMethod != null && property.GetIndexParameters().Length == 0)
+                        type = property.PropertyType;
+                    else
+                        type = type.GetMethod("get_" + name, flags, null, Type.EmptyTypes, null)?.ReturnType
+                            ?? type.GetField(name, flags)?.FieldType
+                            ?? type.GetField("<" + name + ">k__BackingField", flags)?.FieldType;
+                }
+                if (type == null || !string.Equals(NetherLifecycleInteropBindings.TypeName(type), binding.ValueType, StringComparison.Ordinal))
+                    failures.Add(binding.TypeName + "." + binding.Path + " => missing-or-incompatible-member:" + binding.ValueType);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(binding.TypeName + "." + binding.Path + " => precheck-exception:" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+    }
+
+    private static void ValidateCodeConfirmationMembers(Assembly[] loaded, List<string> failures)
+    {
+        try
+        {
+            Type? controller = NetherLifecycleInteropBindings.ResolveType(
+                loaded, NetherNativeBindingCatalog.CodeSelectControllerType
+            );
+            Type? utility = NetherLifecycleInteropBindings.ResolveType(
+                loaded, NetherNativeBindingCatalog.NetherUtilityType
+            );
+            if (!NetherCodeConfirmTaskInvoker.TryResolve(
+                    controller!,
+                    utility!,
+                    NetherCodePopupNativeBinding.ConfirmTaskBinding(NetherNativeBindingCatalog.CodeSelectControllerType),
+                    out string error,
+                    out _,
+                    out _,
+                    out _
+                ))
+                failures.Add(error);
+        }
+        catch (Exception ex)
+        {
+            failures.Add("code-confirm-members => precheck-exception:" + ex.GetType().Name + ":" + ex.Message);
+        }
     }
 
     private static void ValidatePatchCatalog(List<string> failures)

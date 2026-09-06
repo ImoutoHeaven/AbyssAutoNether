@@ -37,15 +37,20 @@ BepInEx and the CLR must load the managed assembly before `Plugin.Load()` can ex
 
 ## Native compatibility contract
 
-`NetherNativeBindingCatalog` is the single inventory of game methods patched or invoked through reflection. Runtime callers reuse the same descriptors so validation and invocation cannot drift independently.
+`NetherNativeBindingCatalog` records the versioned reflection method and member contracts required by the native adapters. Runtime method callers reuse the catalog's descriptors.
 
 The current catalog validates:
 
 - 62 unique game methods;
 - 18 IL2CPP generated callbacks or async-task methods;
+- required instance field/property paths and their exact value types;
 - every Harmony patch class registered by `PatchManager`.
 
 Each game contract includes the declaring type, exact method identity, static or instance ownership, ordered parameter types, and return type. Generated static methods require their exact packaged identity; a renamed method with the same signature does not satisfy startup validation.
+
+`NetherCompiledInteropPreflight` also resolves the plugin's compiled game and Unity type/member references through the CLR. This covers direct calls and accessors, including dependencies reached only during later automation phases.
+
+`Plugin.Load()` uses `Validate`, which reads each required generated callback singleton and rejects an unreadable or null instance. `ValidateMetadata` characterizes assembly contracts for offline tests. Scene controller and popup instances are checked at their runtime ownership boundaries; startup validates their required member paths. Code confirmation uses the same member resolver during precheck and invocation.
 
 The catalog covers:
 
@@ -56,7 +61,7 @@ The catalog covers:
 - battle Auto and speed settings accessors;
 - every reflected game mutation issued by the runtime bridge.
 
-Harmony targets resolve through the catalog and throw when absent. A target resolver may not return `null` to defer a missing binding to Harmony.
+The precheck resolves cataloged Harmony targets before `PatchManager` installs the patches.
 
 `PatchManager.PatchTypes` is the only patch installation list. Tests require every source `[HarmonyPatch]` class to appear exactly once.
 

@@ -44,7 +44,9 @@ public sealed class Plugin : BasePlugin
         Log.LogInfo(
             $"AutoNether native compatibility precheck passed: "
             + $"methods={compatibility.CheckedMethodCount}, "
-            + $"generated={compatibility.CheckedGeneratedMethodCount}."
+            + $"generated={compatibility.CheckedGeneratedMethodCount}, "
+            + $"members={compatibility.CheckedMemberCount}, "
+            + $"compiled={compatibility.CheckedCompiledReferenceCount}."
         );
 
         ConfigFile = base.Config;

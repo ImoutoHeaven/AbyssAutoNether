@@ -75,7 +75,9 @@ internal static class NetherCodePopupInteropResolver
             error = "binding-unavailable:"
                 + (singletonMember?.DeclaringType?.FullName ?? "generated-singleton")
                 + ":generated-singleton-read:"
-                + ex.GetType().Name;
+                + ex.GetBaseException().GetType().Name
+                + ":"
+                + ex.GetBaseException().Message;
             return false;
         }
 

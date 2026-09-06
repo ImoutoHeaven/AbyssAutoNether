@@ -360,7 +360,7 @@ internal static class NetherLifecycleInteropBindings
         TypeName(method.ReturnType)
     ) { IsStatic = method.IsStatic };
 
-    private static string TypeName(Type type)
+    internal static string TypeName(Type type)
     {
         if (!type.IsGenericType)
             return type.FullName ?? type.Name;
