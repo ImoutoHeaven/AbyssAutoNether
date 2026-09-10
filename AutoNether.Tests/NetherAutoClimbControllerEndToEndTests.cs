@@ -1295,8 +1295,10 @@ public class NetherAutoClimbControllerEndToEndTests
         }
     }
 
-    [Fact]
-    public void Result_timeout_is_retired_only_after_an_authoritative_new_run_even_when_settlement_changes_tickets()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(20)]
+    public void Result_timeout_is_retired_only_after_an_authoritative_new_run_even_when_settlement_changes_tickets(int startFloor)
     {
         int previousMaximumDepth = Config.NetherAutoClimbMaxDepth.Value;
         var bridge = new ScriptedRuntimeBridge();
@@ -1347,7 +1349,7 @@ public class NetherAutoClimbControllerEndToEndTests
 
             // The player settles Result manually and starts a genuinely new run.  This is the
             // production proof bundle: a strictly newer FloorSelection generation, its matching
-            // SubScene.OnEntered, and an authoritative Play snapshot at the pristine floor-0
+            // SubScene.OnEntered, and an authoritative Play snapshot at an unlocked entry
             // boundary. Result settlement may change the account-level ticket balance before the
             // next Start consumes its entry ticket, so that balance is not a cross-run identity.
             bridge.CurrentRuntimeGeneration = 2;
@@ -1359,7 +1361,8 @@ public class NetherAutoClimbControllerEndToEndTests
                 Status = NetherSessionStatus.Play,
                 CurrentFloorId = 1,
                 CurrentNodeId = 1,
-                FloorLevel = 0,
+                FloorLevel = startFloor,
+                RecoveryFloorLevel = startFloor,
                 FloorIndex = 1,
                 ErosionPoint = 0,
                 TicketCount = 14,
@@ -1367,7 +1370,7 @@ public class NetherAutoClimbControllerEndToEndTests
                 NetherGold = 30,
                 Codes = Array.Empty<NetherCodeState>(),
                 CodeHash = "nether-codes:none",
-                MapHash = "new-run-floor-zero",
+                MapHash = "new-run-entry-map",
             };
 
             NetherAutoClimbController.Toggle(); // OFF from the nonterminal Result pause.

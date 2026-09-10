@@ -539,6 +539,7 @@ internal sealed class NetherAutoClimbStateMachine
     /// Runtime/controller generation, current-owner identity, matching OnEntered, and the
     /// authoritative capture itself are proved by the caller's FloorScene readiness result;
     /// this method proves the remaining cross-run snapshot contract before discarding anything.
+    /// Native entries are floor zero or ten-floor elevator steps through RecoveryFloorLevel.
     /// TicketCount is deliberately excluded: native GetTicketCount reads account-level item
     /// 200002, whose balance can be changed by Result records/rewards before the next Start.
     /// </summary>
@@ -555,7 +556,9 @@ internal sealed class NetherAutoClimbStateMachine
             || finished.CurrentFloorId <= 0
             || string.IsNullOrEmpty(finished.MapHash)
             || snapshot.Status != NetherSessionStatus.Play
-            || snapshot.FloorLevel != 0
+            || snapshot.FloorLevel < 0
+            || snapshot.FloorLevel % 10 != 0
+            || (snapshot.FloorLevel > 0 && snapshot.FloorLevel > snapshot.RecoveryFloorLevel)
             || snapshot.CurrentFloorId <= 0
             || snapshot.CurrentNodeId <= 0
             || snapshot.Floors == null

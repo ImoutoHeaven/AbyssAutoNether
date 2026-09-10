@@ -157,11 +157,20 @@ public class NetherAutoClimbStateMachineTests
         Assert.Null(machine.PendingAction);
     }
 
-    [Fact]
-    public void Prior_finish_evidence_retires_at_the_exact_pristine_new_run_snapshot()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    [InlineData(20)]
+    [InlineData(70)]
+    [InlineData(130)]
+    public void Prior_finish_evidence_retires_at_the_exact_pristine_new_run_snapshot(int startFloor)
     {
         NetherAutoClimbStateMachine machine = DisabledMachineWithPendingFinish(out NetherSnapshot finished);
-        NetherSnapshot freshRun = PristineNewRunAfter(finished);
+        NetherSnapshot freshRun = PristineNewRunAfter(finished) with
+        {
+            FloorLevel = startFloor,
+            RecoveryFloorLevel = startFloor,
+        };
 
         Assert.True(machine.TryRetireFinishEvidenceForNewRun(freshRun));
 
@@ -199,6 +208,9 @@ public class NetherAutoClimbStateMachineTests
         {
             freshRun with { Status = NetherSessionStatus.Sleep },
             freshRun with { FloorLevel = 1 },
+            freshRun with { FloorLevel = -10 },
+            freshRun with { FloorLevel = 20, RecoveryFloorLevel = 19 },
+            freshRun with { FloorLevel = 21, RecoveryFloorLevel = 130 },
             freshRun with { CurrentFloorId = 0 },
             freshRun with { CurrentNodeId = 0 },
             freshRun with { Floors = System.Array.Empty<NetherFloorNode>() },
