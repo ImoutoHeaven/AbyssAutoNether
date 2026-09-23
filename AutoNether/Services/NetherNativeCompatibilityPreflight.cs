@@ -86,6 +86,7 @@ internal static class NetherNativeBindingCatalog
             "Absf.ISceneTransitionParam",
             "Project.BattleResult.Top.BattleClearRecordBase",
             "Project.Api.IFinishQuestResponseEntity",
+            "System.Int32",
             "Il2CppSystem.Threading.CancellationToken",
         },
         "Project.BattleResult.IBattleResultModel"

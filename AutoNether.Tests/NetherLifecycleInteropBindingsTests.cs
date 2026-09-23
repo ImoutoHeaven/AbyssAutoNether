@@ -93,6 +93,7 @@ public sealed class NetherLifecycleInteropBindingsTests
                 "Absf.ISceneTransitionParam",
                 "Project.BattleResult.Top.BattleClearRecordBase",
                 "Project.Api.IFinishQuestResponseEntity",
+                "System.Int32",
                 "Il2CppSystem.Threading.CancellationToken",
             },
             method.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()

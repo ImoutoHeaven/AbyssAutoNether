@@ -71,10 +71,12 @@ The compatibility catalog is validated against this game baseline:
 
 | Input | SHA-256 |
 |---|---|
-| `GameAssembly.dll` | `efcb1cb47f0c927012b4843c328f6179356e22988ad185e55087887badf97581` |
-| `global-metadata.dat` | `b3b62451678ba469df334680414c49f35f0c7f29710d1c4866b4f85ad44c110a` |
-| `BepInEx/interop/Project.dll` | `075179ed583d6c5c78e6e67f432a547bc1a30e944dc3231e0a05a2c813be07ea` |
-| `BepInEx/interop/Absf.dll` | `c1ceb05bde4fe25f66b7e48039e7031c67046cf80e227a38bd4fd31e23d6aed9` |
+| `GameAssembly.dll` | `1fb9a4ddf393d3f14fe1470f49c182cbf40d2d4c4fa44e85161acb989bc41407` |
+| `global-metadata.dat` | `0e79488127a772f39b5d74bb2cc42b8752e336c259ebe0346d8ce453abf56a1e` |
+| `BepInEx/interop/Project.dll` | `07274e1e7abf234df14747580fcc46a519b2ecb007253ff048c55cf7f3ebd52d` |
+| `BepInEx/interop/Absf.dll` | `a579989a6f6f2ee4bafe336a05e8b79e46b2be7caf44e4e210c4a183fbd455c0` |
+
+The battle terminal hook resolves `BattleResultUtility.CreateBattleResultModel` with a `priorHighScore` integer between the finish response and cancellation token. The hook reads the result type and finish response to classify Nether settlement.
 
 The current run-start mutation is:
 
