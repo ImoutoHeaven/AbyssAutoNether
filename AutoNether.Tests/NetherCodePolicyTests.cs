@@ -1404,7 +1404,7 @@ public class NetherCodePolicyTests
             evidence
         );
 
-        Assert.Equal(NetherCodeDecisionKind.Pause, decision.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decision.Kind);
     }
 
     [Fact]
@@ -1505,7 +1505,7 @@ public class NetherCodePolicyTests
     }
 
     [Fact]
-    public void Incompatible_count_five_is_repaired_below_threshold_or_pauses_before_combat()
+    public void Existing_incompatible_count_five_can_be_repaired_or_declined()
     {
         NetherCodeState[] fiveRush =
         [
@@ -1527,7 +1527,7 @@ public class NetherCodePolicyTests
             evidence,
             repair
         );
-        NetherCodeDecision paused = Decide(
+        NetherCodeDecision declined = Decide(
             Portfolio(capacity: 5, current: fiveRush),
             evidence,
             cannotRepair
@@ -1535,8 +1535,41 @@ public class NetherCodePolicyTests
 
         Assert.Equal(NetherCodeDecisionKind.Select, repaired.Kind);
         Assert.Equal(101, repaired.RemoveCodeId);
-        Assert.Equal(NetherCodeDecisionKind.Pause, paused.Kind);
-        Assert.Equal(NetherPauseReason.UnknownMasterData, paused.PauseReason);
+        Assert.Equal(NetherCodeDecisionKind.Keep, declined.Kind);
+    }
+
+    [Fact]
+    public void Existing_incompatible_threshold_does_not_trap_a_recovered_offer()
+    {
+        NetherCodeState[] held =
+        [
+            Code(101, NetherCodeFamily.Rush),
+            Code(102, NetherCodeFamily.Rush),
+            Code(103, NetherCodeFamily.Rush),
+            Code(104, NetherCodeFamily.Rush),
+            Code(105, NetherCodeFamily.Rush),
+            Code(301, NetherCodeFamily.Safe),
+            Code(302, NetherCodeFamily.Safe),
+            Code(303, NetherCodeFamily.Safe),
+            Code(304, NetherCodeFamily.Safe),
+        ];
+        NetherCodeCandidate rush = Candidate(106, NetherCodeFamily.Rush);
+        NetherCodeCandidate impact = Candidate(201, NetherCodeFamily.Impact);
+        NetherCodeCandidate safe = Candidate(305, NetherCodeFamily.Safe);
+        NetherCodePolicyEvidence evidence = KnownEvidence(
+            Party(Member(1, 0, 1, 2), Member(2, 1, 2, 3)),
+            held.Cast<object>().Append(rush).Append(impact).Append(safe).ToArray()
+        );
+
+        NetherCodeDecision reroll = Decide(Portfolio(capacity: 39, reloadCount: 4, current: held), evidence, rush, impact);
+        NetherCodeDecision decline = Decide(Portfolio(capacity: 39, reloadCount: 0, current: held), evidence, rush, impact);
+        NetherCodeDecision select = Decide(Portfolio(capacity: 39, reloadCount: 4, current: held), evidence, safe);
+
+        Assert.Equal(NetherCodeDecisionKind.Reload, reroll.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Keep, decline.Kind);
+        Assert.Equal(NetherCodeDecisionKind.Select, select.Kind);
+        Assert.Equal(safe.CodeId, select.SelectedCodeId);
+        Assert.Equal(0, select.RemoveCodeId);
     }
 
     [Fact]

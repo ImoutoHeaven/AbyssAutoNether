@@ -386,31 +386,7 @@ internal sealed class NetherCodePolicy
             evidence,
             effectiveResearchFamily
         );
-        NetherCodeDecision decision;
-        if (TryGetIncompatibleThresholdFamily(
-                portfolio.CurrentCodes,
-                evidence.ActiveParty,
-                out NetherCodeFamily incompatibleFamily
-            ))
-        {
-            NetherCodeDecision equipmentRepair = DecideEquipment(
-                portfolio,
-                eligible,
-                settings,
-                evidence,
-                lane
-            );
-            decision = equipmentRepair.Kind == NetherCodeDecisionKind.Select
-                ? equipmentRepair
-                : Pause(
-                    NetherPauseReason.UnknownMasterData,
-                    "incompatible-category-five-no-strict-equipment-repair"
-                );
-        }
-        else
-        {
-            decision = DecideEquipment(portfolio, eligible, settings, evidence, lane);
-        }
+        NetherCodeDecision decision = DecideEquipment(portfolio, eligible, settings, evidence, lane);
         decision = AttachCandidateAudits(decision, candidateAudits);
         if (decision.Kind != NetherCodeDecisionKind.Select)
             return decision;
@@ -558,8 +534,6 @@ internal sealed class NetherCodePolicy
             return NetherCodeDecisionTier.ResearchCapacityReplacement;
         if (detail.Contains("research-target", StringComparison.Ordinal))
             return NetherCodeDecisionTier.ResearchTargetProgression;
-        if (detail.Contains("repair-incompatible-category-five", StringComparison.Ordinal))
-            return NetherCodeDecisionTier.ThresholdRepair;
         return NetherCodeDecisionTier.None;
     }
 
@@ -1565,11 +1539,17 @@ internal sealed class NetherCodePolicy
         NetherCodePolicyEvidence evidence
     )
     {
-        // Category-five crest compatibility remains an absolute hard gate. Actual Combat Value is
-        // evaluated below for the complete retained portfolio, including a portfolio that was
-        // already mixed before this replacement.
-        if (TryGetIncompatibleThresholdFamily(after, evidence.ActiveParty, out _))
-            return false;
+        // A new choice cannot cross or worsen an incompatible crest threshold already held by
+        // the run. Existing Codes remain the input to the complete-portfolio value comparison.
+        if (TryGetIncompatibleThresholdFamily(after, evidence.ActiveParty, out NetherCodeFamily incompatible))
+        {
+            NetherCodeEffectiveLevels beforeLevels = CalculateEffectiveLevels(before);
+            NetherCodeEffectiveLevels afterLevels = CalculateEffectiveLevels(after);
+            if (incompatible == NetherCodeFamily.Rush
+                    ? afterLevels.Rush > beforeLevels.Rush
+                    : afterLevels.Impact > beforeLevels.Impact)
+                return false;
+        }
 
         NetherCodeFamily opposing = Opposing(candidateFamily);
         if (opposing == NetherCodeFamily.Unknown)
@@ -1661,59 +1641,6 @@ internal sealed class NetherCodePolicy
     private static NetherPartyPosition PartyPositionOf(NetherStrategyPartyMember member) =>
         member.PartyPosition;
 
-    private static NetherCodeDecision TryRepairThresholdPortfolio(
-        NetherCodePortfolio portfolio,
-        IReadOnlyList<NetherCodeCandidate> eligible,
-        NetherAutoClimbSettings settings,
-        NetherCodePolicyEvidence evidence,
-        NetherCodeFamily incompatibleFamily,
-        NetherCombatLane lane
-    )
-    {
-        if (portfolio.CurrentCodes.Count < portfolio.Capacity)
-        {
-            return Pause(
-                NetherPauseReason.UnknownMasterData,
-                "incompatible-category-five-requires-replacement"
-            );
-        }
-
-        foreach (NetherCodeCandidate candidate in eligible.OrderBy(candidate => candidate.CodeId))
-        {
-            foreach (NetherCodeState removal in PositiveDistinct(portfolio.CurrentCodes)
-                         .Where(code => code.Family == incompatibleFamily)
-                         .OrderBy(code => code.CodeId))
-            {
-                IReadOnlyList<NetherCodeState> after = ApplyDecision(
-                    portfolio.CurrentCodes,
-                    candidate,
-                    removal.CodeId
-                );
-                NetherCodeEffectiveLevels effective = CalculateEffectiveLevels(after);
-                int repairedCount = incompatibleFamily == NetherCodeFamily.Rush
-                    ? effective.Rush
-                    : effective.Impact;
-                if (repairedCount < 5 && IsPortfolioHardSafe(after, evidence.ActiveParty))
-                {
-                    return Select(
-                        candidate,
-                        removal.CodeId,
-                        lane,
-                        new[] { removal.CodeId }
-                    ) with
-                    {
-                        Detail = "repair-incompatible-category-five",
-                    };
-                }
-            }
-        }
-
-        return Pause(
-            NetherPauseReason.UnknownMasterData,
-            "incompatible-category-five-no-proven-repair"
-        );
-    }
-
     private static IReadOnlyList<NetherCodeState> ApplyDecision(
         IReadOnlyList<NetherCodeState> current,
         NetherCodeCandidate candidate,
@@ -1740,24 +1667,6 @@ internal sealed class NetherCodePolicy
             .Where(code => removeCodeId <= 0 || code.CodeId != removeCodeId)
             .Append(selected)
             .ToArray();
-    }
-
-    private static bool IsPortfolioHardSafe(
-        IReadOnlyList<NetherCodeState> codes,
-        IReadOnlyList<NetherStrategyPartyMember>? party
-    )
-    {
-        NetherCodeState[] distinct = PositiveDistinct(codes).ToArray();
-        bool familySafe = !(distinct.Any(code => code.Family == NetherCodeFamily.Rush)
-                && distinct.Any(code => code.Family == NetherCodeFamily.Impact))
-            && !(distinct.Any(code => code.Family == NetherCodeFamily.Safe)
-                && distinct.Any(code => code.Family == NetherCodeFamily.Risk));
-        if (!familySafe)
-            return false;
-
-        NetherCodeEffectiveLevels effective = CalculateEffectiveLevels(distinct);
-        return (effective.Rush < 5 || EveryActiveCharacterMatches(party, NetherCodeFamily.Rush))
-            && (effective.Impact < 5 || EveryActiveCharacterMatches(party, NetherCodeFamily.Impact));
     }
 
     public static NetherCodeEffectiveLevels CalculateEffectiveLevels(IReadOnlyList<NetherCodeState> codes)
