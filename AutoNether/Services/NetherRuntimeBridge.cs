@@ -3593,8 +3593,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 new("floorId", data.MNetherMapFloorId.ToString()),
                 new("floorLevel", data.FloorLevel.ToString()),
                 new("apiFloorIndex", data.FloorIndex.ToString()),
-                new("floorResolution", data.MNetherMapFloorId == 0
-                    && result.IsSuccess
+                new("floorResolution", result.IsSuccess
+                    && result.Snapshot!.CurrentFloorId != data.MNetherMapFloorId
                         ? status == NetherSessionStatus.Play && requireFreshCharacters
                             ? "postbattle-unique-coordinate-fallback"
                             : "unique-coordinate-fallback"

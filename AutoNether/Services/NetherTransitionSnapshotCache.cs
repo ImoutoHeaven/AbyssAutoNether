@@ -43,8 +43,8 @@ internal sealed record NetherAuthoritativeTransitionState
 /// battle scene the graph no longer has a live controller, but the GET-only response still owns
 /// session status, current floor coordinates, resources and code portfolio.  This cache joins
 /// those two sources only when Nether/map identity and the exact current node coordinate agree.
-/// A zero master floor ID is tolerated only during Battle, or on its result-page Play/Sleep/Clear
-/// state when fresh battle-result characters prove that the transition belongs to this combat.
+/// During Battle and its result page, a lagging master floor ID can be resolved from one unique
+/// cached coordinate; the result page also requires fresh battle-result characters.
 /// </summary>
 internal sealed class NetherTransitionSnapshotCache
 {
@@ -105,23 +105,17 @@ internal sealed class NetherTransitionSnapshotCache
                 + ":fresh=" + state.NetherId + ":" + state.MapId
             );
         }
-        // The packaged client clears m_nether_map_floor_id to zero twice around a combat:
-        // while Status=Battle, and again on the result page after the clear response has
-        // already changed Status to Play, Sleep, or (for the final Boss) Clear.  Those latter
-        // states are distinguishable from invalid ordinary snapshots only by fresh, validated
-        // battle-result characters owned by this cache.  All transitions may recover the master
-        // floor solely from one exact cached (floor_level, floor_index) coordinate.
-        bool battleCoordinateFallback = state.Status == NetherSessionStatus.Battle
-            && state.CurrentFloorId == 0;
+        // Combat may retain the previous master floor ID while level/index already identify
+        // the selected floor.  Result-page coordinates require fresh battle characters.
+        bool battleCoordinateFallback = state.Status == NetherSessionStatus.Battle;
         bool postBattleCoordinateFallback = state.Status is (
                 NetherSessionStatus.Play or NetherSessionStatus.Sleep or NetherSessionStatus.Clear
             )
-            && state.CurrentFloorId == 0
             && requireFreshBattleCharacters
             && battleCharacters != null;
-        bool coordinateFallback = battleCoordinateFallback || postBattleCoordinateFallback;
+        bool allowCoordinateFallback = battleCoordinateFallback || postBattleCoordinateFallback;
         if (state.FloorLevel < 0 || state.FloorIndex < 0
-            || state.CurrentFloorId <= 0 && !coordinateFallback)
+            || state.CurrentFloorId <= 0 && !allowCoordinateFallback)
             return NetherRuntimeSnapshotResult.Failure("invalid-authoritative-current-floor");
         if (state.Codes == null || state.AcquiredItems == null)
             return NetherRuntimeSnapshotResult.Failure("missing-authoritative-transition-collections");
@@ -141,10 +135,19 @@ internal sealed class NetherTransitionSnapshotCache
 
         NetherFloorNode[] current = cached.Floors
             .Where(floor => floor != null
-                && (coordinateFallback || floor.FloorId == state.CurrentFloorId)
+                && floor.FloorId == state.CurrentFloorId
                 && floor.FloorLevel == state.FloorLevel
                 && floor.ApiFloorIndex == state.FloorIndex)
             .ToArray();
+        bool coordinateFallback = current.Length != 1 && allowCoordinateFallback;
+        if (coordinateFallback)
+        {
+            current = cached.Floors
+                .Where(floor => floor != null
+                    && floor.FloorLevel == state.FloorLevel
+                    && floor.ApiFloorIndex == state.FloorIndex)
+                .ToArray();
+        }
         if (current.Length != 1 || current[0].NodeId <= 0)
         {
             if (coordinateFallback)
@@ -192,10 +195,8 @@ internal sealed class NetherTransitionSnapshotCache
             Status = state.Status,
             NetherId = state.NetherId,
             MapId = state.MapId,
-            // Live Battle and its result-page Play/Sleep transition intentionally report
-            // m_nether_map_floor_id=0.  Post-battle cases are admitted only with fresh result
-            // characters; all cases require one exact cached coordinate.  Ordinary
-            // Play/Wait/Sleep snapshots cannot silently drift to another map node.
+            // The combat boundary may report a lagging master ID.  Result-page fallback needs
+            // fresh characters; ordinary Play/Wait/Sleep keeps the exact master-ID gate.
             CurrentFloorId = current[0].FloorId,
             CurrentNodeId = current[0].NodeId,
             FloorLevel = state.FloorLevel,

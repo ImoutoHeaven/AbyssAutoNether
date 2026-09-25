@@ -74,6 +74,60 @@ public sealed class NetherTransitionSnapshotCacheTests
     }
 
     [Fact]
+    public void Battle_and_result_resolve_unique_coordinate_when_master_id_lags_selected_floor()
+    {
+        var cache = new NetherTransitionSnapshotCache();
+        cache.ObserveFullSnapshot(Snapshot(NetherSessionStatus.Play, floorId: 285, floorLevel: 60, apiFloorIndex: 1) with
+        {
+            Floors = new[]
+            {
+                new NetherFloorNode(285, 60, 1, NetherFloorNodeType.Boss)
+                {
+                    NodeId = 261993005058,
+                    ApiFloorIndex = 1,
+                    IsUnlocked = true,
+                },
+                new NetherFloorNode(293, 62, 4, NetherFloorNodeType.MiniBoss)
+                {
+                    NodeId = 270582939653,
+                    ApiFloorIndex = 4,
+                    IsUnlocked = true,
+                },
+            },
+        });
+        Assert.False(cache.TryCompose(
+            TransitionState(NetherSessionStatus.Play, floorId: 285, floorLevel: 62, apiFloorIndex: 4),
+            requireFreshBattleCharacters: false
+        ).IsSuccess);
+        cache.BeginBattle();
+
+        NetherAuthoritativeTransitionState lagging = TransitionState(
+            NetherSessionStatus.Battle,
+            floorId: 285,
+            floorLevel: 62,
+            apiFloorIndex: 4
+        );
+        NetherRuntimeSnapshotResult battle = cache.TryCompose(lagging, requireFreshBattleCharacters: false);
+        Assert.True(battle.IsSuccess, battle.Detail);
+        Assert.Equal(293, battle.Snapshot!.CurrentFloorId);
+        Assert.Equal(270582939653, battle.Snapshot.CurrentNodeId);
+
+        Assert.True(cache.ObserveBattleResultCharacters(new[]
+        {
+            new NetherCharacterState(1001, 720, true),
+            new NetherCharacterState(1002, 0, false),
+        }));
+        NetherRuntimeSnapshotResult result = cache.TryCompose(
+            lagging with { Status = NetherSessionStatus.Play },
+            requireFreshBattleCharacters: true
+        );
+        Assert.True(result.IsSuccess, result.Detail);
+        Assert.Equal(293, result.Snapshot!.CurrentFloorId);
+        Assert.Equal(270582939653, result.Snapshot.CurrentNodeId);
+        Assert.Equal(720, result.Snapshot.Characters[0].HpPermille);
+    }
+
+    [Fact]
     public void Battle_status_zero_master_floor_id_fails_when_coordinate_is_not_unique()
     {
         var cache = new NetherTransitionSnapshotCache();
