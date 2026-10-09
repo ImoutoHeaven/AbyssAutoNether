@@ -1,93 +1,62 @@
 # Abyss AutoNether
 
-`AutoNether.dll` 是独立的 BepInEx IL2CPP 深渊自动爬塔插件。它负责 F12 自动选路、战斗、事件、奖励、商店、深渊代码、checkpoint、Continue 与 Result；不安装 `AbyssMod.dll` 也能运行。
+AutoNether is a standalone BepInEx IL2CPP plugin for Nether automation. F12 controls routing, battles, Code offers, events, rewards, shops, checkpoints, and settlement. `AbyssMod.dll` is optional.
 
-## 安装与启动
+**Current limitation:** the standalone build supplies no native-backed semantic provider for battle tiers and item classifications. Actions that depend on that evidence remain blocked as unknown. A successful startup check establishes binding compatibility, not complete unattended-run support.
 
-1. 将 `AutoNether.dll` 放入 `BepInEx/plugins/AutoNether/`。
-2. 完整重启游戏。
-3. 确认日志出现兼容性预检成功信息。
-4. 进入深渊楼层选择画面后按 F12 开启或关闭自动爬塔。
+## Install and start
 
-配置文件为 `BepInEx/config/Abyss.AutoNether.cfg`，保存后自动重载。
+1. Use a game installation with BepInEx IL2CPP and generated game interop assemblies.
+2. Place `AutoNether.dll` in `BepInEx/plugins/AutoNether/` and restart the game.
+3. Check the log for `AutoNether native compatibility precheck passed`.
+4. Enter the Nether floor-selection screen and press F12 to toggle automation.
 
-## 启动兼容性预检
+Settings live in `BepInEx/config/Abyss.AutoNether.cfg`. Saved changes reload automatically once the file stabilizes.
 
-AutoNether 在读取自己的配置、创建组件、初始化 controller 或安装 Harmony patch 之前，严格检查它依赖的全部游戏原函数、反射调用和 IL2CPP generated callback/task。类型、函数名、静态/实例归属、参数或返回类型任一不匹配，插件都会拒绝加载。
+## Strategy modes
 
-兼容时日志包含：
+- **Equipment** (default): climbs to a Boss-aligned target and builds a safe Code portfolio. Eligible new Codes can fill spare capacity; replacing a held Code requires a strict improvement. Native Code power is a fallback when richer combat valuation is unavailable.
+- **Research**: collects Codes from explicitly configured families, preferring the first incomplete target. It tries the other configured family before rerolling once or declining. It starts at floor zero and settles at a Boss when its objectives or Code capacity are reached, with a floor-70 ceiling.
 
-```text
-AutoNether native compatibility precheck passed: methods=62, generated=18.
-```
+Both modes enforce route safety and reject uniform crest grants that conflict with their actual recipients. See the [behavior specification](docs/specs/evidence-backed-strategy-modes.md) for the complete rules.
 
-不兼容时日志包含一项或多项 `[AutoNether precheck]` 错误，随后由 BepInEx 报告插件加载失败。此时不要继续自动爬塔或手动绕过；需要针对当前游戏程序集更新原生绑定。
+## Configuration
 
-## 策略模式
+All keys are in `[AutoNether]`.
 
-### Equipment
+| Key | Default | Purpose |
+|---|---|---|
+| `MaximumDepth` | `130` | Equipment target; resolves to a Boss using current master data. |
+| `StrategyMode` | `Equipment` | Select `Equipment` or `Research` explicitly. |
+| `ResearchPrimaryFamily` | `Unknown` | Required for Research: `Rush`, `Impact`, `Safe`, or `Risk`. |
+| `ResearchSecondaryFamily` | `Unknown` | Optional second family; `Unknown` disables it. Opposing pairs are invalid. |
+| `SoftErosionLimit` | `90` | Projected erosion threshold, from 1 to 99. Mandatory Bosses may exceed the soft limit; 100 is always forbidden. |
+| `MinimumCharacterHpPermille` | `300` | Route HP threshold, from 1 to 1000; 300 means 30%. |
+| `CombatLane` | `Auto` | Equipment preference: `Auto`, `Rush`, or `Impact`. |
+| `CodeReloadReserve` | `1` | Native rerolls to retain in Equipment mode. Research uses at most one fallback reroll per offer. |
+| `EquipmentRecoveryCodeTransformEnabled` | `false` | Opt into Equipment's tightly gated random Recovery transform. |
+| `TreasureMode` | `KeyOnly` | Use one held key first; an HP payment needs explicit survival and route proof. `Off` pauses at Treasure. |
+| `ShopMode` | `Off` | Leave through the native flow, or use `EquipmentBags` for verified affordable purchases. |
+| `DetailedLogging` | `true` | Enable bounded `[F12][AutoNether]` decision and lifecycle diagnostics. |
+| `CheckpointPreserveItemIds` | empty | Decimal item IDs to prioritize for return, separated by commas, semicolons, or spaces. Empty uses the native safe default. |
 
-默认模式。安全门槛通过且 Code 容量未满时，Equipment 会直接领取不会造成负面机制或混色纹章冲突的新 Code，不要求严格提升；多个候选优先按完整机制战斗价值排序，无法量化时使用游戏原生 `power × 实际目标人数`，仍不可比较时按 Code ID 稳定选择。只有容量已满、必须替换旧 Code 时才要求完整 portfolio 严格提升；完整机制无法量化时，原生战力数字可作为兜底，但不会推翻已证明为零或负收益的结果，也不会绕过安全门槛。
+Research cannot pair `Rush` with `Impact`, or `Safe` with `Risk`. Invalid settings, ambiguous ownership, and insufficient safety evidence stop automation before the affected action.
 
-### Research
+## Battles and optional F11 support
 
-研究模式只追求配置家族的研究收益，不用显示战力、侵蚀收益或一般战斗价值筛选同家族候选。当前目标家族优先；没有时选择另一已配置家族；两者都没有时最多重抽一次，仍没有则原生取消本次 Offer。
+AutoNether temporarily enables native battle Auto and maximum speed, then restores the original settings at battle termination, F12 disable, terminal pause, or unload. Restoration requires the exact native accessors.
 
-主家族研究目标完成后，副家族成为优先目标，主家族降为 fallback。Code 容量满后不再替换：插件取消后续 Offer，并在下一场 Boss 结算窗口正常结束本次 Research run。
+The recovery record is `BepInEx/config/Abyss.AutoNether/battle-settings-lease.json`. Keep a valid crash-left record: it allows restoration when the accessors become available.
 
-两种模式都拒绝会把错误纹章统一发给目标范围内角色的 Code。判断按实际 scope 进行：只有前排、后排或其他目标集合内部存在不兼容角色时才拒绝，不会因为队伍其他位置是混色而误杀安全候选。
+With AbyssMod installed, F11 may wrap the final battle-start task while F12 coordinates Nether progress. AutoNether waits for that task without replaying or cancelling it. Each plugin retains its own settings and toggle; disabling F12 leaves F11 alone.
 
-完整行为规范见 [`docs/specs/evidence-backed-strategy-modes.md`](docs/specs/evidence-backed-strategy-modes.md)。
+## Troubleshooting
 
-## 配置
+- **Load failure:** retain the `[AutoNether precheck]` errors. A game binding mismatch requires updated bindings; bypassing validation is unsafe.
+- **F12 does not start:** confirm the plugin loaded and the game is on the Nether floor-selection screen. Look for `event=hotkey-input` and `event=toggle-result`.
+- **Automation pauses:** keep `DetailedLogging=true` and retain the log from startup through the first pause. Unknown semantics, stale snapshots, and unsafe routes are deliberate stop conditions.
+- **`BindingUnavailable`:** indicates missing structural binding or ownership evidence. An unsuitable Code offer is normally declined instead.
 
-配置段为 `[AutoNether]`：
+## Developer reference
 
-| 键 | 默认值 | 含义 |
-|---|---:|---|
-| `MaximumDepth` | `130` | Equipment 请求的最大深度；实际目标对齐当前主数据中的 Boss。 |
-| `StrategyMode` | `Equipment` | `Equipment` 或 `Research`；不会自动推断。 |
-| `ResearchPrimaryFamily` | `Unknown` | Research 必填：`Rush`、`Impact`、`Safe` 或 `Risk`。 |
-| `ResearchSecondaryFamily` | `Unknown` | 可选副家族；`Unknown` 表示禁用。 |
-| `SoftErosionLimit` | `90` | 路线预计到达该侵蚀百分比前暂停；100 始终是硬停止。 |
-| `MinimumCharacterHpPermille` | `300` | 路线安全使用的角色 HP 软门槛；300 表示 30%。 |
-| `CombatLane` | `Auto` | Equipment 的 `Auto`、`Rush` 或 `Impact` 偏好。 |
-| `CodeReloadReserve` | `1` | Equipment 保留的原生 Code 重抽次数。Research 的单次 fallback 重抽不使用多次预算。 |
-| `EquipmentRecoveryCodeTransformEnabled` | `false` | 允许 Equipment 在严格条件下使用 Recovery 随机 Code 转换。Research 始终禁用。 |
-| `TreasureMode` | `KeyOnly` | 优先使用已验证的一把钥匙选项；无法证明安全选择时暂停。 |
-| `ShopMode` | `Off` | `Off` 原生离店；`EquipmentBags` 购买已验证且买得起的装备袋。 |
-| `DetailedLogging` | `true` | 输出 `[F12][AutoNether]` 决策与生命周期诊断。 |
-| `CheckpointPreserveItemIds` | 空 | checkpoint 优先送回的十进制物品 ID，支持逗号、分号或空格分隔。 |
-
-无效配置、未知主数据、过期 snapshot、无法唯一绑定的 popup 或不安全路线都会 fail closed；AutoNether 不猜测隐藏数据，不重复 mutation，也不调用未经证明的原始 API 替代游戏流程。
-
-## 与 AbyssMod F11 共存
-
-- 只开 F12：AutoNether 使用服务器原始战斗响应自动爬塔。
-- 只开 F11：AbyssMod 保持自己的手动选路与 Auto-SL 行为。
-- F11 与 F12 同时开启：F12 负责流程；F11 可以包装每场战斗的最终 task。AutoNether 等最终 task 结束后才继续。
-- 两个开关、配置和生命周期互不修改；关闭 F12 不是取消 F11 的命令。
-
-AutoNether 只观察最终 `StartQuestAsync` task，不引用 `AbyssMod.dll`，也不读取 AbyssMod 的静态状态或配置。
-
-## 战斗设置与恢复
-
-进入战斗时，AutoNether 临时启用游戏原生 Auto 与最高倍速。战斗结束、关闭 F12、终端暂停或插件卸载时恢复原设置。
-
-持久租约文件为 `BepInEx/config/Abyss.AutoNether/battle-settings-lease.json`。崩溃后不要手动删除仍有效的租约；插件会在重新取得精确原生设置访问器后恢复设置。
-
-## 日志排查
-
-按 F12 后应依次看到 `event=hotkey-input`、`event=toggle-result`，随后出现 snapshot、route、native task 和 reconcile 记录。
-
-若没有启动：
-
-1. 检查兼容性 precheck 是否通过。
-2. 确认日志插件名为 `Abyss AutoNether`，DLL 位于独立目录。
-3. 确认已经进入深渊楼层选择画面。
-4. 保持 `DetailedLogging=true`，保留从 precheck/build 到首次 pause 或 toggle-result 的完整日志。
-5. `BindingUnavailable` 只表示结构性绑定/所有权证据不足；普通候选不合适会取消该 Offer，而不会伪装成绑定失败。
-
-## 开发与验证
-
-运行架构、当前原生兼容性基线和 Docker 验证约束见 [`docs/design/autonether-architecture.md`](docs/design/autonether-architecture.md)。产品隔离与 Release 二进制审计分别由 `scripts/verify-product-isolation.sh` 和 `scripts/verify-release.sh` 执行。
+See the [domain glossary](CONTEXT.md), [behavior specification](docs/specs/evidence-backed-strategy-modes.md), and [architecture and verification guide](docs/design/autonether-architecture.md).

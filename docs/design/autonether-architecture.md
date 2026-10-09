@@ -1,162 +1,72 @@
 # AutoNether Architecture
 
-This document defines the current product boundary, startup contract, runtime ownership model, and verification requirements for `AutoNether.dll`.
+Runtime ownership, compatibility, and verification for `AutoNether.dll`. The [behavior specification](../specs/evidence-backed-strategy-modes.md) defines policy; the [glossary](../../CONTEXT.md) defines domain terms.
 
-## Product boundary
+## Product and startup
 
-AutoNether is a standalone BepInEx IL2CPP plugin with these identities:
+AutoNether is a BepInEx IL2CPP plugin with GUID `Abyss.AutoNether`, display name `Abyss AutoNether`, root namespace `AutoNether`, and hotkey F12. Configuration is `BepInEx/config/Abyss.AutoNether.cfg`; installation is `BepInEx/plugins/AutoNether/`.
 
-| Property | Value |
-|---|---|
-| Assembly | `AutoNether.dll` |
-| Root namespace | `AutoNether` |
-| Plugin GUID | `Abyss.AutoNether` |
-| Display name | `Abyss AutoNether` |
-| Configuration | `BepInEx/config/Abyss.AutoNether.cfg` |
-| Installation directory | `BepInEx/plugins/AutoNether/` |
-| Hotkey | F12 |
+`Plugin.Load()` binds logging, validates native compatibility, binds configuration, creates the hotkey component, installs registered Harmony patches, and initializes the controller, in that order. Validation failures log each incompatible contract and abort before configuration, components, patches, or controller initialization. This is the first executable plugin boundary, after managed assembly loading.
 
-AutoNether owns only Nether automation. Translation, LLM features, F6 inspection, and F11 Auto-SL remain outside this product.
+AbyssMod is an optional soft dependency. AutoNether has no `AbyssMod.dll` reference and owns its own configuration and lifecycle. Translation and F11 Auto-SL are separate products.
 
-`AbyssMod` is an optional BepInEx soft dependency. AutoNether does not reference `AbyssMod.dll`, read its configuration or static state, control F11, or share lifecycle ownership with it.
+## Compatibility
 
-## Startup sequence
+`NetherNativeBindingCatalog` supplies shared descriptors for reflected methods and members. Validation checks declaring type, exact method identity, static/instance ownership, ordered parameter types, return type, required member paths, and registered Harmony targets. Generated callback/task methods require their exact identities; runtime validation also checks required callback singleton instances.
 
-`Plugin.Load()` performs these operations in order:
+`NetherCompiledInteropPreflight` resolves compiled game and Unity references, including direct calls and accessors. `ValidateMetadata` supports offline contract tests; runtime scene and popup instances are checked at their ownership boundaries. The startup log reports the method, generated-method, member, and compiled-reference counts actually checked.
 
-1. Bind the plugin logger.
-2. Run the native compatibility precheck.
-3. Bind AutoNether configuration.
-4. Create the F12 hotkey component.
-5. Install the registered Harmony patches.
-6. Initialize the automation controller.
+`PatchManager.PatchTypes` is the installation list. Compatibility and contract tests cover battle lifecycle, floor selection, checkpoint/start/result flows, interaction popups, Code transactions, and battle-setting accessors.
 
-Only logger binding occurs before compatibility validation so failures can name every incompatible contract. Any validation failure is logged, logger ownership is released, and plugin loading aborts; no AutoNether configuration, component, controller, or patch is initialized.
+For a game update, verify current assembly hashes, exact types and signatures, and relevant decompiled control flow using read-only inputs. Update bindings, characterization tests, and affected current rules together. A game-design conflict overrides an approved requirement only with that evidence, as required by [AGENTS.md](../../AGENTS.md).
 
-BepInEx and the CLR must load the managed assembly before `Plugin.Load()` can execute. The precheck is therefore the earliest executable plugin boundary, not a check performed before the operating system reads the DLL.
+## Runtime responsibilities
 
-## Native compatibility contract
+| Area | Main code | Responsibility |
+|---|---|---|
+| Entry and configuration | `Core/Plugin.cs`, `Config.cs`, `Hotkey.cs`, `ConfigAutoReload.cs` | Validate startup, bind settings, poll stable file changes, and dispatch F12/update ticks. |
+| Lifecycle observations | `Patches/` | Report native controllers, popups, tasks, and terminal boundaries. |
+| Flow ownership | `NetherAutoClimbController`, `NetherAutoClimbStateMachine`, lifecycle coordinators | Own phases and parent/child transactions; wait and reconcile before advancing. |
+| Native adaptation | `NetherRuntimeBridge`, binding and capture services | Bind live owners, capture snapshots, invoke proven native flows, and observe results. |
+| Decisions | Code, route, event, erosion, and boundary policies | Compare authoritative options after safety and compatibility checks. |
+| Diagnostics and recovery | Audit services and battle-settings lease services | Explain decisions and retain restoration state across interruptions. |
 
-`NetherNativeBindingCatalog` records the versioned reflection method and member contracts required by the native adapters. Runtime method callers reuse the catalog's descriptors.
+A mutation requires enabled automation, a current native owner, matching decision/snapshot generations, and exclusive transaction ownership. Pending tasks block progress without synchronous result retrieval or replay. Confirmation invalidates unexecuted route valuation; planning resumes from fresh state after terminal confirmation or an exact child handoff.
 
-The current catalog validates:
+Popup readiness is polled only while its owner remains current. Candidate-local rejection uses native cancel/decline when legal. Structural binding, callback, or owner ambiguity produces `BindingUnavailable`; unsafe branches and unknown dependent content are excluded locally where possible.
 
-- 62 unique game methods;
-- 18 IL2CPP generated callbacks or async-task methods;
-- required instance field/property paths and their exact value types;
-- every Harmony patch class registered by `PatchManager`.
+### Typed semantic evidence
 
-Each game contract includes the declaring type, exact method identity, static or instance ownership, ordered parameter types, and return type. Generated static methods require their exact packaged identity; a renamed method with the same signature does not satisfy startup validation.
+`Plugin.Load()` supplies no semantic-provider factory. The controller can use a registered factory, and the bridge accepts its evidence only for the current snapshot fingerprint. The standalone build ships no native-backed provider, so dependent raw battle/item fields remain unknown and their actions stop safely. Binding compatibility alone does not establish semantic completeness.
 
-`NetherCompiledInteropPreflight` also resolves the plugin's compiled game and Unity type/member references through the CLR. This covers direct calls and accessors, including dependencies reached only during later automation phases.
+## Battle tasks and settings
 
-`Plugin.Load()` uses `Validate`, which reads each required generated callback singleton and rejects an unreadable or null instance. `ValidateMetadata` characterizes assembly contracts for offline tests. Scene controller and popup instances are checked at their runtime ownership boundaries; startup validates their required member paths. Code confirmation uses the same member resolver during precheck and invocation.
+The `Priority.Last` battle-start postfix captures the final Nether `StartQuestAsync` task after optional F11 wrapping. AutoNether waits while it is pending, continues once after successful reconciliation, and pauses on fault or cancellation. F12 does not read or change F11 state, cancel its work, or replay its request.
 
-The catalog covers:
+Battle-setting leases temporarily enable native Auto and maximum speed. Restoration is required at battle termination, F12 disable, terminal pause, unload, and crash recovery. The record lives at `BepInEx/config/Abyss.AutoNether/battle-settings-lease.json`. Exact native accessors must confirm restoration before the record is removed; unresolved restoration blocks route mutation.
 
-- battle start, terminal, result, and battle-result continuation;
-- floor selection, start-status state machine, and floor-event sequencing;
-- Event, Recovery, Treasure, Shop, Return, Code Offer, Code List, Continue, Skip, Finish, Boost, hint, and erosion popups;
-- Code select, cancel, reroll, replace, and transform tasks;
-- battle Auto and speed settings accessors;
-- every reflected game mutation issued by the runtime bridge.
+## Build and verification
 
-The precheck resolves cataloged Harmony targets before `PatchManager` installs the patches.
+The plugin targets .NET 6; tests target .NET 8. Set `ABYSS_GAME_DIR` to the game root so the projects can resolve `BepInEx/interop` and test-time `BepInEx/core` assemblies. The default Release artifact is `release/Release/net6.0/AutoNether.dll`.
 
-`PatchManager.PatchTypes` is the only patch installation list. Tests require every source `[HarmonyPatch]` class to appear exactly once.
+Run restore, tests, builds, decompilation, and binary inspection in ephemeral Docker containers. Check `docker info` first. Use a versioned image suitable for the tool, such as `mcr.microsoft.com/dotnet/sdk:8.0` for this solution. Mount source and game inputs read-only with explicit `--mount type=bind` arguments; build from a disposable copy inside the container. Limit writable host mounts to the artifact directory that needs output.
 
-## Current native baseline
+From that disposable repository copy, with `ABYSS_GAME_DIR` set to the container's game mount:
 
-The compatibility catalog is validated against this game baseline:
-
-| Input | SHA-256 |
-|---|---|
-| `GameAssembly.dll` | `1fb9a4ddf393d3f14fe1470f49c182cbf40d2d4c4fa44e85161acb989bc41407` |
-| `global-metadata.dat` | `0e79488127a772f39b5d74bb2cc42b8752e336c259ebe0346d8ce453abf56a1e` |
-| `BepInEx/interop/Project.dll` | `07274e1e7abf234df14747580fcc46a519b2ecb007253ff048c55cf7f3ebd52d` |
-| `BepInEx/interop/Absf.dll` | `a579989a6f6f2ee4bafe336a05e8b79e46b2be7caf44e4e210c4a183fbd455c0` |
-
-The battle terminal hook resolves `BattleResultUtility.CreateBattleResultModel` with a `priorHighScore` integer between the finish response and cancellation token. The hook reads the result type and finish response to classify Nether settlement.
-
-The current run-start mutation is:
-
-```csharp
-Project.Nether.NetherUtility
-    .TransitionNetherFloorSelectionSceneFromPartyAsync(
-        int partyNo,
-        int useTicket,
-        int startFloorLevel,
-        Il2CppSystem.Threading.CancellationToken cancellationToken
-    ) : Cysharp.Threading.Tasks.UniTask
+```sh
+dotnet restore AutoNether.sln
+dotnet test AutoNether.Tests/AutoNether.Tests.csproj --no-restore
+dotnet build AutoNether.sln -c Release --no-restore -warnaserror
+sh scripts/verify-product-isolation.sh
+sh scripts/verify-release.sh release/Release/net6.0/AutoNether.dll
 ```
 
-A game update changes the baseline only after a fresh read-only Docker decomp proves the new assembly hashes, exact type and member signatures, and relevant control flow. The catalog, characterization tests, this baseline, and any affected strategy rule change together.
+Verification requires current native compatibility tests, focused policy/lifecycle regressions, the full test suite, a warning-free Release build, both audits, and `git diff --check`. These are gates, not a claim that the current checkout has passed them.
 
-## Runtime ownership
+The isolation script checks product identities, forbidden cross-product source dependencies, and final-task capture. The Release script checks DLL identity strings and forbidden symbols using `strings -el`; its container must provide that tool.
 
-The controller advances only from authoritative snapshots. Every actionable state is bound to a runtime generation and the native owner that produced it.
+Deploy only the verified DLL to `BepInEx/plugins/AutoNether/` and compare SHA-256 with the build artifact. Deployment does not launch the game or modify unrelated files.
 
-A mutation is issued only when:
+## Source navigation
 
-- automation is enabled and owns the current phase;
-- the expected native controller and popup are current;
-- the snapshot and decision belong to the same generation;
-- no parent or child transaction already owns the action;
-- every required game binding passed startup validation.
-
-After issuing a mutation, AutoNether waits for its native task or callback and reconciles the observed server/native state. It does not repeat the action because a frame remained in `Wait`, and it does not plan the next route behind an active child popup or battle.
-
-Every confirmed mutation invalidates unexecuted route valuation. The next plan starts from a fresh snapshot after terminal confirmation or an exact child handoff.
-
-## Popup and task lifecycle
-
-Popup registration records the native controller, owner generation, runtime generation, and available callbacks. Model readiness is polled only while the owning controller remains current.
-
-Candidate-local strategy rejection uses the popup's native decline/cancel path and continues the run. `BindingUnavailable` is reserved for structural contract, owner, or callback evidence that cannot safely issue any native action.
-
-Pending native tasks are observed without synchronous `Get`, replay, or replacement. Faulted and cancelled tasks produce a named terminal pause.
-
-## Optional F11 interoperability
-
-F11 is a transparent battle-response middleware; F12 is the Nether flow coordinator. AutoNether installs a lowest-priority postfix on `StartQuestAsync` and observes the final `UniTask` after any optional AbyssMod wrapping.
-
-- Pending means wait without replay or scene transition.
-- Succeeded allows authoritative reconciliation and one continuation.
-- Faulted or cancelled pauses AutoNether.
-- Closing F12 does not cancel F11.
-
-The plugins never modify each other's configuration or toggle state.
-
-## Battle settings lease
-
-AutoNether temporarily enables native Auto and maximum speed while it owns a battle. The original values are restored on battle termination, F12 disable, terminal pause, plugin unload, or recovery from the persisted lease.
-
-The lease is stored under `BepInEx/config/Abyss.AutoNether/`. A lease is removed only after exact native accessors prove restoration.
-
-## Failure model
-
-Failures are local whenever ownership remains authoritative:
-
-- an unknown Code excludes that candidate;
-- an unknown Event part excludes that option;
-- an unknown inventory row excludes that purchase;
-- an unsafe branch excludes that route.
-
-The controller pauses only when no proven legal choice remains, configuration is invalid, transaction identity is ambiguous, or a structural native contract is unavailable. It never substitutes raw API calls or UI clicks for an unproven native flow.
-
-## Repository verification
-
-All restore, test, compilation, native decompilation, and binary inspection run in ephemeral Docker containers. The game and decompilation inputs are mounted read-only; writable mounts are limited to explicit build artifacts or authorized source output.
-
-Required gates are:
-
-1. Native compatibility tests against the packaged current game interop assemblies.
-2. Focused tests for the changed policy or lifecycle boundary.
-3. The full `AutoNether.Tests` suite.
-4. Warning-free Release build of `AutoNether.sln`.
-5. `scripts/verify-product-isolation.sh`.
-6. `scripts/verify-release.sh` against the built DLL.
-7. `git diff --check`.
-8. SHA-256 equality between the verified artifact and any deployed game DLL.
-
-Deployment copies only the verified `AutoNether.dll` into `BepInEx/plugins/AutoNether/`. It does not launch the game or mutate unrelated files.
+All runtime and policy services are under `AutoNether/Services/`; regression and contract tests are under `AutoNether.Tests/`. Start with `Plugin.cs` for startup, `NetherNativeCompatibilityPreflight.cs` for bindings, `NetherRunBoundaryPolicy.cs` for run limits, `NetherCodePolicy.cs` and `NetherResearchObjectivePolicy.cs` for offers, and `NetherRouteEncounterVectorPolicy.cs` / `NetherEventPolicy.cs` for route and interaction rules.
