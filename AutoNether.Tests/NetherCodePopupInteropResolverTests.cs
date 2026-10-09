@@ -257,11 +257,11 @@ public class NetherCodePopupInteropResolverTests
             cancelTaskError
         );
         Assert.Equal(
-            "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_Boolean_CancellationToken_PDM_0",
+            "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_Boolean_CancellationToken_0",
             confirmTask!.Name
         );
         Assert.Equal(
-            "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_PDM_0",
+            "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_0",
             cancelTask!.Name
         );
         Assert.True(

@@ -30,9 +30,9 @@ internal static class NetherCodePopupNativeBinding
     public const string CancelSequenceObfuscatedName =
         "<OpenAbyssCodeSelectPopupIfNeededAsync>g__HandleCancelSequenceAsync|35_1";
     public const string ConfirmTask =
-        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_Boolean_CancellationToken_PDM_0";
+        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_Boolean_CancellationToken_0";
     public const string CancelTask =
-        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_PDM_0";
+        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_0";
 
     public static NetherNativeMethodDescriptor ConfirmDescriptor(string controllerTypeName) => new(
         ConfirmCallback,
