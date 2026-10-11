@@ -30,7 +30,7 @@ internal sealed class BoundConfigValue<T> : IConfigValue<T>
 
 public static class Config
 {
-    internal static IConfigValue<int> NetherAutoClimbMaxDepth { get; private set; } = new DefaultConfigValue<int>(130);
+    internal static IConfigValue<int> NetherAutoClimbMaxDepth { get; private set; } = new DefaultConfigValue<int>(150);
     internal static IConfigValue<NetherStrategyMode> NetherAutoClimbStrategyMode { get; private set; } = new DefaultConfigValue<NetherStrategyMode>(NetherStrategyMode.Equipment);
     internal static IConfigValue<NetherCodeFamily> NetherAutoClimbResearchPrimaryFamily { get; private set; } = new DefaultConfigValue<NetherCodeFamily>(NetherCodeFamily.Unknown);
     internal static IConfigValue<NetherCodeFamily> NetherAutoClimbResearchSecondaryFamily { get; private set; } = new DefaultConfigValue<NetherCodeFamily>(NetherCodeFamily.Unknown);
@@ -49,7 +49,7 @@ public static class Config
         NetherAutoClimbMaxDepth = Bound(
             "AutoNether",
             "MaximumDepth",
-            130,
+            150,
             "Maximum floor to climb. The effective limit is also bounded by server/master-data limits."
         );
         NetherAutoClimbStrategyMode = Bound(

@@ -26,7 +26,7 @@ All keys are in `[AutoNether]`.
 
 | Key | Default | Purpose |
 |---|---|---|
-| `MaximumDepth` | `130` | Equipment target; resolves to a Boss using current master data. |
+| `MaximumDepth` | `150` | Equipment target; resolves to a Boss using current master data. |
 | `StrategyMode` | `Equipment` | Select `Equipment` or `Research` explicitly. |
 | `ResearchPrimaryFamily` | `Unknown` | Required for Research: `Rush`, `Impact`, `Safe`, or `Risk`. |
 | `ResearchSecondaryFamily` | `Unknown` | Optional second family; `Unknown` disables it. Opposing pairs are invalid. |

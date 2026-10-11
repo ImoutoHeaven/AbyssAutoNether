@@ -505,7 +505,7 @@ internal sealed record NetherAutoClimbSettings
     public NetherStrategyMode StrategyMode { get; init; } = NetherStrategyMode.Equipment;
     public NetherCodeFamily ResearchPrimaryFamily { get; init; } = NetherCodeFamily.Unknown;
     public NetherCodeFamily ResearchSecondaryFamily { get; init; } = NetherCodeFamily.Unknown;
-    public int MaxDepth { get; init; } = 130;
+    public int MaxDepth { get; init; } = 150;
     public int SoftErosionLimit { get; init; } = 90;
     public int MinimumCharacterHpPermille { get; init; } = 300;
     public NetherCombatLane CombatLane { get; init; } = NetherCombatLane.Auto;
