@@ -61,6 +61,11 @@ internal sealed class NetherAutoClimbSettingsSnapshotGate
             detail = "invalid-max-depth";
             return false;
         }
+        if (candidate.ResearchMaxDepth < 1)
+        {
+            detail = "invalid-research-max-depth";
+            return false;
+        }
         if (candidate.SoftErosionLimit is < 1 or >= 100)
         {
             detail = "invalid-soft-erosion-limit";

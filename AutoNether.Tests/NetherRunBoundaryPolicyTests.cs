@@ -28,7 +28,7 @@ public class NetherRunBoundaryPolicyTests
 
         Assert.True(decision.IsReady);
         Assert.Equal(80, decision.TargetFloorLevel);
-        Assert.Equal(80, decision.StartFloorLevel);
+        Assert.Equal(70, decision.StartFloorLevel);
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public class NetherRunBoundaryPolicyTests
     }
 
     [Fact]
-    public void Research_uses_the_authoritative_floor_70_boss_and_always_starts_at_zero()
+    public void Research_defaults_to_the_floor_70_boss_and_uses_the_unlocked_elevator_below_it()
     {
         // Fresh Project.dll: MNetherMapFloors.type uses Project.Master.NetherFloorType.BattleBoss;
         // NetherPointData.RecoveryFloorLevel is the live equipment checkpoint authority only.
@@ -61,28 +61,55 @@ public class NetherRunBoundaryPolicyTests
 
         Assert.True(decision.IsReady);
         Assert.Equal(70, decision.TargetFloorLevel);
-        Assert.Equal(0, decision.StartFloorLevel);
+        Assert.Equal(60, decision.StartFloorLevel);
     }
 
-    [Fact]
-    public void Research_fails_closed_when_floor_70_is_not_an_authoritative_boss()
+    [Theory]
+    [InlineData(40, 0, 40, 0)]
+    [InlineData(53, 20, 60, 20)]
+    [InlineData(53, 25, 60, 20)]
+    [InlineData(999, 80, 80, 70)]
+    public void Research_ceiling_is_configurable_and_starts_from_the_unlocked_elevator(
+        int configured,
+        int recoveryFloor,
+        int expectedTarget,
+        int expectedStart
+    )
     {
         NetherRunBoundaryDecision decision = Resolve(
-            Snapshot(recoveryFloor: 60, bosses: new[] { 10, 20, 30, 40, 50, 60 }),
+            Snapshot(recoveryFloor: recoveryFloor, bosses: new[] { 10, 20, 30, 40, 50, 60, 70, 80 }),
             new NetherAutoClimbSettings
             {
                 StrategyMode = NetherStrategyMode.Research,
                 ResearchPrimaryFamily = NetherCodeFamily.Safe,
+                ResearchMaxDepth = configured,
+            }
+        );
+
+        Assert.True(decision.IsReady);
+        Assert.Equal(expectedTarget, decision.TargetFloorLevel);
+        Assert.Equal(expectedStart, decision.StartFloorLevel);
+    }
+
+    [Fact]
+    public void Research_rejects_a_non_positive_ceiling()
+    {
+        NetherRunBoundaryDecision decision = Resolve(
+            Snapshot(recoveryFloor: 80, bosses: new[] { 10, 20, 70 }),
+            new NetherAutoClimbSettings
+            {
+                StrategyMode = NetherStrategyMode.Research,
+                ResearchPrimaryFamily = NetherCodeFamily.Safe,
+                ResearchMaxDepth = 0,
             }
         );
 
         Assert.False(decision.IsReady);
-        Assert.Equal(NetherPauseReason.UnknownMasterData, decision.PauseReason);
-        Assert.Equal("research-floor-70-boss-unavailable", decision.Detail);
+        Assert.Equal(NetherPauseReason.InvalidConfiguration, decision.PauseReason);
     }
 
     [Fact]
-    public void Equipment_uses_the_highest_unlocked_authoritative_checkpoint_not_above_target()
+    public void Equipment_uses_the_highest_unlocked_authoritative_checkpoint_below_target()
     {
         NetherRunBoundaryDecision decision = Resolve(
             Snapshot(recoveryFloor: 75, bosses: new[] { 10, 20, 30, 40, 50, 60, 70, 80 }),
@@ -91,7 +118,7 @@ public class NetherRunBoundaryPolicyTests
 
         Assert.True(decision.IsReady);
         Assert.Equal(70, decision.TargetFloorLevel);
-        Assert.Equal(70, decision.StartFloorLevel);
+        Assert.Equal(60, decision.StartFloorLevel);
     }
 
     [Fact]

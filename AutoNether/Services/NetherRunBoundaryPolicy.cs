@@ -19,13 +19,12 @@ internal sealed record NetherRunBoundaryDecision
 /// Resolves only reward-preserving run boundaries. The current packaged client exposes the map
 /// cap through MNetherMaps.max_floor_num, Boss templates through MNetherMapFloors.type, and the
 /// live elevator authority through NetherPointData.RecoveryFloorLevel.  The native floor-level
-/// selector materializes checkpoint starts in ten-floor increments up to that live authority;
+/// selector materializes checkpoint starts in ten-floor increments up to that live authority
+/// (both modes, strictly below the target);
 /// Boss rows normalize only the reward-preserving target and never define elevator starts.
 /// </summary>
 internal sealed class NetherRunBoundaryPolicy
 {
-    internal const int ResearchBossFloorLevel = 70;
-
     public NetherRunBoundaryDecision Resolve(
         NetherSnapshot snapshot,
         NetherAutoClimbSettings settings
@@ -37,7 +36,8 @@ internal sealed class NetherRunBoundaryPolicy
             throw new ArgumentNullException(nameof(settings));
 
         if (!Enum.IsDefined(typeof(NetherStrategyMode), settings.StrategyMode)
-            || settings.MaxDepth < 1)
+            || settings.MaxDepth < 1
+            || settings.ResearchMaxDepth < 1)
         {
             return Pause(NetherPauseReason.InvalidConfiguration, "invalid-run-boundary-settings");
         }
@@ -58,38 +58,25 @@ internal sealed class NetherRunBoundaryPolicy
         }
 
         int[] bosses = rawBosses.OrderBy(floor => floor).ToArray();
-        int target;
-        int start;
-        if (settings.StrategyMode == NetherStrategyMode.Research)
+        int requested = settings.StrategyMode == NetherStrategyMode.Research
+            ? settings.ResearchMaxDepth
+            : settings.MaxDepth;
+        int target = bosses.FirstOrDefault(floor => floor >= requested);
+        if (target == 0)
+            target = bosses[^1];
+
+        // Both modes start from the deepest unlocked elevator step (tech-tree direct elevator).
+        if (snapshot.RecoveryFloorLevel < 0)
         {
-            if (!bosses.Contains(ResearchBossFloorLevel))
-            {
-                return Pause(
-                    NetherPauseReason.UnknownMasterData,
-                    "research-floor-70-boss-unavailable"
-                );
-            }
-
-            target = ResearchBossFloorLevel;
-            start = 0;
+            return Pause(
+                NetherPauseReason.UnknownMasterData,
+                "invalid-live-recovery-floor-level"
+            );
         }
-        else
-        {
-            target = bosses.FirstOrDefault(floor => floor >= settings.MaxDepth);
-            if (target == 0)
-                target = bosses[^1];
 
-            if (snapshot.RecoveryFloorLevel < 0)
-            {
-                return Pause(
-                    NetherPauseReason.UnknownMasterData,
-                    "invalid-live-recovery-floor-level"
-                );
-            }
-
-            int unlockedLimit = Math.Min(snapshot.RecoveryFloorLevel, target);
-            start = unlockedLimit < 10 ? 0 : unlockedLimit / 10 * 10;
-        }
+        // A start at the target itself would be a Play snapshot already at the ceiling.
+        int unlockedLimit = Math.Min(snapshot.RecoveryFloorLevel, target - 1);
+        int start = unlockedLimit < 10 ? 0 : unlockedLimit / 10 * 10;
 
         return new NetherRunBoundaryDecision
         {

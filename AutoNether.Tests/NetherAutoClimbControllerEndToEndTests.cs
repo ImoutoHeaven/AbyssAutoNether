@@ -19,7 +19,9 @@ public sealed class NetherControllerRuntimeCollection
 public class NetherAutoClimbControllerEndToEndTests
 {
     [Theory]
-    [InlineData((int)NetherStrategyMode.Research, 95, 80, 0)]
+    [InlineData((int)NetherStrategyMode.Research, 95, 80, 60)]
+    [InlineData((int)NetherStrategyMode.Research, 95, 20, 20)]
+    [InlineData((int)NetherStrategyMode.Research, 95, 0, 0)]
     [InlineData((int)NetherStrategyMode.Equipment, 95, 80, 80)]
     public void Production_controller_starts_not_played_run_from_mode_derived_native_floor(
         int rawMode,

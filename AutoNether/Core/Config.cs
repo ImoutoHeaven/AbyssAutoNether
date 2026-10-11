@@ -31,6 +31,7 @@ internal sealed class BoundConfigValue<T> : IConfigValue<T>
 public static class Config
 {
     internal static IConfigValue<int> NetherAutoClimbMaxDepth { get; private set; } = new DefaultConfigValue<int>(150);
+    internal static IConfigValue<int> NetherAutoClimbResearchMaxDepth { get; private set; } = new DefaultConfigValue<int>(70);
     internal static IConfigValue<NetherStrategyMode> NetherAutoClimbStrategyMode { get; private set; } = new DefaultConfigValue<NetherStrategyMode>(NetherStrategyMode.Equipment);
     internal static IConfigValue<NetherCodeFamily> NetherAutoClimbResearchPrimaryFamily { get; private set; } = new DefaultConfigValue<NetherCodeFamily>(NetherCodeFamily.Unknown);
     internal static IConfigValue<NetherCodeFamily> NetherAutoClimbResearchSecondaryFamily { get; private set; } = new DefaultConfigValue<NetherCodeFamily>(NetherCodeFamily.Unknown);
@@ -51,6 +52,12 @@ public static class Config
             "MaximumDepth",
             150,
             "Maximum floor to climb. The effective limit is also bounded by server/master-data limits."
+        );
+        NetherAutoClimbResearchMaxDepth = Bound(
+            "AutoNether",
+            "ResearchMaximumDepth",
+            70,
+            "Research ceiling. Resolves up to the next Boss floor in current master data; Research returns at that checkpoint."
         );
         NetherAutoClimbStrategyMode = Bound(
             "AutoNether",

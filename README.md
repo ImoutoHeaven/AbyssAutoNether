@@ -16,7 +16,7 @@ Settings live in `BepInEx/config/Abyss.AutoNether.cfg`. Saved changes reload aut
 ## Strategy modes
 
 - **Equipment** (default): climbs to a Boss-aligned target and builds a safe Code portfolio. Eligible new Codes can fill spare capacity; replacing a held Code requires a strict improvement. Native Code power is a fallback when richer combat valuation is unavailable.
-- **Research**: collects Codes from explicitly configured families, preferring the first incomplete target. It tries the other configured family before rerolling once or declining. It starts at floor zero and settles at a Boss when its objectives or Code capacity are reached, with a floor-70 ceiling.
+- **Research**: collects Codes from explicitly configured families, preferring the first incomplete target. It tries the other configured family before rerolling once or declining. It starts at the deepest unlocked elevator floor below its ceiling (zero without an elevator) and settles at a Boss when its objectives or Code capacity are reached, with a configurable ceiling (`ResearchMaximumDepth`, default 70).
 
 Both modes enforce route safety and reject uniform crest grants that conflict with their actual recipients. See the [behavior specification](docs/specs/evidence-backed-strategy-modes.md) for the complete rules.
 
@@ -27,6 +27,7 @@ All keys are in `[AutoNether]`.
 | Key | Default | Purpose |
 |---|---|---|
 | `MaximumDepth` | `150` | Equipment target; resolves to a Boss using current master data. |
+| `ResearchMaximumDepth` | `70` | Research ceiling; resolves up to a Boss using current master data, then returns at that checkpoint. |
 | `StrategyMode` | `Equipment` | Select `Equipment` or `Research` explicitly. |
 | `ResearchPrimaryFamily` | `Unknown` | Required for Research: `Rush`, `Impact`, `Safe`, or `Risk`. |
 | `ResearchSecondaryFamily` | `Unknown` | Optional second family; `Unknown` disables it. Opposing pairs are invalid. |

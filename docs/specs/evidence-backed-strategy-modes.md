@@ -12,8 +12,8 @@ Missing evidence excludes the smallest dependent candidate, option, inventory ro
 
 `StrategyMode` is explicit and defaults to `Equipment`. Validate settings before mutation: positive maximum depth, erosion limit 1–99, HP threshold 1–1000 permille, nonnegative reroll reserve, and defined enum values. Research requires a primary family and permits an optional secondary; Rush/Impact and Safe/Risk pairs are invalid.
 
-- **Equipment:** target the first authoritative Boss at or above `MaximumDepth`, or the deepest Boss when the request exceeds the map. Start at the highest unlocked ten-floor checkpoint at or below the target, using live recovery-floor authority; otherwise start at zero.
-- **Research:** start at zero and use the authoritative floor-70 Boss as the ceiling. Settle at the next Boss when all configured research objectives are complete or Code capacity is reached; otherwise settle at the ceiling. Missing Boss evidence blocks the run.
+- **Equipment:** target the first authoritative Boss at or above `MaximumDepth`, or the deepest Boss when the request exceeds the map. Start at the highest unlocked ten-floor elevator checkpoint below the target, using live recovery-floor authority; otherwise start at zero.
+- **Research:** use `ResearchMaximumDepth` (default 70), resolved up to the next authoritative Boss, as the ceiling, and start the same way as Equipment. Settle at the next Boss when all configured research objectives are complete or Code capacity is reached; otherwise settle at the ceiling. Missing Boss evidence blocks the run.
 
 Normal settlement preserves rewards. Ordinary Retreat and intentional defeat are not successful completion paths; Lost Signal is not a planned exit.
 

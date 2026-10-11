@@ -3428,6 +3428,7 @@ internal static class NetherAutoClimbController
     private static NetherAutoClimbSettings BuildSettings() => new()
     {
         MaxDepth = Config.NetherAutoClimbMaxDepth.Value,
+        ResearchMaxDepth = Config.NetherAutoClimbResearchMaxDepth.Value,
         StrategyMode = Config.NetherAutoClimbStrategyMode.Value,
         ResearchPrimaryFamily = Config.NetherAutoClimbResearchPrimaryFamily.Value,
         ResearchSecondaryFamily = Config.NetherAutoClimbResearchSecondaryFamily.Value,
