@@ -8437,18 +8437,20 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
         else
         {
+            // b__10_1 registers the return confirmation synchronously inside this call, so the
+            // stage must already be AwaitingReturnConfirmation for RegisterPopupCore to claim it.
+            if (!_checkpointFlow.SubmitFinish())
+            {
+                return TerminalCheckpointFailure(
+                    NetherNativeActionResult.BindingUnavailable("invalid-native-checkpoint-finish-sequence")
+                );
+            }
             callback = TryInvokeVersionedGeneratedCallback(
                 registration.Controller,
                 NetherCheckpointContinueNativeBinding.FinishCallbackInterop,
                 new object?[] { null, registration.Controller },
                 "finish-at-checkpoint"
             );
-            if (callback.Kind == NetherNativeActionResultKind.Started && !_checkpointFlow.SubmitFinish())
-            {
-                return TerminalCheckpointFailure(
-                    NetherNativeActionResult.BindingUnavailable("invalid-native-checkpoint-finish-sequence")
-                );
-            }
         }
         if (callback.Kind != NetherNativeActionResultKind.Started)
             return TerminalCheckpointFailure(callback);
