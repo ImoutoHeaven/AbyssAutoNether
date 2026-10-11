@@ -13,6 +13,7 @@ internal enum NetherCheckpointPopupKind
     Boost,
     Return,
     ReturnScroll,
+    ReturnConfirm,
 }
 
 /// <summary>
@@ -63,7 +64,7 @@ internal readonly record struct NetherCheckpointPopupWaitResult(
 }
 
 /// <summary>
-/// Bounded, owner-aware waits for the five native checkpoint registrations.  Every wait pumps
+/// Bounded, owner-aware waits for the six native checkpoint registrations.  Every wait pumps
 /// the original parent in parallel: a parent fault/cancel wins immediately, while a parent
 /// completion may briefly precede UI registration.  That late-registration window uses the same
 /// finite budget as a pending parent, then becomes named early-complete evidence instead of an
@@ -91,6 +92,7 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
             [NetherCheckpointPopupKind.Boost] = new(maximumMissingPolls),
             [NetherCheckpointPopupKind.Return] = new(maximumMissingPolls),
             [NetherCheckpointPopupKind.ReturnScroll] = new(maximumMissingPolls),
+            [NetherCheckpointPopupKind.ReturnConfirm] = new(maximumMissingPolls),
         };
     }
 
@@ -136,6 +138,13 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
             return NetherCheckpointPopupWaitResult.Terminal(
                 NetherCheckpointPopupWaitResultKind.BindingUnavailable,
                 "finish-does-not-own-checkpoint-popup:" + kind
+            );
+        }
+        if (_ownerAction == NetherActionKind.Continue && kind == NetherCheckpointPopupKind.ReturnConfirm)
+        {
+            return NetherCheckpointPopupWaitResult.Terminal(
+                NetherCheckpointPopupWaitResultKind.BindingUnavailable,
+                "continue-does-not-own-checkpoint-popup:" + kind
             );
         }
 
@@ -235,6 +244,7 @@ internal sealed class NetherCheckpointPopupWaitCoordinator
         NetherCheckpointPopupKind.Boost => "checkpoint-boost-popup",
         NetherCheckpointPopupKind.Return => "checkpoint-return-popup",
         NetherCheckpointPopupKind.ReturnScroll => "checkpoint-return-scroll",
+        NetherCheckpointPopupKind.ReturnConfirm => "checkpoint-return-confirm-popup",
         _ => "checkpoint-popup",
     };
 }

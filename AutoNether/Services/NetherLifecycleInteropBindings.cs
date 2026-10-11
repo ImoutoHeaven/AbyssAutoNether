@@ -175,6 +175,10 @@ internal static class NetherLifecycleInteropBindings
             "Project.NetherSkipPopup.NetherSkipPopup"
         ),
         Popup(
+            NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName,
+            NetherCheckpointContinueNativeBinding.ReturnConfirmPopupTypeName
+        ),
+        Popup(
             "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopupController",
             "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopup"
         ),

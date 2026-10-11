@@ -356,10 +356,10 @@ public sealed class NetherLifecycleInteropBindingsTests
             resolvedNames.Add(method!.Name);
         }
 
-        Assert.Equal(30, bindings.Length);
+        Assert.Equal(31, bindings.Length);
         Assert.Empty(failures);
         Assert.Contains("Project_ISubService_Terminate", resolvedNames);
-        Assert.Equal(19, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
+        Assert.Equal(20, bindings.Count(binding => binding.Method.Name == "SetupPopupEvent"));
         Assert.Equal(
             new[] { "OnEntered", "OnInitializeAsync", "OnRefreshAsync" },
             bindings
@@ -706,8 +706,12 @@ public sealed class NetherLifecycleInteropBindingsTests
         Type skipController = packaged.RequireType(
             NetherCheckpointContinueNativeBinding.SkipControllerTypeName
         );
+        Type returnConfirmController = packaged.RequireType(
+            NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName
+        );
         var cases = new[]
         {
+            (returnConfirmController, NetherCheckpointContinueNativeBinding.ReturnConfirmOkCallbackInterop, "_SetupPopupEvent_b__9_1"),
             (continueController, NetherCheckpointContinueNativeBinding.ContinueCallbackInterop, "_SetupPopupEvent_b__10_2"),
             (continueController, NetherCheckpointContinueNativeBinding.FinishCallbackInterop, "_SetupPopupEvent_b__10_1"),
             (skipController, NetherCheckpointContinueNativeBinding.SkipDeclineCallbackInterop, "_SetupPopupEvent_b__7_0"),

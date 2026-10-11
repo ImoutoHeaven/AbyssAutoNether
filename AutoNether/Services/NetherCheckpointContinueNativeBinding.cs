@@ -21,6 +21,15 @@ internal static class NetherCheckpointContinueNativeBinding
         "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopup";
     public const string SkipControllerTypeName =
         "Project.NetherSkipPopup.NetherSkipPopupController";
+    public const string ReturnConfirmControllerTypeName = "Project.ConfirmButtonTwoPopupController";
+    public const string ReturnConfirmPopupTypeName = "Project.ConfirmButtonTwoPopup";
+
+    /// <summary>
+    /// Closure that <c>OnTapReturn</c> stores as the confirmation's <c>_onClickOk</c>; its
+    /// <c>__4__this</c> and <c>controller</c> prove which Continue popup owns the generic dialog.
+    /// </summary>
+    public const string ReturnConfirmClosureTypeName =
+        ContinueControllerTypeName + "+__c__DisplayClass11_0";
 
     public static NetherNativeMethodDescriptor ContinueCallback { get; } = new(
         "<SetupPopupEvent>b__10_2",
@@ -51,6 +60,14 @@ internal static class NetherCheckpointContinueNativeBinding
         "_SetupPopupEvent_b__10_1",
         "<SetupPopupEvent>b__10_1",
         new[] { UnitTypeName, ContinueControllerTypeName },
+        "System.Void"
+    ) { IsStatic = false };
+
+    /// <summary>OK button of the generic confirmation: <c>b__9_1(Unit, _onClickOk)</c> invokes the action.</summary>
+    public static NetherCodePopupInteropMethodBinding ReturnConfirmOkCallbackInterop { get; } = new(
+        "_SetupPopupEvent_b__9_1",
+        "<SetupPopupEvent>b__9_1",
+        new[] { UnitTypeName, Il2CppActionTypeName },
         "System.Void"
     ) { IsStatic = false };
 

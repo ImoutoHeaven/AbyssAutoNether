@@ -16,6 +16,7 @@ internal enum NetherCheckpointNativeStage
     AwaitingSkipDecision,
     AwaitingBoostConfirmation,
     AwaitingPristineReturnPopup,
+    AwaitingReturnConfirmation,
     AwaitingTerminalTask,
     Completed,
 }
@@ -68,6 +69,15 @@ internal sealed class NetherCheckpointNativeFlow
     public bool SubmitFinish()
     {
         if (_action?.Kind != NetherActionKind.FinishAtCheckpoint || Stage != NetherCheckpointNativeStage.AwaitingContinuePopup)
+            return false;
+        // The native Return tap opens a generic two-button confirmation before reporting the result.
+        Stage = NetherCheckpointNativeStage.AwaitingReturnConfirmation;
+        return true;
+    }
+
+    public bool SubmitReturnConfirmation()
+    {
+        if (_action?.Kind != NetherActionKind.FinishAtCheckpoint || Stage != NetherCheckpointNativeStage.AwaitingReturnConfirmation)
             return false;
         Stage = NetherCheckpointNativeStage.AwaitingTerminalTask;
         return true;

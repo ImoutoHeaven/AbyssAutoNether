@@ -204,6 +204,35 @@ public class NetherCheckpointPopupWaitCoordinatorTests
             NetherCheckpointPopupWaitResultKind.BindingUnavailable,
             waits.WaitFor(NetherCheckpointPopupKind.Return, null).Kind
         );
+        Assert.Equal(
+            NetherCheckpointPopupWaitResultKind.Ready,
+            waits.WaitFor(
+                NetherCheckpointPopupKind.ReturnConfirm,
+                new NetherCheckpointPopupObservation(
+                    NetherCheckpointPopupKind.ReturnConfirm,
+                    NetherActionKind.FinishAtCheckpoint,
+                    21,
+                    102,
+                    true
+                )
+            ).Kind
+        );
+    }
+
+    [Fact]
+    public void Continue_never_owns_the_finish_return_confirmation()
+    {
+        var driver = new FakeParentDriver(NetherNativeActionResult.Started("parent-pending"));
+        var waits = new NetherCheckpointPopupWaitCoordinator(driver);
+        Assert.True(waits.Begin(NetherActionKind.Continue, ownerGeneration: 21, minimumSequence: 100));
+
+        Assert.Equal(
+            NetherCheckpointPopupWaitResultKind.BindingUnavailable,
+            waits.WaitFor(
+                NetherCheckpointPopupKind.ReturnConfirm,
+                Fresh(NetherCheckpointPopupKind.ReturnConfirm, 101)
+            ).Kind
+        );
     }
 
     private static NetherCheckpointPopupObservation Fresh(NetherCheckpointPopupKind kind, long sequence) => new(

@@ -222,6 +222,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private const string ContinuePopupControllerTypeName = "Project.Nether.NetherContinueConfirmPopup.NetherContinueConfirmPopupController";
     private const string SkipPopupControllerTypeName = NetherCheckpointContinueNativeBinding.SkipControllerTypeName;
     private const string BoostPopupControllerTypeName = "Project.Nether.NetherBoostConfirmPopup.NetherBoostConfirmPopupController";
+    private const string ReturnConfirmPopupControllerTypeName =
+        NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName;
     private const string ContentAcquiredPopupControllerTypeName =
         "Project.Nether.NetherContentAcquiredPopup.NetherContentAcquiredPopupController";
     private const string ErosionPointNotificationPopupControllerTypeName =
@@ -327,6 +329,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private PopupRegistration? _continuePopup;
     private PopupRegistration? _skipPopup;
     private PopupRegistration? _boostPopup;
+    private PopupRegistration? _returnConfirmPopup;
     private PopupRegistration? _erosionPointNotificationPopup;
     private PopupRegistration? _floorEventHintPopup;
     private CheckpointControllerRegistration? _returnScrollController;
@@ -4826,6 +4829,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             _continuePopup = null;
             _skipPopup = null;
             _boostPopup = null;
+            _returnConfirmPopup = null;
             _erosionPointNotificationPopup = null;
             _floorEventHintPopup = null;
             _returnScrollController = null;
@@ -5005,6 +5009,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _continuePopup = null;
         _skipPopup = null;
         _boostPopup = null;
+        _returnConfirmPopup = null;
         _erosionPointNotificationPopup = null;
         _floorEventHintPopup = null;
         _returnScrollController = null;
@@ -5082,6 +5087,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     _continuePopup = null;
                     _skipPopup = null;
                     _boostPopup = null;
+                    _returnConfirmPopup = null;
                     _returnScrollController = null;
                     _nativeActionTask = null;
                 }
@@ -5314,10 +5320,13 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
             else if (_pendingCheckpointAction is NetherPlannedAction checkpointAction
                 && _checkpointOwnerGeneration > 0
-                && typeName is ContinuePopupControllerTypeName
-                    or SkipPopupControllerTypeName
-                    or BoostPopupControllerTypeName
-                    or ReturnPopupControllerTypeName)
+                && (typeName is ContinuePopupControllerTypeName
+                        or SkipPopupControllerTypeName
+                        or BoostPopupControllerTypeName
+                        or ReturnPopupControllerTypeName
+                    // The generic two-button dialog is claimed only after the owned Return tap.
+                    || (typeName == ReturnConfirmPopupControllerTypeName
+                        && _checkpointFlow.Stage == NetherCheckpointNativeStage.AwaitingReturnConfirmation)))
             {
                 ownerAction = checkpointAction.Kind;
                 ownerGeneration = _checkpointOwnerGeneration;
@@ -5468,6 +5477,10 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 case BoostPopupControllerTypeName:
                     _boostPopup = registration;
                     break;
+                case ReturnConfirmPopupControllerTypeName:
+                    if (ownerAction != NetherActionKind.None)
+                        _returnConfirmPopup = registration;
+                    break;
                 case ContentAcquiredPopupControllerTypeName:
                     contentConfirmBound = _contentAcquiredConfirmLease.Register(
                         popup,
@@ -5617,6 +5630,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             InvalidatePopup(ref _continuePopup, popup);
             InvalidatePopup(ref _skipPopup, popup);
             InvalidatePopup(ref _boostPopup, popup);
+            InvalidatePopup(ref _returnConfirmPopup, popup);
             InvalidatePopup(ref _erosionPointNotificationPopup, popup);
             InvalidatePopup(ref _floorEventHintPopup, popup);
             if (_returnScrollController is CheckpointControllerRegistration scroll
@@ -8259,6 +8273,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 _continuePopup = null;
             _skipPopup = null;
             _boostPopup = null;
+            _returnConfirmPopup = null;
             _returnPopup = null;
             _returnScrollController = null;
             _checkpointParentTask = null;
@@ -8349,6 +8364,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             NetherCheckpointNativeStage.AwaitingSkipDecision => PollCheckpointSkipDecision(),
             NetherCheckpointNativeStage.AwaitingBoostConfirmation => PollCheckpointBoostPopup(),
             NetherCheckpointNativeStage.AwaitingPristineReturnPopup => PollCheckpointReturnPopup(action),
+            NetherCheckpointNativeStage.AwaitingReturnConfirmation => PollCheckpointReturnConfirmPopup(),
             NetherCheckpointNativeStage.AwaitingTerminalTask => PollCheckpointTerminalTask(),
             _ => TerminalCheckpointFailure(
                 NetherNativeActionResult.BindingUnavailable("invalid-native-checkpoint-poll-stage:" + _checkpointFlow.Stage)
@@ -8439,6 +8455,112 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         return NetherNativeActionResult.Started("native-checkpoint-callback-submitted");
     }
+
+    /// <summary>
+    /// Current ISIL: Return (<c>b__10_1</c>) runs <c>OnTapReturn</c>, which opens a generic
+    /// <c>ConfirmButtonTwoPopupController</c> and reports Return only from its OK action.
+    /// The OK closure must point back to this exact Continue popup before it is tapped.
+    /// </summary>
+    private NetherNativeActionResult PollCheckpointReturnConfirmPopup()
+    {
+        NetherCheckpointPopupWaitResult wait = WaitForCheckpointPopup(
+            NetherCheckpointPopupKind.ReturnConfirm,
+            _returnConfirmPopup
+        );
+        if (wait.Kind != NetherCheckpointPopupWaitResultKind.Ready)
+            return ToCheckpointWaitResult(wait);
+
+        if (_returnConfirmPopup is not PopupRegistration registration
+            || !IsCurrentCheckpointPopup(registration, NetherCheckpointPopupKind.ReturnConfirm)
+            || _continuePopup is not PopupRegistration continuePopup
+            || registration.Sequence <= continuePopup.Sequence)
+        {
+            return TerminalCheckpointFailure(
+                NetherNativeActionResult.BindingUnavailable("stale-native-checkpoint-return-confirm-popup")
+            );
+        }
+        if (!TryReadOwnedReturnConfirmOk(
+                registration.Controller,
+                continuePopup.Controller,
+                out object? onClickOk,
+                out string ownershipError
+            ))
+        {
+            return TerminalCheckpointFailure(NetherNativeActionResult.BindingUnavailable(ownershipError));
+        }
+
+        NetherNativeActionResult confirm = TryInvokeVersionedGeneratedCallback(
+            registration.Controller,
+            NetherCheckpointContinueNativeBinding.ReturnConfirmOkCallbackInterop,
+            new object?[] { null, onClickOk },
+            "finish-return-confirm"
+        );
+        if (confirm.Kind != NetherNativeActionResultKind.Started)
+            return TerminalCheckpointFailure(confirm);
+        if (!_checkpointFlow.SubmitReturnConfirmation())
+        {
+            return TerminalCheckpointFailure(
+                NetherNativeActionResult.BindingUnavailable("invalid-native-checkpoint-return-confirm-sequence")
+            );
+        }
+        return NetherNativeActionResult.Started("native-checkpoint-return-confirm-submitted");
+    }
+
+    private static bool TryReadOwnedReturnConfirmOk(
+        object confirmController,
+        object continueController,
+        out object? onClickOk,
+        out string error
+    )
+    {
+        onClickOk = null;
+        try
+        {
+            if (!TryReadMember(confirmController, "_onClickOk", out object? ok)
+                || ok is not Il2CppSystem.Delegate okDelegate)
+            {
+                error = "return-confirm-ok-action-unavailable";
+                return false;
+            }
+            Type? closureType = ResolveLoadedType(NetherCheckpointContinueNativeBinding.ReturnConfirmClosureTypeName);
+            MethodInfo? tryCast = typeof(Il2CppObjectBase).GetMethod(
+                nameof(Il2CppObjectBase.TryCast),
+                Type.EmptyTypes
+            );
+            Il2CppSystem.Object? target = okDelegate.Target;
+            object? closure = closureType != null && tryCast != null && target != null
+                ? tryCast.MakeGenericMethod(closureType).Invoke(target, null)
+                : null;
+            if (closure == null)
+            {
+                error = "return-confirm-ok-target-not-continue-return-closure";
+                return false;
+            }
+            if (!TryReadMember(closure, "__4__this", out object? owner)
+                || !TryReadMember(closure, "controller", out object? child)
+                || !IsSameNativeObject(owner, continueController)
+                || !IsSameNativeObject(child, confirmController))
+            {
+                error = "return-confirm-owner-mismatch";
+                return false;
+            }
+            onClickOk = ok;
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Exception detail = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+            error = "return-confirm-ownership-exception:" + detail.GetType().Name + ":" + detail.Message;
+            return false;
+        }
+    }
+
+    private static bool IsSameNativeObject(object? left, object? right) =>
+        left is Il2CppObjectBase a
+        && right is Il2CppObjectBase b
+        && a.Pointer != IntPtr.Zero
+        && a.Pointer == b.Pointer;
 
     private NetherNativeActionResult PollCheckpointSkipDecision()
     {
@@ -8731,7 +8853,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         && kind is NetherCheckpointPopupKind.Continue
             or NetherCheckpointPopupKind.Skip
             or NetherCheckpointPopupKind.Boost
-            or NetherCheckpointPopupKind.Return;
+            or NetherCheckpointPopupKind.Return
+            or NetherCheckpointPopupKind.ReturnConfirm;
 
     private NetherNativeActionResult TerminalCheckpointFailure(NetherNativeActionResult result)
     {
@@ -8786,6 +8909,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         _continuePopup = null;
         _skipPopup = null;
         _boostPopup = null;
+        _returnConfirmPopup = null;
         _returnPopup = null;
         _returnScrollController = null;
         ResetCheckpointStartStatusParent();

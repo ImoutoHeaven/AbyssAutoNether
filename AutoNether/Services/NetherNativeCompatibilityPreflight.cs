@@ -385,6 +385,10 @@ internal static class NetherNativeBindingCatalog
                 NetherCheckpointContinueNativeBinding.FinishCallbackInterop
             ),
             Generated(
+                NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName,
+                NetherCheckpointContinueNativeBinding.ReturnConfirmOkCallbackInterop
+            ),
+            Generated(
                 NetherCheckpointContinueNativeBinding.SkipControllerTypeName,
                 NetherCheckpointContinueNativeBinding.SkipDeclineCallbackInterop
             ),
@@ -496,6 +500,9 @@ internal static class NetherNativeBindingCatalog
             (ReturnScrollControllerType, "_maxSelectedCount", "System.Int32"),
             (ReturnControllerType, "_maxSelectedCount", "System.Int32"),
             ("Project.Nether.NetherContinueConfirmPopup.NetherContinueConfirmPopupController", "_canBoost", "System.Boolean"),
+            (NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName, "_onClickOk", "Il2CppSystem.Action"),
+            (NetherCheckpointContinueNativeBinding.ReturnConfirmClosureTypeName, "__4__this", "Project.Nether.NetherContinueConfirmPopup.NetherContinueConfirmPopupController"),
+            (NetherCheckpointContinueNativeBinding.ReturnConfirmClosureTypeName, "controller", NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName),
         };
 
     public static MethodInfo ResolveRequiredMethod(NetherInteropPatchBinding binding)

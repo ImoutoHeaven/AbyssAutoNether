@@ -29,13 +29,16 @@ public class NetherCheckpointNativeFlowTests
     }
 
     [Fact]
-    public void Finish_never_enters_return_item_stage()
+    public void Finish_confirms_native_return_dialog_and_never_enters_return_item_stage()
     {
         var flow = new NetherCheckpointNativeFlow();
         Assert.True(flow.Begin(new NetherPlannedAction(NetherActionKind.FinishAtCheckpoint)));
+        Assert.False(flow.SubmitReturnConfirmation());
 
         Assert.True(flow.SubmitFinish());
+        Assert.Equal(NetherCheckpointNativeStage.AwaitingReturnConfirmation, flow.Stage);
 
+        Assert.True(flow.SubmitReturnConfirmation());
         Assert.Equal(NetherCheckpointNativeStage.AwaitingTerminalTask, flow.Stage);
         Assert.False(flow.CanSubmitReturnSelection);
     }
