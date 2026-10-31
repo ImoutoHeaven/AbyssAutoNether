@@ -11,6 +11,10 @@ namespace AutoNether.Services;
 /// A version-characterized native member contract.  A candidate is accepted only when its
 /// current managed name or its exact <c>ObfuscatedName</c> attribute matches and every part of
 /// its signature is identical.  This deliberately has no arity-only or substring fallback.
+/// <see cref="SignatureOnly"/> identifies generated members whose managed name embeds an
+/// unstable interop suffix (for example a <c>_PDM_0</c> local-function factory): those are
+/// accepted only when exactly one static member matches the complete return and parameter
+/// signature.
 /// </summary>
 internal sealed record NetherCodePopupInteropMethodBinding(
     string ManagedName,
@@ -20,6 +24,12 @@ internal sealed record NetherCodePopupInteropMethodBinding(
 )
 {
     public bool IsStatic { get; init; }
+
+    /// <summary>
+    /// When set, the managed name is a diagnostic label only and resolution requires one unique
+    /// member with the exact return and ordered parameter types.
+    /// </summary>
+    public bool SignatureOnly { get; init; }
 }
 
 /// <summary>
@@ -285,7 +295,8 @@ internal static class NetherCodePopupInteropResolver
 
     private static bool MatchesMethod(MethodInfo candidate, NetherCodePopupInteropMethodBinding binding)
     {
-        if (!MatchesName(candidate, binding.ManagedName, binding.ObfuscatedName))
+        if (!binding.SignatureOnly
+            && !MatchesName(candidate, binding.ManagedName, binding.ObfuscatedName))
         {
             return false;
         }

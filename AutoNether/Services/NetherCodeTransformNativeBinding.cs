@@ -18,10 +18,10 @@ internal static class NetherCodeTransformNativeBinding
     private const string EventResultTypeName = "Project.Nether.NetherEventResultModel";
     private const string BoolReactivePropertyTypeName = "UniRx.BoolReactiveProperty";
 
-    public const string TransformTask =
-        "Method_Internal_Static_UniTask_AbyssCodeListPopupController_NetherModel_NetherEventResultModel_Int64_BoolReactiveProperty_CancellationToken_PDM_0";
-    public const string TransformTaskObfuscatedName =
-        "<OpenChangeAbyssCodeListPopupByFloorEventAsync>g__HandleChangeAsync|26_1";
+    // The generated factory embeds an unstable interop suffix in its managed name, so it is
+    // identified only by its complete static signature.  The state machine it starts is
+    // resolved separately by source local-function name (see NetherGeneratedSequenceResolver).
+    public const string TransformTaskShape = "code-transform-generated-sequence";
 
     public static NetherCodePopupInteropMethodBinding ConfirmCallbackBinding { get; } = new(
         "_SetupPopupEvent_b__6_1",
@@ -38,8 +38,8 @@ internal static class NetherCodeTransformNativeBinding
     ) { IsStatic = false };
 
     public static NetherCodePopupInteropMethodBinding TransformTaskBinding(string listControllerTypeName) => new(
-        TransformTask,
-        TransformTaskObfuscatedName,
+        TransformTaskShape,
+        null,
         new[]
         {
             listControllerTypeName,
@@ -50,10 +50,10 @@ internal static class NetherCodeTransformNativeBinding
             Il2CppCancellationTokenTypeName,
         },
         UniTaskTypeName
-    ) { IsStatic = true };
+    ) { IsStatic = true, SignatureOnly = true };
 
     public static NetherNativeMethodDescriptor TransformTaskDescriptor(string listControllerTypeName) => new(
-        TransformTask,
+        TransformTaskShape,
         TransformTaskBinding(listControllerTypeName).ParameterTypeNames,
         UniTaskTypeName
     ) { IsStatic = true };

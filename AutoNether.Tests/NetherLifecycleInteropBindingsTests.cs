@@ -855,20 +855,26 @@ public sealed class NetherLifecycleInteropBindingsTests
             out string taskError,
             out MethodInfo? task
         );
-        Assert.True(taskResolved, taskError + ":" + string.Join("|", utility.GetMethods(
-            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
-        ).Where(method => method.Name == NetherCodeTransformNativeBinding.TransformTask).Select(method =>
-            method.ReturnType.FullName + "(" + string.Join(",", method.GetParameters().Select(parameter => parameter.ParameterType.FullName)) + ")"
-        )));
+        Assert.True(taskResolved, taskError);
 
         Assert.NotNull(confirmSingleton);
         Assert.NotNull(closeSingleton);
         Assert.Equal("_SetupPopupEvent_b__6_1", confirm!.Name);
         Assert.Equal("_SetupPopupEvent_b__7_0", close!.Name);
         Assert.Equal(
-            "Method_Internal_Static_UniTask_AbyssCodeListPopupController_NetherModel_NetherEventResultModel_Int64_BoolReactiveProperty_CancellationToken_PDM_0",
-            task!.Name
+            new[]
+            {
+                listController.FullName,
+                "Project.Nether.FloorSelection.NetherModel",
+                "Project.Nether.NetherEventResultModel",
+                "System.Int64",
+                "UniRx.BoolReactiveProperty",
+                "Il2CppSystem.Threading.CancellationToken",
+            },
+            task!.GetParameters().Select(parameter => parameter.ParameterType.FullName).ToArray()
         );
+        Assert.Equal("Cysharp.Threading.Tasks.UniTask", task.ReturnType.FullName);
+        Assert.True(task.IsStatic);
 
         MemberInfo completed = Assert.Single(
             confirmController.GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),

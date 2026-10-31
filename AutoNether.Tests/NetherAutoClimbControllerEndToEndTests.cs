@@ -6316,7 +6316,7 @@ public class NetherAutoClimbControllerEndToEndTests
             return NetherNativeActionResult.Completed("scripted-code-transform-complete-closed");
         }
 
-        NetherNativeActionResult INetherOwnedPopupNativeStagePort.PollCodeTransformTask(
+        NetherNativeActionResult INetherOwnedPopupNativeStagePort.PollCodeTransformCompletion(
             NetherCodeTransformOwner owner
         )
         {

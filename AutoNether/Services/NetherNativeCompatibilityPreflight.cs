@@ -402,6 +402,9 @@ internal static class NetherNativeBindingCatalog
             ),
         };
 
+    public static IReadOnlyList<NetherGeneratedSequenceContract> RequiredGeneratedSequences { get; } =
+        NetherGeneratedSequenceResolver.Contracts;
+
     public static IReadOnlyList<(string TypeName, string Path, string ValueType)> RequiredMembers { get; } =
         new[]
         {
@@ -685,11 +688,13 @@ internal static class NetherNativeCompatibilityPreflight
 
         ValidateMembers(loaded, failures);
         ValidateCodeConfirmationMembers(loaded, failures);
+        ValidateGeneratedSequences(loaded, failures);
         ValidatePatchCatalog(failures);
         int compiledReferences = NetherCompiledInteropPreflight.Validate(plugin, failures);
         return new NetherNativeCompatibilityReport(
             NetherNativeBindingCatalog.RequiredMethods.Count,
-            NetherNativeBindingCatalog.RequiredGeneratedMethods.Count,
+            NetherNativeBindingCatalog.RequiredGeneratedMethods.Count
+                + NetherNativeBindingCatalog.RequiredGeneratedSequences.Count,
             NetherNativeBindingCatalog.RequiredMembers.Count,
             compiledReferences,
             failures
@@ -745,6 +750,24 @@ internal static class NetherNativeCompatibilityPreflight
             {
                 failures.Add(binding.TypeName + "." + binding.Path + " => precheck-exception:" + ex.GetType().Name + ":" + ex.Message);
             }
+        }
+    }
+
+    private static void ValidateGeneratedSequences(Assembly[] loaded, List<string> failures)
+    {
+        try
+        {
+            Type? utility = NetherLifecycleInteropBindings.ResolveType(
+                loaded,
+                NetherNativeBindingCatalog.NetherUtilityType
+            );
+            NetherGeneratedSequenceResolver.TryResolveAll(utility, out _, out IReadOnlyList<string> sequenceFailures);
+            foreach (string failure in sequenceFailures)
+                failures.Add(failure);
+        }
+        catch (Exception ex)
+        {
+            failures.Add("generated-sequences => precheck-exception:" + ex.GetType().Name + ":" + ex.Message);
         }
     }
 

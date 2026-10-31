@@ -5,7 +5,9 @@ namespace AutoNether.Services;
 /// <summary>
 /// Version-characterized generated callbacks for the normal Abyss code offer popup.  ISIL for
 /// the packaged client proves b__12_0 invokes _onCancel while b__12_2 invokes _onConfirm; keep
-/// the identifiers here so tests can distinguish the two otherwise adjacent lambdas.
+/// the identifiers here so tests can distinguish the two otherwise adjacent lambdas.  These are
+/// popup button callbacks the plugin clicks, not sequence factories: the confirm and cancel
+/// UniTask factories are resolved by shape only, and their state machines by source name.
 /// </summary>
 internal static class NetherCodePopupNativeBinding
 {
@@ -25,14 +27,12 @@ internal static class NetherCodePopupNativeBinding
     public const string CancelCallbackObfuscatedName = "<SetupPopupEvent>b__12_0";
     public const string DetailCallbackObfuscatedName = "<SetupPopupEvent>b__12_3";
     public const string ConfirmCallbackObfuscatedName = "<SetupPopupEvent>b__12_2";
-    public const string ConfirmSequenceObfuscatedName =
-        "<OpenAbyssCodeSelectPopupIfNeededAsync>g__HandleConfirmSequenceAsync|35_0";
-    public const string CancelSequenceObfuscatedName =
-        "<OpenAbyssCodeSelectPopupIfNeededAsync>g__HandleCancelSequenceAsync|35_1";
-    public const string ConfirmTask =
-        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_Int64_NetherPartyModel_Boolean_CancellationToken_PDM_0";
-    public const string CancelTask =
-        "Method_Internal_Static_UniTask_AbyssCodeSelectPopupController_CancellationToken_PDM_0";
+
+    // The generated sequence factories embed an unstable interop suffix in their managed names.
+    // They are identified only by their complete static signature; the state machines they
+    // start are resolved by source local-function name (NetherGeneratedSequenceResolver).
+    public const string ConfirmTaskShape = "code-confirm-generated-sequence";
+    public const string CancelTaskShape = "code-cancel-generated-sequence";
 
     public static NetherNativeMethodDescriptor ConfirmDescriptor(string controllerTypeName) => new(
         ConfirmCallback,
@@ -68,8 +68,8 @@ internal static class NetherCodePopupNativeBinding
     ) { IsStatic = false };
 
     public static NetherCodePopupInteropMethodBinding ConfirmTaskBinding(string controllerTypeName) => new(
-        ConfirmTask,
-        ConfirmSequenceObfuscatedName,
+        ConfirmTaskShape,
+        null,
         new[]
         {
             controllerTypeName,
@@ -79,14 +79,14 @@ internal static class NetherCodePopupNativeBinding
             Il2CppCancellationTokenTypeName,
         },
         UniTaskTypeName
-    ) { IsStatic = true };
+    ) { IsStatic = true, SignatureOnly = true };
 
     public static NetherCodePopupInteropMethodBinding CancelTaskBinding(string controllerTypeName) => new(
-        CancelTask,
-        CancelSequenceObfuscatedName,
+        CancelTaskShape,
+        null,
         new[] { controllerTypeName, Il2CppCancellationTokenTypeName },
         UniTaskTypeName
-    ) { IsStatic = true };
+    ) { IsStatic = true, SignatureOnly = true };
 
     /// <summary>
     /// The cancel callback itself returns void because the packaged closure calls Forget.
@@ -95,7 +95,7 @@ internal static class NetherCodePopupNativeBinding
     /// never treated as a completed Keep action.
     /// </summary>
     public static NetherNativeMethodDescriptor CancelSequenceDescriptor(string controllerTypeName) => new(
-        CancelTask,
+        CancelTaskShape,
         new[] { controllerTypeName, Il2CppCancellationTokenTypeName },
         UniTaskTypeName
     ) { IsStatic = true };

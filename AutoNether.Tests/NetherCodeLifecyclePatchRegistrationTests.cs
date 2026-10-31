@@ -21,7 +21,7 @@ public class NetherCodeLifecyclePatchRegistrationTests
         const string listInitialization =
             "typeof(NetherAutoClimbCodeListInitializationLifecyclePatch)";
         const string keepCancel = "typeof(NetherAutoClimbCodeKeepCancelLifecyclePatch)";
-        const string transform = "typeof(NetherAutoClimbCodeTransformLifecyclePatch)";
+        const string transform = "typeof(NetherAutoClimbGeneratedSequenceLifecyclePatch)";
         Assert.Empty(Regex.Matches(source, Regex.Escape(selection)).Cast<Match>());
         Assert.Single(Regex.Matches(source, Regex.Escape(listInitialization)).Cast<Match>());
         Assert.Empty(Regex.Matches(source, Regex.Escape(keepCancel)).Cast<Match>());
@@ -55,7 +55,7 @@ public class NetherCodeLifecyclePatchRegistrationTests
             bridge,
             "internal static MethodBase? GetCodeListInitializationTaskPatchTarget()"
         );
-        string transformTarget = ExtractMethod(bridge, "internal static MethodBase? GetCodeTransformTaskPatchTarget()");
+        string transformTarget = ExtractMethod(bridge, "internal static IReadOnlyList<MethodBase> GetGeneratedSequencePatchTargets()");
         Assert.DoesNotContain("GetCodeSelectionTaskPatchTarget", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("GetCodeKeepCancelTaskPatchTarget", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("NetherAutoClimbCodeSelectionLifecyclePatch", patch, StringComparison.Ordinal);
@@ -63,8 +63,9 @@ public class NetherCodeLifecyclePatchRegistrationTests
         Assert.Contains("NetherCodeConfirmTaskInvoker.TryInvoke", bridge, StringComparison.Ordinal);
         Assert.Contains("NetherCodeCancelTaskInvoker.TryInvoke", bridge, StringComparison.Ordinal);
         Assert.Contains("NetherLifecycleInteropBindings.CodeListInitializationTask", listInitializationTarget);
-        Assert.Contains("NetherCodePopupInteropResolver.TryResolveStaticMethod", transformTarget);
-        Assert.Contains("NetherCodeTransformNativeBinding.TransformTaskBinding", transformTarget);
+        Assert.Contains("NetherGeneratedSequenceResolver.TryResolve", transformTarget);
+        Assert.Contains("NetherGeneratedSequenceResolver.Contracts", transformTarget);
+        Assert.DoesNotContain("Method_Internal_Static_UniTask", transformTarget);
         Assert.DoesNotContain("System.Threading.CancellationToken", transformTarget);
 
         Assert.Contains(
@@ -72,7 +73,11 @@ public class NetherCodeLifecyclePatchRegistrationTests
             patch
         );
         Assert.Contains(
-            "TargetMethod() => NetherRuntimeBridge.GetCodeTransformTaskPatchTarget()",
+            "TargetMethods() =>",
+            patch
+        );
+        Assert.Contains(
+            "NetherRuntimeBridge.GetGeneratedSequencePatchTargets()",
             patch
         );
     }
@@ -91,7 +96,7 @@ public class NetherCodeLifecyclePatchRegistrationTests
             StringComparison.Ordinal
         );
         int patchEnd = patch.IndexOf(
-            "internal static class NetherAutoClimbCodeTransformLifecyclePatch",
+            "internal static class NetherAutoClimbGeneratedSequenceLifecyclePatch",
             patchStart,
             StringComparison.Ordinal
         );

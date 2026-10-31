@@ -248,26 +248,33 @@ internal static class NetherAutoClimbCodeListInitializationLifecyclePatch
 }
 
 /// <summary>
-/// Observes the exact generated UniTask created by a Change-list OnClickChange.  The task
-/// owns the confirmation popup, server update, completion popup, and final native terminal;
-/// F12 never synthesizes or replays that request.
+/// Observes the generated state machine behind each NetherUtility code sequence (Change-list
+/// transform, Code-offer confirm, and Keep/cancel).  IL2CPP inlines every local-function
+/// factory body into the reachable popup lambda, so a postfix on the factory never runs; the
+/// generated <c>MoveNext</c> survives that inlining because <c>builder.Start</c> and every
+/// resume call it directly.  One prefix/postfix/finalizer pair drives the shared
+/// start/completion/fault contract for all three families.
 /// </summary>
 [HarmonyPatch]
-internal static class NetherAutoClimbCodeTransformLifecyclePatch
+internal static class NetherAutoClimbGeneratedSequenceLifecyclePatch
 {
-    private static MethodBase? TargetMethod() => NetherRuntimeBridge.GetCodeTransformTaskPatchTarget();
+    private static IEnumerable<MethodBase> TargetMethods() =>
+        NetherRuntimeBridge.GetGeneratedSequencePatchTargets();
 
-    [HarmonyPostfix]
-    private static void Postfix(object[] __args, ref UniTask __result)
+    private static void Prefix(MethodBase __originalMethod, object __instance) =>
+        NetherRuntimeBridge.ObserveGeneratedSequenceEnter(__originalMethod, __instance);
+
+    private static void Postfix(MethodBase __originalMethod, object __instance) =>
+        NetherRuntimeBridge.ObserveGeneratedSequenceExit(__originalMethod, __instance);
+
+    private static Exception? Finalizer(
+        MethodBase __originalMethod,
+        object __instance,
+        Exception? __exception
+    )
     {
-        try
-        {
-            if (__args != null && __args.Length == 6 && __args[0] != null && __args[3] != null)
-                NetherRuntimeBridge.ObserveCodeTransformTask(__args[0], __args[3], __result);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("[F12][AutoNether] native code transform task observation failed: " + ex);
-        }
+        if (__exception != null)
+            NetherRuntimeBridge.ObserveGeneratedSequenceFault(__originalMethod, __instance, __exception);
+        return __exception;
     }
 }

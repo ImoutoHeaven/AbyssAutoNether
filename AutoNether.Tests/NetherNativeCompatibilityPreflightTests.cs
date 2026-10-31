@@ -102,7 +102,7 @@ public sealed class NetherNativeCompatibilityPreflightTests
 
         Assert.True(report.IsCompatible, string.Join(Environment.NewLine, report.Failures));
         Assert.Equal(63, report.CheckedMethodCount);
-        Assert.Equal(19, report.CheckedGeneratedMethodCount);
+        Assert.Equal(22, report.CheckedGeneratedMethodCount);
     }
 
     [Fact]

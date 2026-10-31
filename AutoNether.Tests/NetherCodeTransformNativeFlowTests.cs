@@ -101,7 +101,7 @@ public sealed class NetherCodeTransformNativeFlowTests
             return NetherNativeActionResult.Completed("transform-complete-closed");
         }
 
-        public NetherNativeActionResult PollCodeTransformTask(NetherCodeTransformOwner owner)
+        public NetherNativeActionResult PollCodeTransformCompletion(NetherCodeTransformOwner owner)
         {
             Calls.Add("task");
             return NetherNativeActionResult.Completed("transform-task-terminal");

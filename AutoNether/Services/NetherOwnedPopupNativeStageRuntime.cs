@@ -90,7 +90,7 @@ internal interface INetherOwnedPopupNativeStagePort
     NetherNativeActionResult InvokeCodeTransformCompleteClose(NetherCodeTransformOwner owner) =>
         NetherNativeActionResult.BindingUnavailable("code-transform-complete-unavailable");
 
-    NetherNativeActionResult PollCodeTransformTask(NetherCodeTransformOwner owner) =>
+    NetherNativeActionResult PollCodeTransformCompletion(NetherCodeTransformOwner owner) =>
         NetherNativeActionResult.BindingUnavailable("code-transform-task-unavailable");
 }
 
@@ -331,7 +331,7 @@ internal sealed class NetherOwnedPopupNativeStageRuntime
                     ? _port.InvokeCodeTransformCompleteClose(owner)
                     : NetherNativeActionResult.BindingUnavailable("code-transform-missing-owner"),
                 () => _codeTransform.Owner is NetherCodeTransformOwner owner
-                    ? _port.PollCodeTransformTask(owner)
+                    ? _port.PollCodeTransformCompletion(owner)
                     : NetherNativeActionResult.BindingUnavailable("code-transform-missing-owner")
             );
             return ToPumpResult(result, reloadReady: false);

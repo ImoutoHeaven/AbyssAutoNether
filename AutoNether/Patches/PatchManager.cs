@@ -19,7 +19,7 @@ public static class PatchManager
         typeof(NetherAutoClimbBattleResultLifecyclePatch),
         typeof(NetherAutoClimbFloorEventSequenceLifecyclePatch),
         typeof(NetherAutoClimbCodeListInitializationLifecyclePatch),
-        typeof(NetherAutoClimbCodeTransformLifecyclePatch),
+        typeof(NetherAutoClimbGeneratedSequenceLifecyclePatch),
     };
 
     public static void Initialize()
