@@ -251,18 +251,6 @@ internal static class NetherNativeBindingCatalog
         Array.Empty<string>(),
         "System.Void"
     );
-    public static NetherInteropPatchBinding CodeListChangeTab { get; } = Instance(
-        CodeListControllerType,
-        "OnChangeTab",
-        new[] { "System.Int32" },
-        "System.Void"
-    );
-    public static NetherInteropPatchBinding CodeListChange { get; } = Instance(
-        CodeListControllerType,
-        "OnClickChange",
-        Array.Empty<string>(),
-        "System.Void"
-    );
     public static NetherInteropPatchBinding CodeReroll { get; } = Instance(
         CodeSelectControllerType,
         "RerollAsync",
@@ -316,8 +304,6 @@ internal static class NetherNativeBindingCatalog
                 BattleSettingsSetSpeed,
                 CodeListThumbnail,
                 CodeListReplace,
-                CodeListChangeTab,
-                CodeListChange,
                 CodeReroll,
             })
             .GroupBy(BindingIdentity, StringComparer.Ordinal)
@@ -402,9 +388,6 @@ internal static class NetherNativeBindingCatalog
             ),
         };
 
-    public static IReadOnlyList<NetherGeneratedSequenceContract> RequiredGeneratedSequences { get; } =
-        NetherGeneratedSequenceResolver.Contracts;
-
     public static IReadOnlyList<(string TypeName, string Path, string ValueType)> RequiredMembers { get; } =
         new[]
         {
@@ -473,6 +456,7 @@ internal static class NetherNativeBindingCatalog
             (CodeSelectControllerType, "_cancellationToken", "Il2CppSystem.Threading.CancellationToken"),
             (CodeListControllerType, "_popupType", "Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopupType"),
             (CodeListControllerType, "_replaceMId", "System.Int64"),
+            (CodeListControllerType, "_onChangeButtonClicked", "Il2CppSystem.Action<System.Int64>"),
             (CodeListControllerType, "_modelDictionary", "Il2CppSystem.Collections.Generic.Dictionary<System.Int32,Il2CppSystem.Collections.Generic.List<Project.Nether.AbyssCodeThumbnailModel>>"),
             (CodeListControllerType, "TabIndexes", "Il2CppSystem.Collections.Generic.Dictionary<System.Int32,System.Int32>"),
             ("Project.Nether.NetherAbyssCodeListPopup.AbyssCodeListPopup", "_tabGroupView", "Project.Outgame.UIParts.TabGroupView"),
@@ -688,13 +672,13 @@ internal static class NetherNativeCompatibilityPreflight
 
         ValidateMembers(loaded, failures);
         ValidateCodeConfirmationMembers(loaded, failures);
-        ValidateGeneratedSequences(loaded, failures);
+        ValidateCodeCancelMembers(loaded, failures);
+        ValidateCodeTransformMembers(loaded, failures);
         ValidatePatchCatalog(failures);
         int compiledReferences = NetherCompiledInteropPreflight.Validate(plugin, failures);
         return new NetherNativeCompatibilityReport(
             NetherNativeBindingCatalog.RequiredMethods.Count,
-            NetherNativeBindingCatalog.RequiredGeneratedMethods.Count
-                + NetherNativeBindingCatalog.RequiredGeneratedSequences.Count,
+            NetherNativeBindingCatalog.RequiredGeneratedMethods.Count,
             NetherNativeBindingCatalog.RequiredMembers.Count,
             compiledReferences,
             failures
@@ -753,21 +737,62 @@ internal static class NetherNativeCompatibilityPreflight
         }
     }
 
-    private static void ValidateGeneratedSequences(Assembly[] loaded, List<string> failures)
+    private static void ValidateCodeCancelMembers(Assembly[] loaded, List<string> failures)
     {
         try
         {
-            Type? utility = NetherLifecycleInteropBindings.ResolveType(
-                loaded,
-                NetherNativeBindingCatalog.NetherUtilityType
+            Type? controller = NetherLifecycleInteropBindings.ResolveType(
+                loaded, NetherNativeBindingCatalog.CodeSelectControllerType
             );
-            NetherGeneratedSequenceResolver.TryResolveAll(utility, out _, out IReadOnlyList<string> sequenceFailures);
-            foreach (string failure in sequenceFailures)
-                failures.Add(failure);
+            Type? utility = NetherLifecycleInteropBindings.ResolveType(
+                loaded, NetherNativeBindingCatalog.NetherUtilityType
+            );
+            if (!NetherCodeCancelTaskInvoker.TryResolve(
+                    controller!,
+                    utility!,
+                    NetherCodePopupNativeBinding.CancelTaskBinding(NetherNativeBindingCatalog.CodeSelectControllerType),
+                    out string error,
+                    out _,
+                    out _
+                ))
+                failures.Add(error);
         }
         catch (Exception ex)
         {
-            failures.Add("generated-sequences => precheck-exception:" + ex.GetType().Name + ":" + ex.Message);
+            failures.Add("code-cancel-members => precheck-exception:" + ex.GetType().Name + ":" + ex.Message);
+        }
+    }
+
+    private static void ValidateCodeTransformMembers(Assembly[] loaded, List<string> failures)
+    {
+        try
+        {
+            Type? controller = NetherLifecycleInteropBindings.ResolveType(
+                loaded, NetherNativeBindingCatalog.CodeListControllerType
+            );
+            Type? utility = NetherLifecycleInteropBindings.ResolveType(
+                loaded, NetherNativeBindingCatalog.NetherUtilityType
+            );
+            if (!NetherCodeTransformTaskInvoker.TryResolve(
+                    controller!,
+                    utility!,
+                    NetherCodeTransformNativeBinding.TransformTaskBinding(NetherNativeBindingCatalog.CodeListControllerType),
+                    out string error,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _
+                ))
+                failures.Add(error);
+        }
+        catch (Exception ex)
+        {
+            failures.Add("code-transform-members => precheck-exception:" + ex.GetType().Name + ":" + ex.Message);
         }
     }
 

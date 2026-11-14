@@ -3,9 +3,15 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using AutoNether.Services;
+using BepInEx.Unity.IL2CPP.Hook;
 using Cysharp.Threading.Tasks;
 using HarmonyLib;
+using Il2CppInterop.Common;
+using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.Runtime;
+using Il2CppInterop.Runtime.Runtime.VersionSpecific.MethodInfo;
 
 namespace AutoNether.Patches;
 
@@ -99,35 +105,126 @@ internal static class NetherAutoClimbBattleSettingsDestroyPrefixPatch
 }
 
 /// <summary>
-/// Captures the actual generated FloorSelection startup/resume state machine. Native OnEntered
-/// invokes MoveNext directly and therefore bypasses the public async wrapper. The prefix owns
-/// popups created during MoveNext; the postfix exposes the builder's pollable parent UniTask.
+/// Hooks the generated FloorSelection startup/resume value-type state machine directly at its
+/// native function pointer. Harmony's Il2CppDetourMethodPatcher boxes Il2CppSystem.ValueType
+/// receivers without copying mutations back to the caller's struct pointer, which freezes
+/// multi-await state transitions across Elevator Skip and recovered Code-offer resumptions.
 /// </summary>
-[HarmonyPatch]
-internal static class NetherAutoClimbStartStatusLifecyclePatch
+internal static unsafe class NetherAutoClimbStartStatusLifecycleDetour
 {
-    private static MethodBase? TargetMethod() =>
-        NetherRuntimeBridge.GetStartStatusStateMachinePatchTarget();
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void MoveNextDelegate(IntPtr thisPtr, IntPtr methodInfo);
 
-    [HarmonyPrefix]
-    private static void Prefix(object __instance)
+    private static INativeDetour? _detour;
+    private static MoveNextDelegate? _detourCallback;
+    private static MoveNextDelegate? _trampoline;
+    private static IntPtr _stateMachineClassPtr;
+    private static int _stateMachineValueSize;
+    private static ConstructorInfo? _wrapperConstructor;
+
+    internal static void Install()
     {
+        if (_detour != null)
+            return;
+
+        if (NetherRuntimeBridge.GetStartStatusStateMachinePatchTarget() is not MethodInfo moveNext
+            || moveNext.DeclaringType == null)
+        {
+            throw new MissingMethodException(
+                "Missing required StartStatus state-machine MoveNext target."
+            );
+        }
+
+        Type stateMachineType = moveNext.DeclaringType;
+        FieldInfo methodInfoPtrField =
+            Il2CppInteropUtils.GetIl2CppMethodInfoPointerFieldForGeneratedMethod(moveNext)
+            ?? throw new MissingFieldException(
+                stateMachineType.FullName,
+                "NativeMethodInfoPtr_MoveNext"
+            );
+        IntPtr methodInfoPtr = (IntPtr)(methodInfoPtrField.GetValue(null) ?? IntPtr.Zero);
+        if (methodInfoPtr == IntPtr.Zero)
+        {
+            throw new InvalidOperationException(
+                "Null native MethodInfo pointer for StartStatus state-machine MoveNext."
+            );
+        }
+
+        IntPtr classPtr = Il2CppClassPointerStore.GetNativeClassPointer(stateMachineType);
+        uint align = 0;
+        int valueSize = classPtr != IntPtr.Zero
+            ? IL2CPP.il2cpp_class_value_size(classPtr, ref align)
+            : 0;
+        ConstructorInfo? wrapperCtor = stateMachineType.GetConstructor(new[] { typeof(IntPtr) });
+        if (classPtr == IntPtr.Zero || valueSize <= 0 || wrapperCtor == null)
+        {
+            throw new InvalidOperationException(
+                "Invalid IL2CPP value-type metadata for " + stateMachineType.FullName
+            );
+        }
+
+        INativeMethodInfoStruct nativeMethod =
+            UnityVersionHandler.Wrap((Il2CppMethodInfo*)methodInfoPtr);
+        if (nativeMethod.MethodPointer == IntPtr.Zero)
+        {
+            throw new InvalidOperationException(
+                "Null native MethodPointer for StartStatus state-machine MoveNext."
+            );
+        }
+
+        _stateMachineClassPtr = classPtr;
+        _stateMachineValueSize = valueSize;
+        _wrapperConstructor = wrapperCtor;
+        _detourCallback = DetourMoveNext;
+        _detour = INativeDetour.CreateAndApply(
+            nativeMethod.MethodPointer,
+            _detourCallback,
+            out _trampoline
+        );
+    }
+
+    private static void DetourMoveNext(IntPtr thisPtr, IntPtr methodInfo)
+    {
+        MoveNextDelegate? trampoline = _trampoline;
+        if (trampoline == null)
+            return;
+        if (thisPtr == IntPtr.Zero)
+        {
+            trampoline(thisPtr, methodInfo);
+            return;
+        }
+
+        IntPtr boxedSnapshot = IntPtr.Zero;
+        object? stateMachineSnapshot = null;
         try
         {
-            NetherRuntimeBridge.ObserveStartStatusStateMachineEnter(__instance);
+            boxedSnapshot = IL2CPP.il2cpp_value_box(_stateMachineClassPtr, thisPtr);
+            if (boxedSnapshot != IntPtr.Zero && _wrapperConstructor != null)
+            {
+                stateMachineSnapshot = _wrapperConstructor.Invoke(new object[] { boxedSnapshot });
+                NetherRuntimeBridge.ObserveStartStatusStateMachineEnter(stateMachineSnapshot);
+            }
         }
         catch (Exception ex)
         {
             Logger.Error("[F12][AutoNether] start-status state-machine enter observation failed: " + ex);
         }
-    }
 
-    [HarmonyPostfix]
-    private static void Postfix(object __instance)
-    {
+        trampoline(thisPtr, methodInfo);
+
+        if (stateMachineSnapshot == null || boxedSnapshot == IntPtr.Zero)
+            return;
+
         try
         {
-            NetherRuntimeBridge.ObserveStartStatusStateMachineExit(__instance);
+            IntPtr unboxedSnapshot = IL2CPP.il2cpp_object_unbox(boxedSnapshot);
+            Buffer.MemoryCopy(
+                thisPtr.ToPointer(),
+                unboxedSnapshot.ToPointer(),
+                _stateMachineValueSize,
+                _stateMachineValueSize
+            );
+            NetherRuntimeBridge.ObserveStartStatusStateMachineExit(stateMachineSnapshot);
         }
         catch (Exception ex)
         {
@@ -244,37 +341,5 @@ internal static class NetherAutoClimbCodeListInitializationLifecyclePatch
         {
             Logger.Error("[F12][AutoNether] native code-list initialization observation failed: " + ex);
         }
-    }
-}
-
-/// <summary>
-/// Observes the generated state machine behind each NetherUtility code sequence (Change-list
-/// transform, Code-offer confirm, and Keep/cancel).  IL2CPP inlines every local-function
-/// factory body into the reachable popup lambda, so a postfix on the factory never runs; the
-/// generated <c>MoveNext</c> survives that inlining because <c>builder.Start</c> and every
-/// resume call it directly.  One prefix/postfix/finalizer pair drives the shared
-/// start/completion/fault contract for all three families.
-/// </summary>
-[HarmonyPatch]
-internal static class NetherAutoClimbGeneratedSequenceLifecyclePatch
-{
-    private static IEnumerable<MethodBase> TargetMethods() =>
-        NetherRuntimeBridge.GetGeneratedSequencePatchTargets();
-
-    private static void Prefix(MethodBase __originalMethod, object __instance) =>
-        NetherRuntimeBridge.ObserveGeneratedSequenceEnter(__originalMethod, __instance);
-
-    private static void Postfix(MethodBase __originalMethod, object __instance) =>
-        NetherRuntimeBridge.ObserveGeneratedSequenceExit(__originalMethod, __instance);
-
-    private static Exception? Finalizer(
-        MethodBase __originalMethod,
-        object __instance,
-        Exception? __exception
-    )
-    {
-        if (__exception != null)
-            NetherRuntimeBridge.ObserveGeneratedSequenceFault(__originalMethod, __instance, __exception);
-        return __exception;
     }
 }

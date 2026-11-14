@@ -122,6 +122,39 @@ internal static class NetherCodePopupReadiness
             return NetherCodePopupReadinessResult.Pending("code-offer-model-not-ready");
         return NetherCodePopupReadinessResult.Ready();
     }
+
+    public static NetherCodePopupReadinessResult EvaluateTransform(
+        NetherNativeActionResult initialization,
+        bool changeCallbackReadable,
+        bool hasChangeCallback
+    )
+    {
+        if (initialization.Kind == NetherNativeActionResultKind.Started)
+        {
+            return NetherCodePopupReadinessResult.Pending(
+                "code-transform-list-not-ready:" + initialization.Detail
+            );
+        }
+        if (initialization.Kind != NetherNativeActionResultKind.Completed)
+        {
+            return NetherCodePopupReadinessResult.Unavailable(
+                "code-transform-list-initialization:" + initialization.Detail
+            );
+        }
+        if (!changeCallbackReadable)
+        {
+            return NetherCodePopupReadinessResult.Unavailable(
+                "missing-code-transform-change-callback-member"
+            );
+        }
+        if (!hasChangeCallback)
+        {
+            return NetherCodePopupReadinessResult.Pending(
+                "code-transform-list-not-ready:awaiting-change-callback"
+            );
+        }
+        return NetherCodePopupReadinessResult.Ready();
+    }
 }
 
 internal enum NetherOwnedCodePopupRegistrationKind

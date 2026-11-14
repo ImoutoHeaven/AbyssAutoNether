@@ -13,19 +13,18 @@ public static class PatchManager
         typeof(NetherAutoClimbBattleSettingsDestroyPrefixPatch),
         typeof(NetherBattleStartTaskCapturePatch),
         typeof(NetherBattleTerminalPatch),
-        typeof(NetherAutoClimbStartStatusLifecyclePatch),
         typeof(NetherAutoClimbStartStatusTaskPatch),
         typeof(NetherAutoClimbResultPatch),
         typeof(NetherAutoClimbBattleResultLifecyclePatch),
         typeof(NetherAutoClimbFloorEventSequenceLifecyclePatch),
         typeof(NetherAutoClimbCodeListInitializationLifecyclePatch),
-        typeof(NetherAutoClimbGeneratedSequenceLifecyclePatch),
     };
 
     public static void Initialize()
     {
         foreach (Type patchType in PatchTypes)
             Harmony.CreateAndPatchAll(patchType);
+        NetherAutoClimbStartStatusLifecycleDetour.Install();
 
         NetherAutoClimbController.LogDiagnostic(
             "patch-manager",

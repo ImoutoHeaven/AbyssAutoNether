@@ -229,7 +229,7 @@ public sealed class NetherLifecycleInteropBindingsTests
         ));
 
         Assert.Contains(
-            "typeof(NetherAutoClimbStartStatusLifecyclePatch)",
+            "NetherAutoClimbStartStatusLifecycleDetour.Install();",
             source,
             StringComparison.Ordinal
         );

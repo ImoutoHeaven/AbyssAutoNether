@@ -83,4 +83,39 @@ public sealed class NetherCodeReceivedConfirmLeaseTests
             lease.Claim(NetherActionKind.SelectFloor, 3, 10020).Kind
         );
     }
+
+    [Fact]
+    public void Selection_flow_must_remain_awaiting_completion_until_received_overlay_is_claimed()
+    {
+        var flow = new NetherCodeSelectionNativeFlow();
+        var lease = new NetherCodeReceivedConfirmLease();
+        var popup = new object();
+        var close = new object();
+
+        Assert.True(flow.Begin(codeId: 20002, replaceCodeId: 0, popupSequenceBaseline: 9));
+        Assert.True(lease.Begin(NetherActionKind.SelectFloor, ownerGeneration: 7, codeId: 20002));
+        Assert.True(flow.ObserveConfirmationTask());
+        Assert.Equal(NetherCodeSelectionNativeStage.AwaitingCompletion, flow.Stage);
+
+        // Before AbyssCodeReceivedPopup opens, Claim returns None while preserving SelectedCodeId.
+        Assert.Equal(
+            NetherCodeReceivedConfirmClaimKind.None,
+            lease.Claim(NetherActionKind.SelectFloor, 7, flow.SelectedCodeId).Kind
+        );
+        Assert.Equal(20002, flow.SelectedCodeId);
+
+        // When AbyssCodeReceivedPopup registers later in the pending confirmation UniTask,
+        // SelectedCodeId still matches and binds the close callback.
+        Assert.True(lease.RegisterPopup(popup, close, sequence: 10, codeId: flow.SelectedCodeId));
+        NetherCodeReceivedConfirmClaim claimed = lease.Claim(
+            NetherActionKind.SelectFloor,
+            7,
+            flow.SelectedCodeId
+        );
+        Assert.Equal(NetherCodeReceivedConfirmClaimKind.Claimed, claimed.Kind);
+        Assert.Same(close, claimed.Close);
+
+        Assert.True(flow.CompleteConfirmationTask());
+        Assert.Equal(0, flow.SelectedCodeId);
+    }
 }

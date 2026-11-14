@@ -1,7 +1,6 @@
 #nullable enable
 
 using System;
-using System.Collections.Generic;
 using System.Reflection;
 
 namespace AutoNether.Services;
@@ -14,9 +13,8 @@ namespace AutoNether.Services;
 /// </summary>
 internal static class NetherCodeCancelTaskInvoker
 {
+    private const string ErrorScope = "code-cancel";
     private const string CancellationTokenFieldName = "_cancellationToken";
-    private const BindingFlags DeclaredInstanceFlags =
-        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly;
 
     public static bool TryResolve(
         Type controllerType,
@@ -53,10 +51,11 @@ internal static class NetherCodeCancelTaskInvoker
             return false;
         }
 
-        if (!TryResolveExactMember(
+        if (!NetherCodePopupInteropResolver.TryResolveExactMember(
                 controllerType,
                 CancellationTokenFieldName,
                 parameters[1].ParameterType,
+                ErrorScope,
                 out error,
                 out cancellationTokenMember
             ))
@@ -98,7 +97,7 @@ internal static class NetherCodeCancelTaskInvoker
 
         try
         {
-            object? cancellationToken = ReadValue(cancellationTokenMember!, controller);
+            object? cancellationToken = NetherCodePopupInteropResolver.ReadMemberValue(cancellationTokenMember!, controller);
             if (cancellationToken == null)
             {
                 error = "binding-unavailable:code-cancel:null-cancellation-token";
@@ -134,107 +133,5 @@ internal static class NetherCodeCancelTaskInvoker
                 + ex.Message;
             return false;
         }
-    }
-
-    private static bool TryResolveExactMember(
-        Type controllerType,
-        string memberName,
-        Type expectedMemberType,
-        out string error,
-        out MemberInfo? member
-    )
-    {
-        var candidates = new List<MemberInfo>();
-        for (Type? current = controllerType; current != null; current = current.BaseType)
-        {
-            foreach (FieldInfo candidate in current.GetFields(DeclaredInstanceFlags))
-            {
-                if (string.Equals(candidate.Name, memberName, StringComparison.Ordinal))
-                    candidates.Add(candidate);
-            }
-            foreach (PropertyInfo candidate in current.GetProperties(DeclaredInstanceFlags))
-            {
-                if (string.Equals(candidate.Name, memberName, StringComparison.Ordinal)
-                    && candidate.GetMethod != null
-                    && !candidate.GetMethod.IsStatic
-                    && candidate.GetIndexParameters().Length == 0)
-                {
-                    candidates.Add(candidate);
-                }
-            }
-        }
-
-        if (candidates.Count != 1)
-        {
-            member = null;
-            error = "binding-unavailable:code-cancel:"
-                + memberName
-                + ":"
-                + (candidates.Count == 0 ? "no-exact" : "ambiguous")
-                + ":available="
-                + DescribeInstanceMembers(controllerType);
-            return false;
-        }
-
-        Type actualType = candidates[0] switch
-        {
-            FieldInfo field => field.FieldType,
-            PropertyInfo property => property.PropertyType,
-            _ => typeof(void),
-        };
-        if (actualType != expectedMemberType)
-        {
-            member = null;
-            error = "binding-unavailable:code-cancel:"
-                + memberName
-                + ":type-mismatch:"
-                + (actualType.FullName ?? actualType.Name);
-            return false;
-        }
-
-        member = candidates[0];
-        error = string.Empty;
-        return true;
-    }
-
-    private static object? ReadValue(MemberInfo member, object target) => member switch
-    {
-        FieldInfo field => field.GetValue(target),
-        PropertyInfo property => property.GetValue(target),
-        _ => null,
-    };
-
-    private static string DescribeInstanceMembers(Type controllerType)
-    {
-        var members = new List<string>();
-        for (Type? current = controllerType; current != null && members.Count < 32; current = current.BaseType)
-        {
-            foreach (FieldInfo field in current.GetFields(DeclaredInstanceFlags))
-            {
-                if (members.Count >= 32)
-                    break;
-                members.Add(
-                    (current.FullName ?? current.Name)
-                    + "."
-                    + field.Name
-                    + ":"
-                    + (field.FieldType.FullName ?? field.FieldType.Name)
-                );
-            }
-            foreach (PropertyInfo property in current.GetProperties(DeclaredInstanceFlags))
-            {
-                if (members.Count >= 32)
-                    break;
-                members.Add(
-                    (current.FullName ?? current.Name)
-                    + "."
-                    + property.Name
-                    + ":"
-                    + (property.PropertyType.FullName ?? property.PropertyType.Name)
-                    + "(property)"
-                );
-            }
-        }
-        return members.Count == 0 ? "none" : string.Join("|", members);
     }
 }

@@ -19,8 +19,8 @@ internal static class NetherCodeTransformNativeBinding
     private const string BoolReactivePropertyTypeName = "UniRx.BoolReactiveProperty";
 
     // The generated factory embeds an unstable interop suffix in its managed name, so it is
-    // identified only by its complete static signature.  The state machine it starts is
-    // resolved separately by source local-function name (see NetherGeneratedSequenceResolver).
+    // identified only by its complete static signature and invoked directly from the live
+    // Change-list closure.
     public const string TransformTaskShape = "code-transform-generated-sequence";
 
     public static NetherCodePopupInteropMethodBinding ConfirmCallbackBinding { get; } = new(
@@ -51,10 +51,4 @@ internal static class NetherCodeTransformNativeBinding
         },
         UniTaskTypeName
     ) { IsStatic = true, SignatureOnly = true };
-
-    public static NetherNativeMethodDescriptor TransformTaskDescriptor(string listControllerTypeName) => new(
-        TransformTaskShape,
-        TransformTaskBinding(listControllerTypeName).ParameterTypeNames,
-        UniTaskTypeName
-    ) { IsStatic = true };
 }

@@ -250,11 +250,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private readonly NetherNativeWaitGate _codeReplacementCompleteViewWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeListInitializationTaskWait = new(maximumMissingPolls: 600);
     private readonly NetherNativeWaitGate _codeKeepCancelTaskWait = new(maximumMissingPolls: 600);
-    private readonly NetherGeneratedSequenceObservationRegistry _generatedSequences = new();
-    private readonly long[] _armedSequenceTokens = new long[3];
-    private static readonly Dictionary<MethodBase, NetherGeneratedSequenceFamily> GeneratedSequenceFamilies = new();
-    private static readonly object GeneratedSequenceResolutionGate = new();
-    private static IReadOnlyList<MethodBase>? _generatedSequencePatchTargets;
+    private readonly NetherNativeWaitGate _codeTransformTaskWait = new(maximumMissingPolls: 600);
     private const string NetherApiServiceTypeName = "Project.Ingame.Exploration.NetherAPIService";
     private const string ResultControllerTypeName = "Project.NetherTop.Result.SubViewController";
     private const string BottomRightViewTypeName = "Project.Ingame.BottomRightView";
@@ -341,6 +337,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     private object? _treasureSkipTask;
     private object? _codeKeepCancelTask;
     private object? _codeSelectionTask;
+    private object? _codeTransformTask;
     private bool _battleActive;
     private bool _battleClearObserved;
     private bool _battleCloseObserved;
@@ -801,73 +798,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         object resultTask
     ) => Instance.ObserveCodeListInitializationTaskCore(controller, popup, resultTask);
 
-    /// <summary>
-    /// Observes the generated state machine behind each NetherUtility code sequence.  IL2CPP
-    /// inlines the local-function factory bodies into the reachable popup lambdas, so the
-    /// factory has no call sites; <c>builder.Start</c> always calls the generated
-    /// <c>MoveNext</c>, which remains a real call from both the lambda and the dead factory
-    /// body.  Entry (<c>__1__state == -1</c>) marks the native sequence start and a return with
-    /// <c>__1__state == -2</c> marks its terminal state.
-    /// </summary>
-    internal static void ObserveGeneratedSequenceEnter(MethodBase? originalMethod, object? stateMachine)
-    {
-        try
-        {
-            if (stateMachine == null || !TryGetGeneratedSequenceFamily(originalMethod, out var family))
-                return;
-            if (!TryReadInt32(stateMachine, NetherGeneratedSequenceResolver.StateFieldName, out int state)
-                || state != -1)
-            {
-                return;
-            }
-            Instance.ObserveGeneratedSequenceEnterCore(family, stateMachine);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("[F12][AutoNether] generated sequence enter observation failed: " + ex);
-        }
-    }
 
-    internal static void ObserveGeneratedSequenceExit(MethodBase? originalMethod, object? stateMachine)
-    {
-        try
-        {
-            if (stateMachine == null || !TryGetGeneratedSequenceFamily(originalMethod, out var family))
-                return;
-            if (!TryReadInt32(stateMachine, NetherGeneratedSequenceResolver.StateFieldName, out int state)
-                || state != -2)
-            {
-                return;
-            }
-            Instance.ObserveGeneratedSequenceExitCore(family, stateMachine);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("[F12][AutoNether] generated sequence terminal observation failed: " + ex);
-        }
-    }
-
-    internal static void ObserveGeneratedSequenceFault(
-        MethodBase? originalMethod,
-        object? stateMachine,
-        Exception? exception
-    )
-    {
-        try
-        {
-            if (exception == null
-                || stateMachine == null
-                || !TryGetGeneratedSequenceFamily(originalMethod, out var family))
-            {
-                return;
-            }
-            Instance.ObserveGeneratedSequenceFaultCore(family, stateMachine, exception);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("[F12][AutoNether] generated sequence fault observation failed: " + ex);
-        }
-    }
 
     internal static IEnumerable<MethodBase> GetPatchTargets()
     {
@@ -1034,58 +965,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         return method;
     }
 
-    /// <summary>
-    /// Resolves the generated MoveNext of each code-sequence state machine.  Resolution is by
-    /// the source local-function name embedded in the interop <c>ObfuscatedNameAttribute</c>
-    /// plus the exact state-machine shape, never by a generated managed type name or by the
-    /// inlined factory's <c>_PDM_0</c> name.  A family that cannot be resolved is logged with
-    /// its precise reason and skipped; the precheck reports the same failure before patching.
-    /// </summary>
-    internal static IReadOnlyList<MethodBase> GetGeneratedSequencePatchTargets()
-    {
-        lock (GeneratedSequenceResolutionGate)
-        {
-            if (_generatedSequencePatchTargets != null)
-                return _generatedSequencePatchTargets;
 
-            var targets = new List<MethodBase>();
-            Type? utility = ResolveLoadedType(NetherGeneratedSequenceResolver.UtilityTypeName);
-            foreach (NetherGeneratedSequenceContract contract in NetherGeneratedSequenceResolver.Contracts)
-            {
-                bool resolved = NetherGeneratedSequenceResolver.TryResolve(
-                    utility,
-                    contract,
-                    out NetherGeneratedSequenceTarget? target,
-                    out string error
-                );
-                NetherAutoClimbController.LogDiagnostic(
-                    "binding",
-                    new("family", contract.FamilyName + "-sequence"),
-                    new("outcome", resolved ? "resolved" : "missing"),
-                    new("type", utility?.FullName ?? NetherGeneratedSequenceResolver.UtilityTypeName),
-                    new(
-                        "method",
-                        resolved
-                            ? NetherGeneratedSequenceResolver.MoveNextName
-                            : contract.SourceMethodName
-                    ),
-                    new(
-                        "detail",
-                        resolved
-                            ? "source=" + contract.SourceMethodName
-                            : error
-                    )
-                );
-                if (!resolved)
-                    continue;
-                GeneratedSequenceFamilies[target!.MoveNext] = contract.Family;
-                targets.Add(target.MoveNext);
-            }
-
-            _generatedSequencePatchTargets = targets;
-            return targets;
-        }
-    }
 
     /// <summary>
     /// Prefix-only lifecycle boundary. The general lifecycle observer is a postfix, but this
@@ -5495,7 +5375,8 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                     {
                         _codeTransformConfirmPopup = null;
                         _codeTransformCompletePopup = null;
-                        ClearGeneratedSequence(NetherGeneratedSequenceFamily.Transform);
+                        _codeTransformTask = null;
+                        _codeTransformTaskWait.Clear();
                     }
                     else if (codeListType == 2)
                     {
@@ -6816,341 +6697,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         );
     }
 
-    private static bool TryGetGeneratedSequenceFamily(
-        MethodBase? originalMethod,
-        out NetherGeneratedSequenceFamily family
-    )
-    {
-        family = default;
-        if (originalMethod == null)
-            return false;
-        lock (GeneratedSequenceResolutionGate)
-        {
-            foreach (KeyValuePair<MethodBase, NetherGeneratedSequenceFamily> pair in GeneratedSequenceFamilies)
-            {
-                if (pair.Key.DeclaringType == originalMethod.DeclaringType
-                    && string.Equals(pair.Key.Name, originalMethod.Name, StringComparison.Ordinal))
-                {
-                    family = pair.Value;
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private void ObserveGeneratedSequenceEnterCore(
-        NetherGeneratedSequenceFamily family,
-        object stateMachine
-    )
-    {
-        NetherGeneratedSequenceContract contract = NetherGeneratedSequenceResolver.For(family);
-        object? controller = ReadSequenceController(stateMachine, contract);
-        long controllerIdentity = NativeIdentity(controller);
-        long codeId = ReadSequenceCodeId(stateMachine, contract);
-        bool accepted = _generatedSequences.ObserveEntry(
-            family,
-            controller,
-            controllerIdentity,
-            codeId,
-            out NetherGeneratedSequenceObservation observation
-        );
-        string detail = accepted
-            ? family == NetherGeneratedSequenceFamily.Transform
-                ? ObserveCodeTransformSequenceStart(controller, codeId)
-                : "state-machine-entered"
-            : "unarmed-or-mismatched";
-
-        NetherAutoClimbController.LogDiagnostic(
-            "generated-sequence",
-            new("action", "sequence-enter"),
-            new("family", contract.FamilyName),
-            new("accepted", accepted.ToString()),
-            new("controllerType", controller?.GetType().Name ?? "null"),
-            new("stateMachineType", stateMachine.GetType().Name),
-            new("codeId", observation.CodeId.ToString(CultureInfo.InvariantCulture)),
-            new("detail", detail)
-        );
-    }
-
-    private void ObserveGeneratedSequenceExitCore(
-        NetherGeneratedSequenceFamily family,
-        object stateMachine
-    )
-    {
-        NetherGeneratedSequenceContract contract = NetherGeneratedSequenceResolver.For(family);
-        object? controller = ReadSequenceController(stateMachine, contract);
-        long controllerIdentity = NativeIdentity(controller);
-        long codeId = ReadSequenceCodeId(stateMachine, contract);
-        object? builder = null;
-        TryReadMember(stateMachine, NetherGeneratedSequenceResolver.BuilderFieldName, out builder);
-        string exception = builder == null ? string.Empty : TryReadBuilderException(builder);
-        string status = ReadBuilderTaskStatus(builder);
-
-        NetherGeneratedSequencePhase phase = NetherGeneratedSequencePhase.Completed;
-        string detail = "state-machine-completed";
-        if (exception.Length > 0)
-        {
-            phase = NetherGeneratedSequencePhase.Faulted;
-            detail = "state-machine-exception:" + exception;
-        }
-        else if (string.Equals(status, "Succeeded", StringComparison.Ordinal))
-        {
-            detail = "state-machine-completed";
-        }
-        else if (string.Equals(status, "Pending", StringComparison.Ordinal))
-        {
-            // The builder reports a still-running task even though MoveNext returned: never
-            // promote that to success.  Keep the armed slot pending so the flow's existing
-            // 600-pump bound remains the only timeout owner.
-            NetherAutoClimbController.LogDiagnostic(
-                "generated-sequence",
-                new("action", "sequence-terminal-deferred"),
-                new("family", contract.FamilyName),
-                new("stateMachineType", stateMachine.GetType().Name),
-                new("detail", "state-machine-terminal-status-pending")
-            );
-            return;
-        }
-        else if (string.Equals(status, "Faulted", StringComparison.Ordinal)
-            || string.Equals(status, "Canceled", StringComparison.Ordinal))
-        {
-            phase = NetherGeneratedSequencePhase.Faulted;
-            detail = "state-machine-" + status.ToLowerInvariant();
-        }
-        else
-        {
-            // Missing, unknown, or unreadable terminal status is not success: the same
-            // fail-closed mapping NetherNativeTaskStatusPoller applies to a native task.
-            phase = NetherGeneratedSequencePhase.Faulted;
-            detail = "state-machine-terminal-status-unavailable:"
-                + (status.Length == 0 ? "missing" : status);
-        }
-
-        RecordGeneratedSequenceTerminal(
-            family,
-            contract,
-            controller,
-            controllerIdentity,
-            codeId,
-            phase,
-            detail,
-            stateMachine,
-            "sequence-terminal"
-        );
-    }
-
-    private void ObserveGeneratedSequenceFaultCore(
-        NetherGeneratedSequenceFamily family,
-        object stateMachine,
-        Exception exception
-    )
-    {
-        NetherGeneratedSequenceContract contract = NetherGeneratedSequenceResolver.For(family);
-        object? controller = ReadSequenceController(stateMachine, contract);
-        long controllerIdentity = NativeIdentity(controller);
-        long codeId = ReadSequenceCodeId(stateMachine, contract);
-        RecordGeneratedSequenceTerminal(
-            family,
-            contract,
-            controller,
-            controllerIdentity,
-            codeId,
-            NetherGeneratedSequencePhase.Faulted,
-            "state-machine-finalizer:" + exception.GetType().Name,
-            stateMachine,
-            "sequence-fault"
-        );
-    }
-
-    private void RecordGeneratedSequenceTerminal(
-        NetherGeneratedSequenceFamily family,
-        NetherGeneratedSequenceContract contract,
-        object? controller,
-        long controllerIdentity,
-        long codeId,
-        NetherGeneratedSequencePhase phase,
-        string detail,
-        object stateMachine,
-        string action
-    )
-    {
-        bool accepted = _generatedSequences.ObserveTerminal(
-            family,
-            controller,
-            controllerIdentity,
-            codeId,
-            phase,
-            detail,
-            out NetherGeneratedSequenceObservation observation
-        );
-        NetherAutoClimbController.LogDiagnostic(
-            "generated-sequence",
-            new("action", action),
-            new("family", contract.FamilyName),
-            new("accepted", accepted.ToString()),
-            new("controllerType", controller?.GetType().Name ?? "null"),
-            new("stateMachineType", stateMachine.GetType().Name),
-            new("phase", observation.Phase.ToString()),
-            new("codeId", observation.CodeId.ToString(CultureInfo.InvariantCulture)),
-            new("detail", detail)
-        );
-    }
-
-    /// <summary>
-    /// Correlates the transform state machine's entry with the exact Change-list controller and
-    /// selected pre-conversion code, then advances the owned transform flow exactly as the old
-    /// factory postfix did.  Unrelated manual conversions are ignored.
-    /// </summary>
-    private string ObserveCodeTransformSequenceStart(object? controller, long codeId)
-    {
-        string outcome = "ignored";
-        string detail;
-        lock (_gate)
-        {
-            if (OwnedPopupTransformOwner is not NetherCodeTransformOwner owner)
-            {
-                detail = "no-active-transform-owner";
-            }
-            else if (_codeListPopup is not PopupRegistration registration
-                || !registration.IsLive
-                || registration.RuntimeGeneration <= 0
-                || registration.RuntimeGeneration != _runtimeGeneration
-                || !IsSameNativeObject(registration.Controller, controller)
-                || registration.OwnerAction != owner.OwnerAction
-                || registration.OwnerGeneration != owner.Generation
-                || registration.Sequence != owner.Sequence
-                || codeId != owner.ReplaceCodeId)
-            {
-                detail = "transform-owner-or-before-code-mismatch";
-            }
-            else if (!ObserveOwnedPopupCodeTransformTask(owner))
-            {
-                detail = "transform-stage-rejected-sequence";
-            }
-            else
-            {
-                outcome = "accepted";
-                detail = "beforeCodeId=" + codeId;
-            }
-        }
-
-        NetherAutoClimbController.LogDiagnostic(
-            "code-transform",
-            new("stage", "sequence-enter"),
-            new("outcome", outcome),
-            new("detail", detail),
-            new("controllerType", controller?.GetType().FullName ?? "null"),
-            new("codeId", codeId.ToString(CultureInfo.InvariantCulture))
-        );
-        return detail;
-    }
-
-    private static object? ReadSequenceController(
-        object stateMachine,
-        NetherGeneratedSequenceContract contract
-    )
-    {
-        if (!TryReadMember(stateMachine, NetherGeneratedSequenceResolver.ControllerFieldName, out object? controller)
-            || controller == null)
-        {
-            return null;
-        }
-        for (Type? type = controller.GetType(); type != null; type = type.BaseType)
-        {
-            if (string.Equals(type.FullName, contract.ControllerTypeName, StringComparison.Ordinal))
-                return controller;
-        }
-        return null;
-    }
-
-    private static long ReadSequenceCodeId(
-        object stateMachine,
-        NetherGeneratedSequenceContract contract
-    ) => contract.CodeIdFieldName != null
-        && TryReadInt(stateMachine, contract.CodeIdFieldName, out long codeId)
-            ? codeId
-            : 0;
-
-    private static string ReadBuilderTaskStatus(object? builder)
-    {
-        if (builder == null
-            || !TryReadMember(builder, "Task", out object? task)
-            || task == null)
-        {
-            return string.Empty;
-        }
-        return TryReadMember(task, "Status", out object? status) && status != null
-            ? status.ToString() ?? string.Empty
-            : string.Empty;
-    }
-
-    private static long NativeIdentity(object? target) =>
-        target is Il2CppObjectBase native && native.Pointer != IntPtr.Zero
-            ? native.Pointer.ToInt64()
-            : 0;
-
-    /// <summary>
-    /// Reads the shared terminal phase of one armed sequence.  Completion/failure is the same
-    /// state-machine evidence the retained task would report, so the confirm and keep/cancel
-    /// flows can use it without changing which native work they own.
-    /// </summary>
-    private long ArmGeneratedSequence(
-        NetherGeneratedSequenceFamily family,
-        object? controller,
-        long codeId
-    )
-    {
-        long token = _generatedSequences.Arm(family, controller, NativeIdentity(controller), codeId);
-        _armedSequenceTokens[(int)family] = token;
-        return token;
-    }
-
-    private void ClearGeneratedSequence(NetherGeneratedSequenceFamily family)
-    {
-        _generatedSequences.Clear(family);
-        _armedSequenceTokens[(int)family] = 0;
-    }
-
-    /// <summary>
-    /// A terminal is accepted only for the exact arm that started this flow.  The observation
-    /// carries the token of the arm that created its slot, so a slot replaced by a newer arm
-    /// (or cleared by a flow reset) can never satisfy an older reader.
-    /// </summary>
-    private bool IsCurrentSequenceObservation(NetherGeneratedSequenceObservation observation) =>
-        observation.Token > 0
-        && observation.Token == _armedSequenceTokens[(int)observation.Family];
-
-    private bool TryReadGeneratedSequenceTerminal(
-        NetherGeneratedSequenceFamily family,
-        string detailPrefix,
-        out NetherNativeActionResult result
-    )
-    {
-        NetherGeneratedSequenceObservation observation;
-        lock (_gate)
-            observation = _generatedSequences.Current(family);
-        if (!IsCurrentSequenceObservation(observation))
-        {
-            result = default;
-            return false;
-        }
-        switch (observation.Phase)
-        {
-            case NetherGeneratedSequencePhase.Completed:
-                result = NetherNativeActionResult.Completed(detailPrefix + "-sequence-completed");
-                return true;
-            case NetherGeneratedSequencePhase.Faulted:
-                result = NetherNativeActionResult.BindingUnavailable(
-                    detailPrefix + "-sequence-faulted:" + observation.Detail
-                );
-                return true;
-            default:
-                result = default;
-                return false;
-        }
-    }
-
     private void ClearTreasureConfirmationFlow()
     {
         _treasureSkipTask = null;
@@ -7161,7 +6707,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         _codeSelectionTask = null;
         _codeSelectionTaskWait.Clear();
-        ClearGeneratedSequence(NetherGeneratedSequenceFamily.Confirm);
         _codeReplacementPopupWait.Clear();
         _codeReplacementTabActivationWait.Clear();
         _codeReplacementSelectionTransaction.Clear();
@@ -7181,12 +6726,12 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
     {
         _codeKeepCancelTask = null;
         _codeKeepCancelTaskWait.Clear();
-        ClearGeneratedSequence(NetherGeneratedSequenceFamily.Cancel);
     }
 
     private void ClearCodeTransformFlow()
     {
-        ClearGeneratedSequence(NetherGeneratedSequenceFamily.Transform);
+        _codeTransformTask = null;
+        _codeTransformTaskWait.Clear();
         _codeTransformConfirmPopup = null;
         _codeTransformCompletePopup = null;
     }
@@ -7463,11 +7008,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
             }
             _codeSelectionTask = null;
             _codeSelectionTaskWait.Clear();
-            ArmGeneratedSequence(
-                NetherGeneratedSequenceFamily.Confirm,
-                registration.Value.Controller,
-                action.CodeId
-            );
             _codeReplacementPopupWait.Clear();
             _codeReplacementTabActivationWait.Clear();
             _codeReplacementSelectionTransaction.Clear();
@@ -7603,16 +7143,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherNativeActionResult receivedConfirm = ConfirmCodeReceivedPopupIfNeeded();
         if (receivedConfirm.Kind != NetherNativeActionResultKind.Completed)
             return receivedConfirm;
-
-        if (TryReadGeneratedSequenceTerminal(
-                NetherGeneratedSequenceFamily.Confirm,
-                "code-confirmation",
-                out NetherNativeActionResult observedConfirmation
-            ))
-        {
-            if (observedConfirmation.Kind != NetherNativeActionResultKind.Completed)
-                return observedConfirmation;
-        }
 
         NetherNativeActionResult result = PollResultTask(_codeSelectionTask);
         if (result.Kind == NetherNativeActionResultKind.Started)
@@ -8208,11 +7738,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         {
             _codeKeepCancelTask = null;
             _codeKeepCancelTaskWait.Clear();
-            ArmGeneratedSequence(
-                NetherGeneratedSequenceFamily.Cancel,
-                registration.Value.Controller,
-                0
-            );
         }
 
         // Packaged ISIL proves b__12_0 merely invokes _onCancel; that native closure starts
@@ -8280,23 +7805,6 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherCodeKeepCancelOwner owner
     )
     {
-        if (TryReadGeneratedSequenceTerminal(
-                NetherGeneratedSequenceFamily.Cancel,
-                "code-keep-cancel",
-                out NetherNativeActionResult observedCancel
-            ))
-        {
-            if (observedCancel.Kind == NetherNativeActionResultKind.Completed)
-            {
-                lock (_gate)
-                {
-                    _codeKeepCancelTask = null;
-                    _codeKeepCancelTaskWait.Clear();
-                }
-            }
-            return observedCancel;
-        }
-
         object? task;
         lock (_gate)
         {
@@ -8306,7 +7814,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         }
 
         NetherNativeActionResult result = PollResultTask(task);
-        if (result.Kind == NetherNativeActionResultKind.Completed)
+        if (result.Kind != NetherNativeActionResultKind.Started)
         {
             lock (_gate)
             {
@@ -8356,38 +7864,88 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
 
         lock (_gate)
         {
-            ArmGeneratedSequence(
-                NetherGeneratedSequenceFamily.Transform,
-                list.Controller,
-                owner.ReplaceCodeId
-            );
+            _codeTransformTask = null;
+            _codeTransformTaskWait.Clear();
             _codeTransformConfirmPopup = null;
             _codeTransformCompletePopup = null;
         }
 
-        NetherNativeActionResult tab = TryInvokeExact(
-            list.Controller,
-            NetherNativeBindingCatalog.CodeListChangeTab.Method,
-            new object[] { tabIndex },
-            "select-code-transform-tab"
+        Type? utilityType = ResolveLoadedType(NetherUtilityTypeName);
+        if (utilityType == null)
+        {
+            return LogCodeTransformNative(
+                "list-select",
+                NetherNativeActionResult.BindingUnavailable(
+                    "binding-unavailable:code-transform:missing-nether-utility"
+                ),
+                owner
+            );
+        }
+        NetherAutoClimbController.LogDiagnostic(
+            "native-code-transform",
+            new("outcome", "direct-task-invoke-start"),
+            new("beforeCodeId", owner.ReplaceCodeId.ToString(CultureInfo.InvariantCulture)),
+            new("controllerType", list.Controller.GetType().FullName ?? "unknown"),
+            new("method", NetherCodeTransformNativeBinding.TransformTaskShape)
         );
-        if (tab.Kind != NetherNativeActionResultKind.Started)
-            return LogCodeTransformNative("list-select", tab, owner);
-        NetherNativeActionResult thumbnail = TryInvokeExact(
-            list.Controller,
-            NetherNativeBindingCatalog.CodeListThumbnail.Method,
-            new object[] { modelIndex },
-            "select-code-transform-thumbnail"
+        if (!NetherCodeTransformTaskInvoker.TryInvoke(
+                list.Controller,
+                utilityType,
+                owner.ReplaceCodeId,
+                NetherCodeTransformNativeBinding.TransformTaskBinding(CodeListPopupControllerTypeName),
+                out object? transformTask,
+                out string transformError
+            ))
+        {
+            lock (_gate)
+            {
+                _codeTransformTask = null;
+                _codeTransformTaskWait.Clear();
+            }
+            NetherAutoClimbController.LogDiagnostic(
+                "native-code-transform",
+                new("outcome", "direct-task-invoke-failed"),
+                new("beforeCodeId", owner.ReplaceCodeId.ToString(CultureInfo.InvariantCulture)),
+                new("detail", transformError)
+            );
+            NetherNativeActionResult failed = transformError.StartsWith(
+                "native-code-transform-task-exception:",
+                StringComparison.Ordinal
+            )
+                ? NetherNativeActionResult.UnknownOutcome(transformError)
+                : NetherNativeActionResult.BindingUnavailable(transformError);
+            return LogCodeTransformNative("list-select", failed, owner);
+        }
+
+        lock (_gate)
+        {
+            if (!ObserveOwnedPopupCodeTransformTask(owner))
+            {
+                _codeTransformTask = null;
+                _codeTransformTaskWait.Clear();
+                return LogCodeTransformNative(
+                    "list-select",
+                    NetherNativeActionResult.UnknownOutcome(
+                        "native-code-transform-task-owner-registration-failed"
+                    ),
+                    owner
+                );
+            }
+            _codeTransformTask = transformTask;
+            _codeTransformTaskWait.ObserveRegistration();
+        }
+        NetherAutoClimbController.LogDiagnostic(
+            "native-code-transform",
+            new("outcome", "direct-task-started"),
+            new("beforeCodeId", owner.ReplaceCodeId.ToString(CultureInfo.InvariantCulture)),
+            new("taskType", transformTask!.GetType().FullName ?? transformTask.GetType().Name)
         );
-        if (thumbnail.Kind != NetherNativeActionResultKind.Started)
-            return LogCodeTransformNative("list-select", thumbnail, owner);
-        NetherNativeActionResult change = TryInvokeExact(
-            list.Controller,
-            NetherNativeBindingCatalog.CodeListChange.Method,
-            Array.Empty<object>(),
-            "start-code-transform"
+        return LogCodeTransformNative(
+            "list-select",
+            NetherNativeActionResult.Started("start-code-transform"),
+            owner,
+            "tab=" + tabIndex + ",model=" + modelIndex
         );
-        return LogCodeTransformNative("list-select", change, owner, "tab=" + tabIndex + ",model=" + modelIndex);
     }
 
     NetherNativeActionResult INetherOwnedPopupNativeStagePort.InvokeCodeTransformConfirm(
@@ -8507,39 +8065,32 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherCodeTransformOwner owner
     )
     {
-        NetherGeneratedSequenceObservation observation;
+        object? task;
         lock (_gate)
         {
             if (OwnedPopupTransformOwner is not NetherCodeTransformOwner expected || expected != owner)
             {
                 return LogCodeTransformNative(
-                    "sequence-terminal",
+                    "task-terminal",
                     NetherNativeActionResult.BindingUnavailable("code-transform-task-owner-lost"),
                     owner
                 );
             }
-            observation = _generatedSequences.Current(NetherGeneratedSequenceFamily.Transform);
-            if (!IsCurrentSequenceObservation(observation))
-            {
-                return LogCodeTransformNative(
-                    "sequence-terminal",
-                    NetherNativeActionResult.Started("code-transform-sequence-unarmed"),
-                    owner
-                );
-            }
+            task = _codeTransformTask;
+            if (task == null)
+                return _codeTransformTaskWait.AwaitRegistration("code-transform");
         }
 
-        NetherNativeActionResult result = observation.Phase switch
+        NetherNativeActionResult result = PollResultTask(task);
+        if (result.Kind != NetherNativeActionResultKind.Started)
         {
-            NetherGeneratedSequencePhase.Completed =>
-                NetherNativeActionResult.Completed("code-transform-sequence-completed"),
-            NetherGeneratedSequencePhase.Faulted =>
-                NetherNativeActionResult.BindingUnavailable(
-                    "code-transform-sequence-faulted:" + observation.Detail
-                ),
-            _ => NetherNativeActionResult.Started("code-transform-sequence-pending"),
-        };
-        return LogCodeTransformNative("sequence-terminal", result, owner);
+            lock (_gate)
+            {
+                _codeTransformTask = null;
+                _codeTransformTaskWait.Clear();
+            }
+        }
+        return LogCodeTransformNative("task-terminal", result, owner);
     }
 
     private bool IsMatchingCodeTransformSupport(
@@ -8559,22 +8110,26 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         NetherCodeTransformOwner owner
     )
     {
-        NetherGeneratedSequenceObservation observation;
+        object? task;
         lock (_gate)
+            task = _codeTransformTask;
+        if (task == null)
         {
-            observation = _generatedSequences.Current(NetherGeneratedSequenceFamily.Transform);
-            if (!IsCurrentSequenceObservation(observation))
-                observation = default;
+            return LogCodeTransformNative(
+                stage,
+                NetherNativeActionResult.Started("await-code-transform-" + stage + "-popup"),
+                owner
+            );
         }
-        NetherNativeActionResult result = observation.Phase switch
+
+        NetherNativeActionResult taskState = PollResultTask(task);
+        NetherNativeActionResult result = taskState.Kind switch
         {
-            NetherGeneratedSequencePhase.Completed => NetherNativeActionResult.BindingUnavailable(
-                "code-transform-task-completed-before-" + stage + "-popup"
-            ),
-            NetherGeneratedSequencePhase.Faulted => NetherNativeActionResult.BindingUnavailable(
-                "code-transform-sequence-faulted:" + observation.Detail
-            ),
-            _ => NetherNativeActionResult.Started("await-code-transform-" + stage + "-popup"),
+            NetherNativeActionResultKind.Started =>
+                NetherNativeActionResult.Started("await-code-transform-" + stage + "-popup"),
+            NetherNativeActionResultKind.Completed =>
+                NetherNativeActionResult.BindingUnavailable("code-transform-task-completed-before-" + stage + "-popup"),
+            _ => taskState,
         };
         return LogCodeTransformNative(stage, result, owner);
     }
@@ -11755,7 +11310,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         return true;
     }
 
-    private static NetherRuntimePopupResult TryMapCodeListPopup(PopupRegistration registration)
+    private NetherRuntimePopupResult TryMapCodeListPopup(PopupRegistration registration)
     {
         if (!TryReadCodeListPopupType(registration.Controller, out int popupType))
             return NetherRuntimePopupResult.Failure("missing-native-code-list-popup-type");
@@ -11767,10 +11322,7 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
         // faulting or redispatching the offer.
         return popupType switch
         {
-            1 => NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
-            {
-                Kind = NetherRuntimePopupKind.CodeTransform,
-            }),
+            1 => MapCodeTransformPopup(registration),
             2 => NetherRuntimePopupResult.NativeContinuation(
                 new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.CodeOffer },
                 "owned-code-list-native-replacement-continuation"
@@ -11779,6 +11331,37 @@ internal sealed class NetherRuntimeBridge : NetherOwnedPopupStageBridgeAdapter, 
                 "owned-code-list-internal-popup-type:" + popupType
             ),
         };
+    }
+
+    private NetherRuntimePopupResult MapCodeTransformPopup(PopupRegistration registration)
+    {
+        NetherNativeActionResult initialization;
+        lock (_gate)
+            initialization = PollCodeListInitializationTask(registration);
+        bool changeCallbackReadable = TryReadMember(
+            registration.Controller,
+            "_onChangeButtonClicked",
+            out object? changeAction
+        );
+        NetherCodePopupReadinessResult readiness = NetherCodePopupReadiness.EvaluateTransform(
+            initialization,
+            changeCallbackReadable,
+            changeAction != null
+        );
+        if (readiness.IsPending)
+        {
+            return NetherRuntimePopupResult.Pending(
+                new NetherRuntimePopupContext { Kind = NetherRuntimePopupKind.CodeTransform },
+                readiness.Detail
+            );
+        }
+        if (!readiness.IsReady)
+            return NetherRuntimePopupResult.Failure(readiness.Detail);
+
+        return NetherRuntimePopupResult.Success(new NetherRuntimePopupContext
+        {
+            Kind = NetherRuntimePopupKind.CodeTransform,
+        });
     }
 
     private static bool TryReadCodeListPopupType(object controller, out int popupType)

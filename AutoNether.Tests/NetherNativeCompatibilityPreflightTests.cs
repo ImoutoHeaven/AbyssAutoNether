@@ -69,6 +69,7 @@ public sealed class NetherNativeCompatibilityPreflightTests
     [InlineData("_netherModel")]
     [InlineData("_mIds")]
     [InlineData("_model")]
+    [InlineData("_onChangeButtonClicked")]
     [InlineData("_onCompleted")]
     [InlineData("_tabGroupView")]
     [InlineData("_contentModelList")]
@@ -101,8 +102,8 @@ public sealed class NetherNativeCompatibilityPreflightTests
             NetherNativeCompatibilityPreflight.ValidateMetadata(packaged.Assemblies, packaged.PluginAssembly);
 
         Assert.True(report.IsCompatible, string.Join(Environment.NewLine, report.Failures));
-        Assert.Equal(63, report.CheckedMethodCount);
-        Assert.Equal(22, report.CheckedGeneratedMethodCount);
+        Assert.Equal(61, report.CheckedMethodCount);
+        Assert.Equal(19, report.CheckedGeneratedMethodCount);
     }
 
     [Fact]

@@ -94,6 +94,52 @@ public sealed class NetherCodePopupReadinessTests
     }
 
     [Fact]
+    public void Code_transform_readiness_requires_completed_initialization_and_fails_closed_when_callback_member_is_missing()
+    {
+        NetherCodePopupReadinessResult initializing = NetherCodePopupReadiness.EvaluateTransform(
+            NetherNativeActionResult.Started("awaiting-init"),
+            changeCallbackReadable: true,
+            hasChangeCallback: false
+        );
+        Assert.True(initializing.IsPending);
+        Assert.Equal("code-transform-list-not-ready:awaiting-init", initializing.Detail);
+
+        NetherCodePopupReadinessResult initFailed = NetherCodePopupReadiness.EvaluateTransform(
+            NetherNativeActionResult.BindingUnavailable("init-missing"),
+            changeCallbackReadable: true,
+            hasChangeCallback: true
+        );
+        Assert.False(initFailed.IsReady);
+        Assert.False(initFailed.IsPending);
+        Assert.Equal("code-transform-list-initialization:init-missing", initFailed.Detail);
+
+        NetherCodePopupReadinessResult missingMember = NetherCodePopupReadiness.EvaluateTransform(
+            NetherNativeActionResult.Completed("initialized"),
+            changeCallbackReadable: false,
+            hasChangeCallback: false
+        );
+        Assert.False(missingMember.IsReady);
+        Assert.False(missingMember.IsPending);
+        Assert.Equal("missing-code-transform-change-callback-member", missingMember.Detail);
+
+        NetherCodePopupReadinessResult nullCallback = NetherCodePopupReadiness.EvaluateTransform(
+            NetherNativeActionResult.Completed("initialized"),
+            changeCallbackReadable: true,
+            hasChangeCallback: false
+        );
+        Assert.True(nullCallback.IsPending);
+        Assert.Equal("code-transform-list-not-ready:awaiting-change-callback", nullCallback.Detail);
+
+        NetherCodePopupReadinessResult ready = NetherCodePopupReadiness.EvaluateTransform(
+            NetherNativeActionResult.Completed("initialized"),
+            changeCallbackReadable: true,
+            hasChangeCallback: true
+        );
+        Assert.True(ready.IsReady);
+        Assert.False(ready.IsPending);
+    }
+
+    [Fact]
     public void Pending_budget_is_scoped_to_the_exact_runtime_owner_and_popup_sequence()
     {
         var gate = new NetherPopupReadinessGate(maximumPendingPolls: 1);

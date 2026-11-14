@@ -185,6 +185,130 @@ internal static class NetherCodePopupInteropResolver
         out method
     );
 
+    internal static bool TryResolveExactMember(
+        Type targetType,
+        string memberName,
+        Type expectedMemberType,
+        string errorScope,
+        out string error,
+        out MemberInfo? member
+    )
+    {
+        if (!TryFindSingleMember(targetType, memberName, errorScope, out error, out member, out Type actualType))
+            return false;
+
+        if (actualType != expectedMemberType)
+        {
+            member = null;
+            error = "binding-unavailable:"
+                + errorScope
+                + ":"
+                + memberName
+                + ":type-mismatch:"
+                + (actualType.FullName ?? actualType.Name);
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    internal static bool TryFindSingleMember(
+        Type targetType,
+        string memberName,
+        string errorScope,
+        out string error,
+        out MemberInfo? member,
+        out Type actualType
+    )
+    {
+        member = null;
+        actualType = typeof(void);
+        var candidates = new List<MemberInfo>();
+        for (Type? current = targetType; current != null; current = current.BaseType)
+        {
+            foreach (FieldInfo candidate in current.GetFields(DeclaredInstanceFlags))
+            {
+                if (string.Equals(candidate.Name, memberName, StringComparison.Ordinal))
+                    candidates.Add(candidate);
+            }
+            foreach (PropertyInfo candidate in current.GetProperties(DeclaredInstanceFlags))
+            {
+                if (string.Equals(candidate.Name, memberName, StringComparison.Ordinal)
+                    && candidate.GetMethod != null
+                    && !candidate.GetMethod.IsStatic
+                    && candidate.GetIndexParameters().Length == 0)
+                {
+                    candidates.Add(candidate);
+                }
+            }
+        }
+
+        if (candidates.Count != 1)
+        {
+            error = "binding-unavailable:"
+                + errorScope
+                + ":"
+                + memberName
+                + ":"
+                + (candidates.Count == 0 ? "no-exact" : "ambiguous")
+                + ":available="
+                + DescribeInstanceMembers(targetType);
+            return false;
+        }
+
+        member = candidates[0];
+        actualType = member switch
+        {
+            FieldInfo field => field.FieldType,
+            PropertyInfo property => property.PropertyType,
+            _ => typeof(void),
+        };
+        error = string.Empty;
+        return true;
+    }
+
+    internal static object? ReadMemberValue(MemberInfo member, object target) => member switch
+    {
+        FieldInfo field => field.GetValue(target),
+        PropertyInfo property => property.GetValue(target),
+        _ => null,
+    };
+
+    private static string DescribeInstanceMembers(Type targetType)
+    {
+        var members = new List<string>();
+        for (Type? current = targetType; current != null && members.Count < 32; current = current.BaseType)
+        {
+            foreach (FieldInfo field in current.GetFields(DeclaredInstanceFlags))
+            {
+                if (members.Count >= 32)
+                    break;
+                members.Add(
+                    (current.FullName ?? current.Name)
+                    + "."
+                    + field.Name
+                    + ":"
+                    + (field.FieldType.FullName ?? field.FieldType.Name)
+                );
+            }
+            foreach (PropertyInfo property in current.GetProperties(DeclaredInstanceFlags))
+            {
+                if (members.Count >= 32)
+                    break;
+                members.Add(
+                    (current.FullName ?? current.Name)
+                    + "."
+                    + property.Name
+                    + ":"
+                    + (property.PropertyType.FullName ?? property.PropertyType.Name)
+                    + "(property)"
+                );
+            }
+        }
+        return members.Count == 0 ? "none" : string.Join("|", members);
+    }
+
     private static bool TryResolveSingletonMember(Type holder, out string error, out MemberInfo? singletonMember)
     {
         singletonMember = null;
