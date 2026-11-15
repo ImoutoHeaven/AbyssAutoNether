@@ -201,6 +201,12 @@ internal static class NetherNativeBindingCatalog
         new[] { "Il2CppSystem.Threading.CancellationToken" },
         UniTask
     );
+    public static NetherInteropPatchBinding AnimatorIsState { get; } = Static(
+        "Project.AnimatorExtensions",
+        "IsState",
+        new[] { "UnityEngine.Animator", "System.Int32", "System.Int32" },
+        "System.Boolean"
+    );
     public static NetherInteropPatchBinding AppButtonSubmit { get; } = Instance(
         "Project.AppButton",
         "OnSubmit",
@@ -296,6 +302,7 @@ internal static class NetherNativeBindingCatalog
                 ReturnSelect,
                 ReturnConfirm,
                 TreasureSkip,
+                AnimatorIsState,
                 AppButtonSubmit,
                 TabGroupUpdate,
                 BattleSettingsGetAuto,
@@ -481,6 +488,9 @@ internal static class NetherNativeBindingCatalog
             (TreasureControllerType, "_mNetherEvents", "Project.Master.NoaMessagePack.MNetherFloorEvents"),
             (TreasureControllerType, "_mNetherEventPartsArray", ReferenceArray + "<Project.Master.NoaMessagePack.MNetherFloorEventParts>"),
             (TreasurePopupType, "SkipAndConfirmButton", "Project.AppButton"),
+            (TreasurePopupType, "Animator", "UnityEngine.Animator"),
+            (TreasurePopupType, "IsClosing", "System.Boolean"),
+            (TreasurePopupType, "ContentThumbnails", ReferenceArray + "<Project.Outgame.UI.ContentThumbnail>"),
             (ShopControllerType, "_mNetherFloorShopContentsArray", ReferenceArray + "<Project.Master.NoaMessagePack.MNetherFloorShopContents>"),
             (ReturnPopupType, "ReturnableItemScrollViewController", ReturnScrollControllerType),
             (ReturnScrollControllerType, "_contentModelList", "Il2CppSystem.Collections.Generic.List<Project.Outgame.UI.ContentModel>"),
@@ -490,6 +500,13 @@ internal static class NetherNativeBindingCatalog
             (NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName, "_onClickOk", "Il2CppSystem.Action"),
             (NetherCheckpointContinueNativeBinding.ReturnConfirmClosureTypeName, "__4__this", "Project.Nether.NetherContinueConfirmPopup.NetherContinueConfirmPopupController"),
             (NetherCheckpointContinueNativeBinding.ReturnConfirmClosureTypeName, "controller", NetherCheckpointContinueNativeBinding.ReturnConfirmControllerTypeName),
+        };
+
+    public static IReadOnlyList<(string TypeName, string Path, string ValueType)> RequiredStaticMembers { get; } =
+        new[]
+        {
+            (TreasurePopupType, "OpenAnim.Hash", "System.Int32"),
+            (TreasurePopupType, "SkipAnim.Hash", "System.Int32"),
         };
 
     public static MethodInfo ResolveRequiredMethod(NetherInteropPatchBinding binding)
@@ -679,7 +696,8 @@ internal static class NetherNativeCompatibilityPreflight
         return new NetherNativeCompatibilityReport(
             NetherNativeBindingCatalog.RequiredMethods.Count,
             NetherNativeBindingCatalog.RequiredGeneratedMethods.Count,
-            NetherNativeBindingCatalog.RequiredMembers.Count,
+            NetherNativeBindingCatalog.RequiredMembers.Count
+                + NetherNativeBindingCatalog.RequiredStaticMembers.Count,
             compiledReferences,
             failures
         );
@@ -709,16 +727,32 @@ internal static class NetherNativeCompatibilityPreflight
 
     private static void ValidateMembers(Assembly[] loaded, List<string> failures)
     {
-        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        foreach (var binding in NetherNativeBindingCatalog.RequiredMembers)
+        const BindingFlags instanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        const BindingFlags staticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        ValidateMemberEntries(loaded, NetherNativeBindingCatalog.RequiredMembers, instanceFlags, instanceFlags, failures);
+        ValidateMemberEntries(loaded, NetherNativeBindingCatalog.RequiredStaticMembers, staticFlags, instanceFlags, failures);
+    }
+
+    private static void ValidateMemberEntries(
+        Assembly[] loaded,
+        IReadOnlyList<(string TypeName, string Path, string ValueType)> bindings,
+        BindingFlags firstSegmentFlags,
+        BindingFlags instanceFlags,
+        List<string> failures
+    )
+    {
+        foreach (var binding in bindings)
         {
             try
             {
                 Type? type = NetherLifecycleInteropBindings.ResolveType(loaded, binding.TypeName);
-                foreach (string name in binding.Path.Split('.'))
+                string[] segments = binding.Path.Split('.');
+                for (int index = 0; index < segments.Length; index++)
                 {
                     if (type == null)
                         break;
+                    BindingFlags flags = index == 0 ? firstSegmentFlags : instanceFlags;
+                    string name = segments[index];
                     PropertyInfo? property = type.GetProperty(name, flags);
                     if (property != null && property.GetMethod != null && property.GetIndexParameters().Length == 0)
                         type = property.PropertyType;

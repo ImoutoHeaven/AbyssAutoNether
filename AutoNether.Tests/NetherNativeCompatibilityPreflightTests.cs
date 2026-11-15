@@ -80,6 +80,11 @@ public sealed class NetherNativeCompatibilityPreflightTests
     [InlineData("CharacterAbilityEffectModels")]
     [InlineData("EquipmentAbilityEffectModels")]
     [InlineData("NetherCodeCategoryType")]
+    [InlineData("SkipAndConfirmButton")]
+    [InlineData("IsClosing")]
+    [InlineData("ContentThumbnails")]
+    [InlineData("OpenAnim")]
+    [InlineData("SkipAnim")]
     public void Renamed_required_member_rejects_load_even_when_patch_methods_are_unchanged(
         string memberName
     )
@@ -102,8 +107,23 @@ public sealed class NetherNativeCompatibilityPreflightTests
             NetherNativeCompatibilityPreflight.ValidateMetadata(packaged.Assemblies, packaged.PluginAssembly);
 
         Assert.True(report.IsCompatible, string.Join(Environment.NewLine, report.Failures));
-        Assert.Equal(61, report.CheckedMethodCount);
+        Assert.Equal(62, report.CheckedMethodCount);
         Assert.Equal(19, report.CheckedGeneratedMethodCount);
+    }
+
+    [Fact]
+    public void Il2cpp_value_types_like_cancellation_token_construct_default_values_instead_of_null()
+    {
+        using var packaged = PackagedInteropAssemblies.Load();
+        Assembly project = packaged.Assemblies.Single(assembly => assembly.GetName().Name == "Project");
+        Type popupType = project.GetType("Project.Nether.NetherTreasurePopup.NetherTreasurePopup", throwOnError: false)!;
+        MethodInfo skipMethod = popupType.GetMethod("SkipOpenTreasureAnimationAsync")!;
+        Type cancellationToken = skipMethod.GetParameters()[0].ParameterType;
+        Assert.Equal("Il2CppSystem.Threading.CancellationToken", cancellationToken.FullName);
+        Assert.False(cancellationToken.IsValueType);
+        Assert.True(NetherRuntimeBridge.ShouldConstructDefaultValue(cancellationToken));
+        Assert.True(NetherRuntimeBridge.ShouldConstructDefaultValue(typeof(int)));
+        Assert.False(NetherRuntimeBridge.ShouldConstructDefaultValue(typeof(string)));
     }
 
     [Fact]

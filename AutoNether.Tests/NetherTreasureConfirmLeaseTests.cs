@@ -1,5 +1,8 @@
 #nullable enable
 
+using System;
+using System.Reflection;
+using System.Reflection.Emit;
 using AutoNether.Services;
 using Xunit;
 
@@ -100,5 +103,224 @@ public sealed class NetherTreasureConfirmLeaseTests
             Sequence: 1
         )));
         Assert.Equal(NetherTreasureConfirmStage.Idle, lease.Stage);
+    }
+
+    [Fact]
+    public void Confirm_tap_succeeds_when_popup_close_hook_synchronously_invalidates_treasure_lease()
+    {
+        var bridge = new NetherRuntimeBridge();
+        try
+        {
+            InitializeOwnedFloorParent(bridge);
+            var parentTask = new MutableNativeTask { Status = "Pending" };
+            ObserveFloorEventSequenceTask(bridge, parentTask);
+
+            object popup = CreateSyntheticTreasurePopup(onSubmit: p =>
+            {
+                ((SyntheticTreasurePopup)p).IsClosing = true;
+                ObservePopupClosed(bridge, p);
+            });
+            RegisterTreasurePopup(bridge, popup, ownerAction: NetherActionKind.SelectFloor, ownerGeneration: 7);
+
+            NetherTreasureConfirmLease lease = GetPrivateField<NetherTreasureConfirmLease>(bridge, "_treasureConfirmLease");
+            var owner = new NetherTreasureConfirmOwner(
+                popup,
+                NetherActionKind.SelectFloor,
+                OwnerGeneration: 7,
+                RuntimeGeneration: GetPrivateField<long>(bridge, "_runtimeGeneration"),
+                Sequence: GetPrivateField<long>(bridge, "_popupSequence")
+            );
+            Assert.True(lease.Begin(owner));
+            Assert.True(lease.TryClaimSkip(owner));
+            Assert.True(lease.ObserveSkipTaskCompleted(owner));
+            Assert.True(lease.AdvanceResumePump(owner));
+
+            NetherNativeActionResult tap = bridge.PollFloorParent();
+            Assert.Equal(NetherNativeActionResultKind.Started, tap.Kind);
+            Assert.Equal("native-treasure-confirm-tap-invoked", tap.Detail);
+            Assert.Equal(NetherTreasureConfirmStage.Idle, lease.Stage);
+
+            parentTask.Status = "Succeeded";
+            NetherNativeActionResult completed = bridge.PollFloorParent();
+            Assert.Equal(NetherNativeActionResultKind.Completed, completed.Kind);
+        }
+        finally
+        {
+            bridge.ClearRegistrations();
+        }
+    }
+
+    [Fact]
+    public void Recovered_treasure_confirm_failure_resets_recovered_floor_event_flow()
+    {
+        var bridge = new NetherRuntimeBridge();
+        try
+        {
+            RegisterFloorSelection(bridge);
+            object popup = new object();
+            RegisterTreasurePopup(bridge, popup, ownerAction: NetherActionKind.None, ownerGeneration: 0);
+
+            NetherFloorEventSequenceTaskFlow recoveredFlow = GetPrivateField<NetherFloorEventSequenceTaskFlow>(
+                bridge,
+                "_recoveredFloorEventSequenceTaskFlow"
+            );
+            Assert.True(recoveredFlow.BeginRecovered(new MutableNativeTask { Status = "Pending" }));
+
+            NetherTreasureConfirmLease lease = GetPrivateField<NetherTreasureConfirmLease>(bridge, "_treasureConfirmLease");
+            var owner = new NetherTreasureConfirmOwner(
+                popup,
+                NetherActionKind.None,
+                OwnerGeneration: 0,
+                RuntimeGeneration: GetPrivateField<long>(bridge, "_runtimeGeneration"),
+                Sequence: GetPrivateField<long>(bridge, "_popupSequence")
+            );
+            Assert.True(lease.Begin(owner));
+
+            NetherNativeActionResult failed = bridge.PollNativeFlow();
+            Assert.Equal(NetherNativeActionResultKind.BindingUnavailable, failed.Kind);
+            Assert.Equal("missing-treasure-popup-animator", failed.Detail);
+            Assert.False(recoveredFlow.IsActive);
+            Assert.Equal(NetherTreasureConfirmStage.Idle, lease.Stage);
+
+            NetherNativeActionResult idle = bridge.PollNativeFlow();
+            Assert.Equal(NetherNativeActionResultKind.Completed, idle.Kind);
+            Assert.Equal("no-pending-native-flow", idle.Detail);
+        }
+        finally
+        {
+            bridge.ClearRegistrations();
+        }
+    }
+
+    private static void InitializeOwnedFloorParent(NetherRuntimeBridge bridge)
+    {
+        RegisterFloorSelection(bridge);
+        Assert.True(bridge.BeginFloorParent(new NetherPlannedAction(NetherActionKind.SelectFloor), generation: 7));
+    }
+
+    private static void RegisterFloorSelection(NetherRuntimeBridge bridge) =>
+        GetBridgeMethod("RegisterFloorSelectionCore").Invoke(
+            bridge,
+            [new Project.Nether.FloorSelection.SubViewController(), "direct-registration"]
+        );
+
+    private static void ObserveFloorEventSequenceTask(NetherRuntimeBridge bridge, object task)
+    {
+        NetherFloorEventSequenceTaskFlow flow = GetPrivateField<NetherFloorEventSequenceTaskFlow>(
+            bridge,
+            "_floorEventSequenceTaskFlow"
+        );
+        Assert.True(flow.ObserveClickTask(new MutableNativeTask { Status = "Succeeded" }));
+        Assert.True(flow.ObserveEventSequenceTask(task));
+    }
+
+    private static void RegisterTreasurePopup(
+        NetherRuntimeBridge bridge,
+        object popup,
+        NetherActionKind ownerAction,
+        long ownerGeneration
+    )
+    {
+        SetPrivateField(bridge, "_popupSequence", 10L);
+        Type registrationType = typeof(NetherRuntimeBridge).GetNestedType(
+            "PopupRegistration",
+            BindingFlags.NonPublic
+        )!;
+        object registration = Activator.CreateInstance(
+            registrationType,
+            [
+                new object(),
+                popup,
+                null,
+                10L,
+                ownerAction,
+                ownerGeneration,
+                GetPrivateField<long>(bridge, "_runtimeGeneration"),
+                true,
+            ]
+        )!;
+        SetPrivateField(bridge, "_treasurePopup", registration);
+    }
+
+    private static void ObservePopupClosed(NetherRuntimeBridge bridge, object popup) =>
+        GetBridgeMethod("InvalidatePopupCore").Invoke(bridge, [popup]);
+
+    private static object CreateSyntheticTreasurePopup(Action<object> onSubmit)
+    {
+        object button = SyntheticSubmitButtonFactory.Create();
+        var popup = new SyntheticTreasurePopup(button);
+        SyntheticSubmitButtonFactory.Bind(button, () => onSubmit(popup));
+        return popup;
+    }
+
+    private static MethodInfo GetBridgeMethod(string name) =>
+        typeof(NetherRuntimeBridge).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+    private static T GetPrivateField<T>(object target, string name) =>
+        (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
+
+    private static void SetPrivateField(object target, string name, object? value) =>
+        target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(target, value);
+
+    private sealed class MutableNativeTask
+    {
+        public string Status { get; set; } = "Pending";
+    }
+
+    private sealed class SyntheticTreasurePopup
+    {
+        public SyntheticTreasurePopup(object button)
+        {
+            SkipAndConfirmButton = button;
+        }
+
+        public bool IsClosing { get; set; }
+        public object SkipAndConfirmButton { get; }
+    }
+
+    private static class SyntheticSubmitButtonFactory
+    {
+        private static readonly Type ButtonType = BuildButtonType();
+
+        public static object Create() => Activator.CreateInstance(ButtonType)!;
+
+        public static void Bind(object button, Action onSubmit) =>
+            ButtonType.GetField("Callback")!.SetValue(button, onSubmit);
+
+        private static Type BuildButtonType()
+        {
+            AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(
+                new AssemblyName("AutoNetherTreasureButtonFixtures"),
+                AssemblyBuilderAccess.Run
+            );
+            ModuleBuilder module = assembly.DefineDynamicModule("Main");
+            TypeBuilder baseEventData = module.DefineType(
+                "UnityEngine.EventSystems.BaseEventData",
+                TypeAttributes.Public | TypeAttributes.Class
+            );
+            Type baseEventDataType = baseEventData.CreateType()!;
+
+            TypeBuilder button = module.DefineType(
+                "Project.AppButton",
+                TypeAttributes.Public | TypeAttributes.Class
+            );
+            FieldBuilder callback = button.DefineField(
+                "Callback",
+                typeof(Action),
+                FieldAttributes.Public
+            );
+            MethodBuilder onSubmit = button.DefineMethod(
+                "OnSubmit",
+                MethodAttributes.Public,
+                typeof(void),
+                [baseEventDataType]
+            );
+            ILGenerator il = onSubmit.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, callback);
+            il.Emit(OpCodes.Callvirt, typeof(Action).GetMethod(nameof(Action.Invoke))!);
+            il.Emit(OpCodes.Ret);
+            return button.CreateType()!;
+        }
     }
 }
